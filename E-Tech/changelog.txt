@@ -26,6 +26,9 @@ Date: 2026-07-14
   Changes:
     - The teleport-to-player shortcut's internals moved to an event_handler lib so both
       teleport systems can share GUI events. No behavior change.
+    - Compat shim: resource mining products without an explicit probability get the engine
+      default (1) written out. No gameplay change; keeps mods that sort products by
+      probability (e.g. resource-map-label-marker-fork 1.0.1) from crashing on nil.
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.3
 Date: 2026-07-11
