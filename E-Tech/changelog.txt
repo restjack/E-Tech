@@ -1,4 +1,28 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.6.0
+Date: 2026-07-14
+  Features:
+    - Teleporter pads toggle (default off): port of the Teleporters mod by Klonan (LGPLv3, see
+      LICENSE-third-party.txt), updated for Factorio 2.1 and extended. Buildable pads researched
+      with chemical science; walk onto a pad to get a map of your other pads and click one to
+      teleport. Pads are named, renamable, and shown as map tags.
+    - Energy cost: each pad has a 200 MJ electric buffer; teleporting drains the DESTINATION
+      pad, so an unpowered pad can't be teleported to. Map settings for MJ per teleport
+      (0 = free), extra MJ per 100 tiles, and a cross-surface multiplier.
+    - Cross-surface teleporting with a per-player surface filter dropdown in the GUI, custom
+      display-only surface aliases (rename button next to the dropdown), and an optional
+      hide-space-platforms setting.
+    - Wireless remote: toolbar shortcut opens the teleporter list from anywhere once the tech
+      is researched. Costs a configurable multiple of the pad-to-pad price (default 2x), still
+      drained from the destination pad.
+    - Return teleport: after a remote jump the list offers a free Return entry with a live
+      camera preview of where you came from (configurable time limit, default 10 min).
+    - Players in the list: your team's online players appear at the top with map previews -
+      click to teleport to them for free.
+  Changes:
+    - The teleport-to-player shortcut's internals moved to an event_handler lib so both
+      teleport systems can share GUI events. No behavior change.
+---------------------------------------------------------------------------------------------------
 Version: 0.5.3
 Date: 2026-07-11
   Changes:
