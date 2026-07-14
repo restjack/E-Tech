@@ -137,7 +137,9 @@ local unlink_teleporter = function(player)
   script_data.player_linked_teleporter[player.index] = nil
 end
 
-local clear_teleporter_data = function(teleporter_data)
+-- Visuals only (flying text + chart tag) — safe to call from resync, which
+-- recreates them right after.
+local clear_teleporter_visuals = function(teleporter_data)
   local flying_text = teleporter_data.flying_text
   if flying_text and flying_text.valid then
     flying_text.destroy()
@@ -147,6 +149,51 @@ local clear_teleporter_data = function(teleporter_data)
     script_data.tag_map[map_tag.tag_number] = nil
     map_tag.destroy()
   end
+end
+
+-- Full teardown: visuals + the energy companion. Only for pads that are
+-- actually gone.
+local clear_teleporter_data = function(teleporter_data)
+  clear_teleporter_visuals(teleporter_data)
+  local eei = teleporter_data.energy_interface
+  if eei and eei.valid then
+    eei.destroy()
+  end
+  teleporter_data.energy_interface = nil
+end
+
+-- Find-or-create the pad's invisible electric buffer. Searching before
+-- creating keeps clones/migrations/toggle-flips from stacking duplicates.
+local get_energy_interface = function(teleporter_data, entity)
+  local eei = teleporter_data.energy_interface
+  if eei and eei.valid then return eei end
+  if not (entity and entity.valid) then return end
+  local surface = entity.surface
+  local found = surface.find_entities_filtered{name = names.entities.energy_interface, position = entity.position, limit = 1}
+  eei = found[1] or surface.create_entity
+  {
+    name = names.entities.energy_interface,
+    position = entity.position,
+    force = entity.force,
+  }
+  if eei then
+    eei.destructible = false
+    teleporter_data.energy_interface = eei
+  end
+  return eei
+end
+
+-- Cost in joules to teleport from `source` (pad or nil) to the destination
+-- pad. Flat per-use cost plus an optional per-distance term (same surface
+-- only — cross-surface distance is meaningless).
+local get_teleport_cost = function(source, destination)
+  local per_use = settings.global["etech-teleporter-energy-mj"].value
+  local per_100 = settings.global["etech-teleporter-energy-distance-mj"].value
+  local cost = per_use
+  if per_100 > 0 and source and source.valid and source.surface == destination.surface then
+    cost = cost + per_100 * (util.distance(source.position, destination.position) / 100)
+  end
+  return cost * 1000000
 end
 
 local make_teleporter_gui = function(player, source)
@@ -284,6 +331,18 @@ local make_teleporter_gui = function(player, source)
       label.style.font_color = {}
       label.style.horizontally_stretchable = true
       label.style.maximal_width = preview_size
+      local cost = get_teleport_cost(source, teleporter_entity)
+      if cost > 0 then
+        local eei = get_energy_interface(teleporter, teleporter_entity)
+        local stored = (eei and eei.valid and eei.energy) or 0
+        local energy_label = inner_flow.add{type = "label", caption = {"etech-tp-energy-label", string.format("%.0f", cost / 1000000), string.format("%.0f", stored / 1000000)}}
+        energy_label.style.maximal_width = preview_size
+        if stored < cost then
+          energy_label.style.font_color = {r = 1, g = 0.3, b = 0.3}
+          button.enabled = false
+          button.tooltip = {"etech-tp-not-enough-energy"}
+        end
+      end
       util.register_gui(script_data.button_actions, button, {type = "teleport_button", param = teleporter})
       any = true
     end
@@ -326,7 +385,7 @@ local resync_teleporter = function(name, teleporter_data)
   local surface = teleporter.surface
   local color = get_force_color(force)
 
-  clear_teleporter_data(teleporter_data)
+  clear_teleporter_visuals(teleporter_data)
 
   local flying_text = rendering.draw_text
   {
@@ -424,11 +483,24 @@ local gui_actions =
     if not teleport_param then return end
     local destination = teleport_param.teleporter
     if not (destination and destination.valid) then return end
+    local player = game.players[event.player_index]
+    if not (player and player.valid) then return end
+
+    local source = script_data.player_linked_teleporter[player.index]
+    local cost = get_teleport_cost(source, destination)
+    if cost > 0 then
+      local eei = get_energy_interface(teleport_param, destination)
+      local stored = (eei and eei.valid and eei.energy) or 0
+      if stored < cost then
+        player.print({"etech-tp-not-enough-energy"})
+        return
+      end
+      eei.energy = stored - cost
+    end
+
     destination.timeout = destination.prototype.timeout
     local destination_surface = destination.surface
     local destination_position = destination.position
-    local player = game.players[event.player_index]
-    if not (player and player.valid) then return end
     create_flash(destination_surface, destination_position)
     create_flash(player.surface, player.position)
     player.teleport(destination_position, destination_surface)
@@ -468,6 +540,7 @@ local on_built_entity = function(event)
   local teleporter_data = {teleporter = entity}
   network[name] = teleporter_data
   script_data.teleporter_map[entity.unit_number] = teleporter_data
+  get_energy_interface(teleporter_data, entity)
   resync_teleporter(name, teleporter_data)
   refresh_teleporter_frames()
 end
@@ -551,6 +624,10 @@ end
 local resync_all_teleporters = function()
   for force, network in pairs (script_data.networks) do
     for name, teleporter_data in pairs (network) do
+      local entity = teleporter_data.teleporter
+      if entity and entity.valid then
+        get_energy_interface(teleporter_data, entity)
+      end
       resync_teleporter(name, teleporter_data)
     end
   end

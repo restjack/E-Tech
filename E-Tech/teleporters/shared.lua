@@ -9,6 +9,7 @@ shared.entities =
 {
   teleporter = "etech-teleporter",
   teleporter_sticker = "etech-teleporter-sticker",
+  energy_interface = "etech-teleporter-energy",
 }
 
 shared.explosions =
