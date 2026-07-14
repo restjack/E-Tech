@@ -171,6 +171,41 @@ local hotkey =
   key_sequence = "Control + F"
 }
 
+-- Invisible electric buffer placed on top of each pad by the control stage.
+-- Teleporting drains the DESTINATION pad's buffer, so an unpowered pad can't
+-- be teleported to (when an energy cost is configured). No collision, not
+-- selectable, not blueprintable — pure companion entity.
+local energy_interface =
+{
+  type = "electric-energy-interface",
+  name = names.entities.energy_interface,
+  localised_name = localised_name,
+  icon = path.."teleporter-icon.png",
+  icon_size = 64,
+  flags =
+  {
+    "not-on-map",
+    "not-blueprintable",
+    "not-deconstructable",
+    "placeable-off-grid",
+    "not-upgradable",
+  },
+  hidden = true,
+  max_health = 1,
+  collision_box = {{-0.9, -0.9}, {0.9, 0.9}},
+  collision_mask = {layers = {}},
+  energy_source =
+  {
+    type = "electric",
+    buffer_capacity = "200MJ",
+    usage_priority = "secondary-input",
+    input_flow_limit = "4MW",
+    output_flow_limit = "0W",
+  },
+  energy_production = "0W",
+  energy_usage = "0W",
+}
+
 data:extend
 {
   teleporter,
@@ -180,5 +215,6 @@ data:extend
   recipe,
   technology,
   hotkey,
-  sticker
+  sticker,
+  energy_interface
 }
