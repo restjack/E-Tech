@@ -81,6 +81,15 @@ data:extend({
   },
   {
     type = "bool-setting",
+    name = "etech-teleporters",
+    setting_type = "startup",
+    default_value = false,
+    order = "j",
+    localised_name = {"", "Teleporter pads"},
+    localised_description = {"", "Adds buildable teleporter pads (researched with chemical science). Walk onto a pad to open a map of your other pads and click one to teleport there. Pads are named, renamable, and shown as map tags. Port of the Teleporters mod by Klonan, updated for Factorio 2.1; off by default."},
+  },
+  {
+    type = "bool-setting",
     name = "etech-gleba-uranium",
     setting_type = "startup",
     default_value = false,
