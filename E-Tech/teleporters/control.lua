@@ -33,6 +33,12 @@ local script_data =
   -- for "all surfaces").
   surface_filter = {},
   surface_rename_frames = {},
+  -- Players whose destination GUI was opened via the wireless-remote
+  -- shortcut (no source pad, character not frozen).
+  remote_open = {},
+  -- Per-player return slot after a remote teleport:
+  -- {surface_index, position, tick}.
+  returns = {},
 }
 
 local preview_size = 256
@@ -148,6 +154,7 @@ local unlink_teleporter = function(player)
     add_recent(player, source)
   end
   script_data.player_linked_teleporter[player.index] = nil
+  script_data.remote_open[player.index] = nil
 end
 
 -- Visuals only (flying text + chart tag) — safe to call from resync, which
@@ -199,14 +206,29 @@ end
 -- Cost in joules to teleport from `source` (pad or nil) to the destination
 -- pad. Flat per-use cost plus an optional per-distance term (same surface
 -- only — cross-surface distance is meaningless).
-local get_teleport_cost = function(source, destination)
+-- Cost in joules to teleport to `destination`. `source` is the pad the
+-- player is standing on, or nil for a wireless-remote jump — then the
+-- player's own surface/position anchor the distance and cross-surface
+-- terms, and the remote multiplier applies.
+local get_teleport_cost = function(source, destination, player)
   local per_use = settings.global["etech-teleporter-energy-mj"].value
   local per_100 = settings.global["etech-teleporter-energy-distance-mj"].value
   local cost = per_use
-  if source and source.valid and source.surface ~= destination.surface then
-    cost = cost * settings.global["etech-teleporter-cross-surface-multiplier"].value
-  elseif per_100 > 0 and source and source.valid then
-    cost = cost + per_100 * (util.distance(source.position, destination.position) / 100)
+  local from_surface, from_position
+  if source and source.valid then
+    from_surface = source.surface
+    from_position = source.position
+  elseif player and player.valid then
+    from_surface = player.surface
+    from_position = player.position
+    cost = cost * settings.global["etech-teleporter-remote-multiplier"].value
+  end
+  if from_surface then
+    if from_surface ~= destination.surface then
+      cost = cost * settings.global["etech-teleporter-cross-surface-multiplier"].value
+    elseif per_100 > 0 then
+      cost = cost + per_100 * (util.distance(from_position, destination.position) / 100)
+    end
   end
   return cost * 1000000
 end
@@ -217,6 +239,25 @@ local get_surface_label = function(surface)
   local alias = script_data.surface_aliases[surface.index]
   if alias and alias ~= "" then return alias end
   return surface.localised_name or surface.name
+end
+
+-- The player's return slot, if it's still usable (setting on, surface still
+-- exists, grace period not expired). Cleans up dead slots as a side effect.
+local get_valid_return = function(player)
+  local ret = script_data.returns[player.index]
+  if not ret then return end
+  if not settings.global["etech-teleporter-return-enabled"].value then return end
+  local surface = game.surfaces[ret.surface_index]
+  if not (surface and surface.valid) then
+    script_data.returns[player.index] = nil
+    return
+  end
+  local grace = settings.global["etech-teleporter-return-grace-min"].value
+  if grace > 0 and game.tick > ret.tick + grace * 60 * 60 then
+    script_data.returns[player.index] = nil
+    return
+  end
+  return ret, surface
 end
 
 local make_teleporter_gui = function(player, source)
@@ -233,14 +274,23 @@ local make_teleporter_gui = function(player, source)
 
   print("Making new frame")
 
-  if not (source and source.valid and not script_data.to_be_removed[source.unit_number]) then
+  -- source = the pad the player is standing on, or nil when opened via the
+  -- wireless-remote shortcut.
+  if source then
+    if not (source.valid and not script_data.to_be_removed[source.unit_number]) then
+      unlink_teleporter(player)
+      return
+    end
+  elseif not script_data.remote_open[player.index] then
     unlink_teleporter(player)
     return
   end
 
-  local force = source.force
-  local network = script_data.networks[force.name]
-  if not network then return end
+  local force = source and source.force or player.force
+  local network = script_data.networks[force.name] or {}
+  -- The surface jumps are measured from (pad surface, or the player's own
+  -- for remote use).
+  local here_surface = source and source.surface or player.surface
 
   local gui = player.gui.screen
   local frame = gui.add{type = "frame", direction = "vertical", ignored_by_interaction = false}
@@ -257,7 +307,10 @@ local make_teleporter_gui = function(player, source)
   title_flow.style.vertical_align = "center"
   local title = title_flow.add{type = "label", style = "frame_title"}
   title.drag_target = frame
-  local rename_button = title_flow.add{type = "sprite-button", sprite = "utility/rename_icon", style = "mini_button_aligned_to_text_vertically_when_centered", visible = source.force == player.force}
+  if not source then
+    title.caption = {"etech-tp-remote-title"}
+  end
+  local rename_button = title_flow.add{type = "sprite-button", sprite = "utility/rename_icon", style = "mini_button_aligned_to_text_vertically_when_centered", visible = source ~= nil and source.force == player.force}
   local pusher = title_flow.add{type = "empty-widget", direction = "horizontal", style = "draggable_space_header"}
   pusher.style.horizontally_stretchable = true
   pusher.style.vertically_stretchable = true
@@ -321,6 +374,62 @@ local make_teleporter_gui = function(player, source)
     util.register_gui(script_data.button_actions, rename_surface_button, {type = "rename_surface_button"})
   end
 
+  -- Return slot + same-force players, in one row above the pad list.
+  local special_size = 128
+  local special_flow
+  local get_special_flow = function()
+    if special_flow and special_flow.valid then return special_flow end
+    local special_frame = frame.add{type = "frame", style = "inside_deep_frame"}
+    special_flow = special_frame.add{type = "flow", direction = "horizontal"}
+    special_flow.style.horizontal_spacing = 2
+    return special_flow
+  end
+
+  local add_preview_button = function(parent, view_spec, caption, tooltip, action)
+    local button = parent.add{type = "button"}
+    button.style.height = special_size + 32 + 8
+    button.style.width = special_size + 8
+    button.style.left_padding = 0
+    button.style.right_padding = 0
+    button.tooltip = tooltip
+    local inner_flow = button.add{type = "flow", direction = "vertical", ignored_by_interaction = true}
+    inner_flow.style.vertically_stretchable = true
+    inner_flow.style.horizontally_stretchable = true
+    inner_flow.style.horizontal_align = "center"
+    local view = inner_flow.add(view_spec)
+    view.ignored_by_interaction = true
+    view.style.height = special_size
+    view.style.width = special_size
+    local label = inner_flow.add{type = "label", caption = caption}
+    label.style.font = "default-dialog-button"
+    label.style.font_color = {}
+    label.style.maximal_width = special_size
+    util.register_gui(script_data.button_actions, button, action)
+  end
+
+  local ret, ret_surface = get_valid_return(player)
+  if ret then
+    add_preview_button(get_special_flow(),
+      {type = "camera", position = ret.position, surface_index = ret.surface_index, zoom = 0.2},
+      {"etech-tp-return"},
+      {"etech-tp-return-tooltip", get_surface_label(ret_surface)},
+      {type = "return_button"})
+  end
+
+  if settings.global["etech-teleporter-players-section"].value then
+    for _, other in pairs (player.force.connected_players) do
+      if other.index ~= player.index then
+        local other_surface = other.physical_surface or other.surface
+        local other_position = other.physical_position or other.position
+        add_preview_button(get_special_flow(),
+          {type = "minimap", surface_index = other_surface.index, zoom = 1, force = force.name, position = other_position},
+          other.name,
+          {"etech-tp-player-tooltip", other.name, get_surface_label(other_surface)},
+          {type = "player_button", target_index = other.index})
+      end
+    end
+  end
+
   local inner = frame.add{type = "frame", style = "inside_deep_frame"}
   local scroll = inner.add{type = "scroll-pane", direction = "vertical"}
   scroll.style.maximal_height = (player.display_resolution.height / player.display_scale) * 0.8
@@ -364,7 +473,7 @@ local make_teleporter_gui = function(player, source)
       local pad_surface = teleporter_entity.surface
       local show
       if not cross_surface then
-        show = pad_surface == source.surface
+        show = pad_surface == here_surface
       elseif filter_index then
         show = pad_surface.index == filter_index
       else
@@ -406,12 +515,12 @@ local make_teleporter_gui = function(player, source)
       label.style.font_color = {}
       label.style.horizontally_stretchable = true
       label.style.maximal_width = preview_size
-      if pad_surface ~= source.surface then
+      if pad_surface ~= here_surface then
         local surface_label = inner_flow.add{type = "label", caption = get_surface_label(pad_surface)}
         surface_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
         surface_label.style.maximal_width = preview_size
       end
-      local cost = get_teleport_cost(source, teleporter_entity)
+      local cost = get_teleport_cost(source, teleporter_entity, player)
       if cost > 0 then
         local eei = get_energy_interface(teleporter, teleporter_entity)
         local stored = (eei and eei.valid and eei.energy) or 0
@@ -443,10 +552,20 @@ local refresh_teleporter_frames = function()
       make_teleporter_gui(player, source)
     end
   end
+  for player_index in pairs (script_data.remote_open) do
+    local player = players[player_index]
+    if player and player.valid and get_teleporter_frame(player) then
+      make_teleporter_gui(player, nil)
+    end
+  end
 end
 
 local check_player_linked_teleporter = function(player)
   print("Checking player linked teleporter")
+  if script_data.remote_open[player.index] then
+    make_teleporter_gui(player, nil)
+    return
+  end
   local source = script_data.player_linked_teleporter[player.index]
   if source and source.valid then
     print("Linked teleporter exists...")
@@ -610,13 +729,14 @@ local gui_actions =
     if not (player and player.valid) then return end
 
     local source = script_data.player_linked_teleporter[player.index]
+    local remote = not source and script_data.remote_open[player.index]
     if not settings.global["etech-teleporter-cross-surface"].value then
       if destination.surface ~= player.surface then
         player.print({"etech-tp-cross-surface-disabled"})
         return
       end
     end
-    local cost = get_teleport_cost(source, destination)
+    local cost = get_teleport_cost(source, destination, player)
     if cost > 0 then
       local eei = get_energy_interface(teleport_param, destination)
       local stored = (eei and eei.valid and eei.energy) or 0
@@ -627,14 +747,72 @@ local gui_actions =
       eei.energy = stored - cost
     end
 
+    local from_surface = player.surface
+    local from_position = player.position
+
     destination.timeout = destination.prototype.timeout
     local destination_surface = destination.surface
     local destination_position = destination.position
     create_flash(destination_surface, destination_position)
-    create_flash(player.surface, player.position)
+    create_flash(from_surface, from_position)
     player.teleport(destination_position, destination_surface)
     unlink_teleporter(player)
     add_recent(player, destination)
+
+    if remote and settings.global["etech-teleporter-return-enabled"].value then
+      script_data.returns[player.index] =
+      {
+        surface_index = from_surface.index,
+        position = from_position,
+        tick = game.tick,
+      }
+    end
+  end,
+
+  return_button = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    local ret, surface = get_valid_return(player)
+    if not ret then
+      player.print({"etech-tp-return-expired"})
+      check_player_linked_teleporter(player)
+      return
+    end
+    local position = surface.find_non_colliding_position("character", ret.position, 16, 0.5) or ret.position
+    create_flash(player.surface, player.position)
+    create_flash(surface, position)
+    player.teleport(position, surface)
+    script_data.returns[player.index] = nil
+    unlink_teleporter(player)
+  end,
+  player_button = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    local target = game.get_player(param.target_index)
+    if not (target and target.valid and target.connected) then
+      player.print({"etech-tp-player-offline"})
+      check_player_linked_teleporter(player)
+      return
+    end
+    local surface = target.physical_surface or target.surface
+    local position = target.physical_position or target.position
+    local destination = surface.find_non_colliding_position("character", position, 16, 0.5) or position
+    create_flash(player.surface, player.position)
+    create_flash(surface, destination)
+    local ok = pcall(function()
+      if player.character then
+        player.character.teleport(destination, surface)
+      else
+        player.teleport(destination, surface)
+      end
+    end)
+    if not ok then
+      player.print({"etech-tp-player-teleport-failed"})
+      return
+    end
+    unlink_teleporter(player)
   end,
 
   surface_filter = function(event, param)
@@ -720,6 +898,7 @@ local teleporter_triggered = function(entity, character)
   entity.disabled_by_script = true
   entity.timeout = entity.prototype.timeout
   character.disabled_by_script = true
+  script_data.remote_open[player.index] = nil
   script_data.player_linked_teleporter[player.index] = entity
   make_teleporter_gui(player, entity)
 end
@@ -869,6 +1048,34 @@ local on_player_display_scale_changed = function(event)
   check_player_linked_teleporter(player)
 end
 
+-- Wireless remote: open the destination GUI from anywhere. Gated on the
+-- runtime setting and on the Teleporter technology being researched.
+local on_lua_shortcut = function(event)
+  if event.prototype_name ~= names.shortcuts.remote then return end
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  if not settings.global["etech-teleporter-remote"].value then
+    player.print({"etech-tp-remote-disabled"})
+    return
+  end
+  local tech = player.force.technologies[teleporter_name]
+  if tech and not tech.researched then
+    player.print({"etech-tp-remote-not-researched"})
+    return
+  end
+  if script_data.remote_open[player.index] and get_teleporter_frame(player) then
+    unlink_teleporter(player)
+    return
+  end
+  if script_data.player_linked_teleporter[player.index] then
+    -- Standing on a pad with its GUI open — the shortcut just closes it.
+    unlink_teleporter(player)
+    return
+  end
+  script_data.remote_open[player.index] = true
+  make_teleporter_gui(player, nil)
+end
+
 local on_surface_deleted = function(event)
   script_data.surface_aliases[event.surface_index] = nil
   for player_index, surface_index in pairs (script_data.surface_filter) do
@@ -924,6 +1131,7 @@ teleporters.events =
   [defines.events.on_chart_tag_added] = on_chart_tag_added,
 
   [defines.events.on_surface_deleted] = on_surface_deleted,
+  [defines.events.on_lua_shortcut] = on_lua_shortcut,
 
   [defines.events.on_trigger_created_entity] = on_trigger_created_entity
 }
@@ -944,6 +1152,8 @@ teleporters.on_configuration_changed = function()
   stored.surface_aliases = stored.surface_aliases or {}
   stored.surface_filter = stored.surface_filter or {}
   stored.surface_rename_frames = stored.surface_rename_frames or {}
+  stored.remote_open = stored.remote_open or {}
+  stored.returns = stored.returns or {}
   script_data = stored
   resync_all_teleporters()
 end

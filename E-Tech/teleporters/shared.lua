@@ -23,4 +23,9 @@ shared.hotkeys =
   focus_search = "etech-teleporter-focus-search",
 }
 
+shared.shortcuts =
+{
+  remote = "etech-teleporter-remote",
+}
+
 return shared

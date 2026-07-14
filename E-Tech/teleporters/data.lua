@@ -206,6 +206,23 @@ local energy_interface =
   energy_usage = "0W",
 }
 
+-- Toolbar shortcut: open the teleporter destination list from anywhere
+-- ("wireless remote"). Runtime gating (setting + tech researched) happens
+-- in the control stage.
+local remote_shortcut =
+{
+  type = "shortcut",
+  name = names.shortcuts.remote,
+  order = "z[etech]-b[teleporter-remote]",
+  action = "lua",
+  icon = path.."teleporter-icon.png",
+  icon_size = 64,
+  small_icon = path.."teleporter-icon.png",
+  small_icon_size = 64,
+  localised_name = {"etech-tp-remote-title"},
+  localised_description = {"etech-tp-remote-description"},
+}
+
 data:extend
 {
   teleporter,
@@ -216,5 +233,6 @@ data:extend
   technology,
   hotkey,
   sticker,
-  energy_interface
+  energy_interface,
+  remote_shortcut
 }
