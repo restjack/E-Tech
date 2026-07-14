@@ -1,19 +1,10 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.6.3
+Version: 0.6.4
 Date: 2026-07-14
   Changes:
-    - New map setting "Factorissimo icons: show on map" (default on): unchecking hides all
-      factory markers immediately, no restart. The game's "show recipe icons" map toggle only
-      affects the engine's recipe overlay and can't touch map tags, so the markers get their
-      own switch. Force-wide, since map tags are per force.
----------------------------------------------------------------------------------------------------
-Version: 0.6.2
-Date: 2026-07-14
-  Changes:
-    - Factorissimo map markers now use the compact pin style (small icon + "Factory <id>"
-      label) instead of the big standalone map icon. Icon-only chart tags always render at
-      the engine's large map-icon size - there is no API to scale them - so a text label is
-      the way to get the small look.
+    - Removed the short-lived Factorissimo map icons experiment (0.6.2/0.6.3, never released):
+      map tags can't match the recipe-icon look and feel. Saves that ran it get their factory
+      markers and stored data cleaned up automatically.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.1
 Date: 2026-07-14
@@ -58,11 +49,6 @@ Date: 2026-07-14
       first enabled and whenever a known marker mod is removed; /etech-markers-clean-legacy
       does the same on demand (count first, "confirm" to delete). Player-placed tags are
       never touched.
-    - Factorissimo map icons toggle (default off, needs the notnotmelon Factorissimo fork):
-      each factory building's first overlay signal (the display-upgrade icons drawn on the
-      building) is mirrored as a map marker, so factories are identifiable in map view like
-      machines' recipe icons. Updates within 5 seconds of changing the signal; deleting a
-      marker hides it until the signal is changed.
   Changes:
     - The teleport-to-player shortcut's internals moved to an event_handler lib so both
       teleport systems can share GUI events. No behavior change.
