@@ -207,31 +207,3 @@ if settings.startup["etech-gleba-uranium"].value then
     elog("gleba uranium setting on but Space Age not active - skipped")
   end
 end
-
--- ---------------------------------------------------------------------------
--- 6. Compat: explicit probability on resource mining products
--- ---------------------------------------------------------------------------
--- Some mods' resources list multiple mining products without a probability
--- field (nil = guaranteed, engine default 1). At least one mod in the wild
--- (resource-map-label-marker-fork 1.0.1) sorts products by probability and
--- crashes on the nils. Setting the default explicitly is a no-op for the
--- engine and keeps such mods alive. Unconditional - there is nothing to
--- configure about writing down a default.
-do
-  local fixed = 0
-  for name, resource in pairs(data.raw.resource or {}) do
-    local minable = resource.minable
-    local results = minable and minable.results
-    if results then
-      for _, product in pairs(results) do
-        if type(product) == "table" and product.name and product.probability == nil then
-          product.probability = 1
-          fixed = fixed + 1
-        end
-      end
-    end
-  end
-  if fixed > 0 then
-    elog("added explicit probability=1 to " .. fixed .. " resource mining products (compat shim)")
-  end
-end
