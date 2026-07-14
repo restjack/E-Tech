@@ -1096,7 +1096,91 @@ local on_trigger_created_entity = function(event)
   teleporter_triggered(source, stuck_to)
 end
 
+-- One-shot migration from the original Teleporters mod: converts every
+-- placed "teleporter" entity to ours, keeping position/force and recovering
+-- custom pad names from the original's chart tags. Also converts teleporter
+-- items in player inventories and carries over the researched tech. Run
+-- while BOTH mods are installed (after removing the original its entities
+-- are already gone from the save), then remove the original mod.
+local migrate_from_original = function(command)
+  local player = command.player_index and game.get_player(command.player_index)
+  local out = function(msg)
+    if player and player.valid then player.print(msg) else game.print(msg) end
+  end
+
+  if not prototypes.entity["teleporter"] then
+    out({"etech-tp-migrate-no-original"})
+    return
+  end
+
+  local pads = 0
+  for _, surface in pairs (game.surfaces) do
+    for _, og in pairs (surface.find_entities_filtered{name = "teleporter"}) do
+      if og.valid then
+        local force = og.force
+        local position = og.position
+
+        -- The original mod tags the map with icon = item "teleporter" and
+        -- text = the pad's name. Read it before raise_destroy removes it.
+        local og_name
+        local area = {{position.x - 1, position.y - 1}, {position.x + 1, position.y + 1}}
+        for _, tag in pairs (force.find_chart_tags(surface, area)) do
+          local icon = tag.icon
+          if icon and icon.name == "teleporter" and (icon.type == nil or icon.type == "item") then
+            og_name = tag.text
+            break
+          end
+        end
+
+        og.destroy{raise_destroy = true}
+        local new = surface.create_entity{name = teleporter_name, position = position, force = force, raise_built = true}
+        if new then
+          pads = pads + 1
+          if og_name and og_name ~= "" then
+            local target = og_name
+            local n = 2
+            while not is_name_available(force, target) do
+              target = og_name.." ("..n..")"
+              n = n + 1
+            end
+            rename_teleporter(force, "Teleporter "..new.unit_number, target)
+          end
+        end
+      end
+    end
+  end
+
+  local items = 0
+  if prototypes.item["teleporter"] then
+    for _, p in pairs (game.players) do
+      local inventory = p.get_main_inventory()
+      if inventory then
+        local count = inventory.get_item_count("teleporter")
+        if count > 0 then
+          inventory.remove{name = "teleporter", count = count}
+          items = items + inventory.insert{name = teleporter_name, count = count}
+        end
+      end
+    end
+  end
+
+  for _, force in pairs (game.forces) do
+    local og_tech = force.technologies["teleporter"]
+    local our_tech = force.technologies[teleporter_name]
+    if og_tech and our_tech and og_tech.researched and not our_tech.researched then
+      our_tech.researched = true
+    end
+  end
+
+  refresh_teleporter_frames()
+  out({"etech-tp-migrate-done", pads, items})
+end
+
 local teleporters = {}
+
+teleporters.add_commands = function()
+  commands.add_command("etech-migrate-teleporters", {"etech-tp-migrate-help"}, migrate_from_original)
+end
 
 teleporters.events =
 {
