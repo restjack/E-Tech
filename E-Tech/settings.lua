@@ -207,6 +207,15 @@ data:extend({
     localised_description = {"", "Needs Factorissimo (notnotmelon fork). Mirrors the first overlay signal of each factory building as a map marker, so factories are identifiable in map view like machines' recipe icons. Set the signal via the factory's display upgrade; delete a marker to hide it until the signal is changed."},
   },
   {
+    type = "bool-setting",
+    name = "etech-factorissimo-icons-visible",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "tl",
+    localised_name = {"", "Factorissimo icons: show on map"},
+    localised_description = {"", "Uncheck to hide all Factorissimo factory markers from the map (whole team - map tags are per force). Takes effect immediately, no restart. The game's own 'show recipe icons' toggle can't affect map tags."},
+  },
+  {
     type = "int-setting",
     name = "etech-markers-min-size",
     setting_type = "runtime-global",
