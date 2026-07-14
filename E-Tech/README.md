@@ -24,6 +24,8 @@ Everything is a startup setting, and every recipe change is guarded so it never 
 | Agricultural science pack spoils | on (vanilla) | Turn off to stop agricultural science packs from spoiling |
 | Restore nuclear fuel crafting (K2) | off | Brings back the vanilla nuclear fuel item/recipe that Krastorio 2 hides, unlocked by Kovarex enrichment as in vanilla. Off by default — hiding it is a deliberate K2 balance choice |
 | Teleport-to-player shortcut | off (experimental) | Toolbar shortcut for multiplayer: one other player online = click teleports to them; several = a picker window opens |
+| Teleporter pads | off | Buildable teleporter pads (chemical science tech) — walk onto one, pick a destination from a map GUI. Port of [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3 — see `LICENSE-third-party.txt`) extended with: energy cost drained from the destination pad (map settings, 0 = free), cross-surface teleporting with a surface filter + custom surface display names, a wireless-remote toolbar shortcut, a free return teleport with live camera preview, and your team's players in the list. Coming from the original mod? Run `/etech-migrate-teleporters` while both mods are installed — placed pads (names included), inventory items, and research carry over; then remove the original |
+| Resource map markers | off | Auto-tags resource patches on the map: one marker per patch with icon + total amount (oil shows well count and average yield). Updates as you chart and mine; delete a marker to mute that patch; `/etech-markers-rebuild` rescans. Written from scratch for E-Tech as a 2.1 replacement for the abandoned Resource Map Label Marker mod |
 | Uranium bacteria on Gleba | off | Needs Space Age. Mirrors iron/copper bacteria: jelly → 1% uranium bacteria (Jellynut tech), bacteria + bioflux → ×4 in a biochamber (Bacteria cultivation tech), spoils into uranium ore. Port of the abandoned [Simple Gleba Uranium](https://mods.factorio.com/mod/simple-gleba-uranium) by cindersash (MIT — see `LICENSE-third-party.txt`); saves from that mod keep their items |
 
 Stack-size and spoilage defaults match vanilla, so installing the mod changes nothing until you move a slider or flip a switch — safe to share with friends who want different settings.
@@ -53,4 +55,4 @@ Every recipe restore is guarded by a fingerprint check: a recipe is only touched
 
 ## License
 
-None (public domain). Do whatever you want with it. Exception: the Gleba uranium feature (code + icons) is ported from Simple Gleba Uranium by cindersash under the MIT license — see `LICENSE-third-party.txt`.
+None (public domain). Do whatever you want with it. Exceptions (see `LICENSE-third-party.txt`): the Gleba uranium feature (code + icons) is ported from Simple Gleba Uranium by cindersash under the MIT license, and the teleporter pads (everything under `teleporters/`) are adapted from Teleporters by Klonan under LGPLv3.

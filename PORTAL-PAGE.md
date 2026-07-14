@@ -7,7 +7,7 @@ E-Tech: Vanilla Recipes for AAI Industry + QoL Toggles
 
 ## Summary
 
-Restores vanilla recipes while keeping everything AAI Industry adds (Krastorio 2 aware). Plus optional startup toggles: all modules in beacons, quality asteroid crushing, stack sizes, K2 nuclear fuel crafting, uranium bacteria on Gleba, a teleport-to-player shortcut, and more.
+Restores vanilla recipes while keeping everything AAI Industry adds (Krastorio 2 aware). Plus optional startup toggles: all modules in beacons, quality asteroid crushing, stack sizes, K2 nuclear fuel crafting, uranium bacteria on Gleba, teleporter pads with energy cost and cross-surface support, a teleport-to-player shortcut, and more.
 
 ## Description — copy everything BELOW this line
 
@@ -35,6 +35,8 @@ Defaults marked; everything defaults to vanilla behavior.
 - **Restore nuclear fuel crafting** (off) — un-hides the nuclear fuel Krastorio 2 removes, unlocked by Kovarex enrichment like vanilla.
 - **Uranium bacteria on Gleba** (off, needs Space Age) — jelly gives a 1% chance of uranium bacteria, multiply it with bioflux in a biochamber, and it spoils into uranium ore. Revival of the abandoned [Simple Gleba Uranium](https://mods.factorio.com/mod/simple-gleba-uranium) by cindersash (MIT); saves from that mod keep their items.
 - **Teleport-to-player shortcut** (off, experimental) — multiplayer toolbar shortcut: one other player online = click teleports to them, several = a picker window.
+- **Resource map markers** (off) — auto-tags every resource patch on the map: one marker per patch with the resource icon and total amount (oil shows well count + average yield). Updates as you chart and mine, respects markers you delete, `/etech-markers-rebuild` rescans. Written from scratch, 2.1-native — replaces the abandoned Resource Map Label Marker mod (whose 2.1 fork crashes on any mod change).
+- **Teleporter pads** (off) — buildable teleporters (chemical science tech): walk onto a pad, pick a destination from a map GUI. Revival of [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3), updated for 2.1 and extended: pads have a 200 MJ buffer and teleporting drains the DESTINATION pad (map settings; 0 = free like the original), cross-surface teleporting with a surface filter and custom surface display names, a wireless-remote toolbar shortcut (default 2x cost), a free return teleport with live camera preview after remote jumps, and your team's online players at the top of the list. Upgrading from the original mod? Run `/etech-migrate-teleporters` while both mods are installed — placed pads keep their names, items and research carry over — then remove the original.
 
 ## Plays nice with other overhaul mods
 

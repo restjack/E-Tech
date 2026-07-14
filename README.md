@@ -32,4 +32,4 @@ Release zips are not tracked here — they're built by `build.ps1` and published
 
 **Public domain** ([LICENSE.txt](E-Tech/LICENSE.txt)) — copy, modify, redistribute, fork, sell, no attribution required, no warranty.
 
-Exception: third-party content ported into the mod keeps its original license, documented in [LICENSE-third-party.txt](E-Tech/LICENSE-third-party.txt) (currently: Gleba uranium bacteria from *Simple Gleba Uranium* by cindersash, MIT).
+Exception: third-party content ported into the mod keeps its original license, documented in [LICENSE-third-party.txt](E-Tech/LICENSE-third-party.txt) (currently: Gleba uranium bacteria from *Simple Gleba Uranium* by cindersash, MIT; teleporter pads under `E-Tech/teleporters/` from *Teleporters* by Klonan, LGPLv3).
