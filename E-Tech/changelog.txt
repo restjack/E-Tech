@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.6.1
+Date: 2026-07-14
+  Changes:
+    - Dev build bump (no code change from the final 0.6.0 build). During development each
+      built zip now gets its own patch version so the game reliably fires
+      on_configuration_changed and multiplayer version checks stay unambiguous.
+---------------------------------------------------------------------------------------------------
 Version: 0.6.0
 Date: 2026-07-14
   Features:
