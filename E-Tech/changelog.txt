@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.6.2
+Date: 2026-07-14
+  Changes:
+    - Factorissimo map markers now use the compact pin style (small icon + "Factory <id>"
+      label) instead of the big standalone map icon. Icon-only chart tags always render at
+      the engine's large map-icon size - there is no API to scale them - so a text label is
+      the way to get the small look.
+---------------------------------------------------------------------------------------------------
 Version: 0.6.1
 Date: 2026-07-14
   Changes:
