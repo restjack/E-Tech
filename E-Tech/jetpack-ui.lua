@@ -41,6 +41,12 @@ local close_window = function(player, state)
   local frame = player.gui.screen[WINDOW]
   if frame then frame.destroy() end
   state.gui = nil
+  -- fresh consumption estimate per flight — a tick delta measured across
+  -- the gap between flights makes consumption look tiny and the remaining
+  -- time absurdly long
+  state.remaining_energy = nil
+  state.synced_tick = nil
+  state.estimated_consumption = nil
 end
 
 local render_time = function(seconds)
@@ -62,6 +68,9 @@ local ensure_window = function(player, state)
   if existing then existing.destroy() end
 
   local frame = player.gui.screen.add{type = "frame", name = WINDOW, direction = "horizontal"}
+  -- match the width of the weapon/quickbar panel so the HUD lines up with
+  -- the gun slots it usually sits above
+  frame.style.width = 180
   local handle = frame.add{type = "empty-widget", style = "draggable_space"}
   handle.style.width = 8
   handle.style.height = 45
@@ -76,7 +85,7 @@ local ensure_window = function(player, state)
   local count = row.add{type = "label"}
   local bar = row.add{type = "progressbar"}
   bar.style.color = {r = 1, g = 0.667, b = 0.2}
-  bar.style.width = 120
+  bar.style.horizontally_stretchable = true
   local time = column.add{type = "label"}
 
   state.gui = {frame = frame, icon = icon, count = count, bar = bar, time = time}
@@ -143,9 +152,12 @@ local sync = function()
     if not (fuel and jetpacking) then
       close_window(player, state)
     else
-      if state.remaining_energy and state.synced_tick and game.tick > state.synced_tick then
+      local dt = state.synced_tick and (game.tick - state.synced_tick)
+      if state.remaining_energy and dt and dt > 0 and dt <= 60 then
         local burned = state.remaining_energy - fuel.energy
-        state.estimated_consumption = burned * (60 / (game.tick - state.synced_tick))
+        if burned >= 0 then -- negative = fuel item switched, skip that sample
+          state.estimated_consumption = burned * (60 / dt)
+        end
       end
       state.synced_tick = game.tick
       state.remaining_energy = fuel.energy

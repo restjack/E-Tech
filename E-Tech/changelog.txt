@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.7.1
+Date: 2026-07-14
+  Bugfixes:
+    - Jetpack HUD: remaining-time estimate no longer inflates to hours. The consumption
+      sample could be measured across the gap between two flights, making burn rate look
+      tiny; estimates now reset per flight, only accept sane tick deltas, and skip the
+      sample when the fuel item switches.
+  Changes:
+    - Jetpack HUD window fixed at 180px wide to line up with the weapon/quickbar panel,
+      and the label reads "Est time left ..." like the original mod.
+---------------------------------------------------------------------------------------------------
 Version: 0.7.0
 Date: 2026-07-14
   Features:
