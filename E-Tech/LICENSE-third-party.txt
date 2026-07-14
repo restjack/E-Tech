@@ -23,6 +23,28 @@ ported features below, which keep their original licenses.
    hr_version wrapper, rocket-launch easter egg removed, and E-Tech
    feature additions on top (see changelog.txt).
 
+3. Total productivity (productivity/data.lua) is adapted from the mod
+   "Total Productivity" 2.0.x by AivanF
+   (https://mods.factorio.com/mod/Productivity,
+   https://github.com/AivanF/factorio-AivanF-mods), used under the GNU
+   Lesser General Public License v3.0 (the repository's license),
+   reproduced below. That file remains LGPLv3-licensed; the public-domain
+   grant in LICENSE.txt does not apply to it.
+   Modifications by E-Tech: the 28 per-category startup settings condensed
+   into 4 group toggles, nil-safe data.raw category lookups, per-recipe
+   pcall/error wrapper dropped, settings renamed etech-prod-*.
+
+4. Jetpack fuel HUD (jetpack-ui.lua) is adapted from the mod
+   "Puppy's Jetpack UI" 0.2.1 by Puppy
+   (https://mods.factorio.com/mod/puppy-jetpack-ui), used under the MIT
+   License (Copyright (c) 2022 Puppy) — same license text as reproduced
+   below for Simple Gleba Uranium.
+   Modifications by E-Tech: flib dependency removed (plain gui
+   construction), element names prefixed etech-, and the window-position
+   reset bug fixed (saved position is always restored and clamped on the
+   display-resolution/scale events instead of being discarded against a
+   possibly-stale display_resolution at window creation).
+
 MIT License
 
 Copyright (c) 2025 cindersash

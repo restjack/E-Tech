@@ -1,4 +1,23 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.7.0
+Date: 2026-07-14
+  Features:
+    - Total productivity toggle (default off): allows productivity modules on recipes the
+      game normally forbids - belts, inserters, rails, pipes, solar, walls, ammo, equipment,
+      and more, with four category group toggles (logistics / buildings / military / misc).
+      Port of the abandoned Total Productivity mod by AivanF (LGPLv3, see
+      LICENSE-third-party.txt), skipped automatically when the original mod is installed.
+    - Jetpack fuel HUD toggle (default off, needs the Jetpack mod): while flying, a small
+      movable window shows current fuel + inventory count, a burn bar, and estimated
+      remaining flight time. Port of Puppy's Jetpack UI (MIT) without the flib dependency,
+      skipped automatically when the original mod is installed.
+  Bugfixes:
+    - The jetpack HUD keeps its window position across restarts and server joins. The
+      original discarded the saved position when it looked off-screen, judged against a
+      display resolution that reports a stale default during the first ticks after joining -
+      the position is now always restored and clamped when the resolution/scale events
+      deliver real values.
+---------------------------------------------------------------------------------------------------
 Version: 0.6.4
 Date: 2026-07-14
   Changes:

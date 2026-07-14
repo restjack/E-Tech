@@ -207,3 +207,14 @@ if settings.startup["etech-gleba-uranium"].value then
     elog("gleba uranium setting on but Space Age not active - skipped")
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- 6. Total productivity (port of Total Productivity by AivanF, LGPLv3)
+-- ---------------------------------------------------------------------------
+if settings.startup["etech-total-productivity"].value then
+  if mods["Productivity"] then
+    elog("total productivity setting on but the original Productivity mod is installed - skipped (disable one of the two)")
+  else
+    require("productivity/data")
+  end
+end
