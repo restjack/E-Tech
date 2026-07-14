@@ -289,9 +289,7 @@ local find_legacy_tags = function()
     if #force.players > 0 then
       for _, surface in pairs (game.surfaces) do
         for _, tag in pairs (force.find_chart_tags(surface)) do
-          local factorissimo_tags = storage.etech_factorissimo_icons and storage.etech_factorissimo_icons.tag_numbers
-          if tag.valid and not tag.last_user and not script_data.tag_map[tag.tag_number]
-            and not (factorissimo_tags and factorissimo_tags[tag.tag_number]) then
+          if tag.valid and not tag.last_user and not script_data.tag_map[tag.tag_number] then
             local icon = tag.icon
             if icon and icon.name then
               local icon_type = icon.type or "item"
