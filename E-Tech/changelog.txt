@@ -19,6 +19,10 @@ Date: 2026-07-14
       camera preview of where you came from (configurable time limit, default 10 min).
     - Players in the list: your team's online players appear at the top with map previews -
       click to teleport to them for free.
+    - Migration from the original Teleporters mod: run /etech-migrate-teleporters while BOTH
+      mods are installed to convert every placed teleporter to an E-Tech pad (names recovered
+      from map tags), convert teleporter items in player inventories, and carry over the
+      researched technology. Then save and remove the original mod.
   Changes:
     - The teleport-to-player shortcut's internals moved to an event_handler lib so both
       teleport systems can share GUI events. No behavior change.
