@@ -25,7 +25,14 @@ local script_data =
   to_be_removed = {},
   tag_map = {},
   search_boxes = {},
-  recent = {}
+  recent = {},
+  -- Display-only names for surfaces (keyed by surface index). The real
+  -- surface is never renamed — other mods may reference it by name.
+  surface_aliases = {},
+  -- Per-player surface filter in the destination GUI (surface index, or nil
+  -- for "all surfaces").
+  surface_filter = {},
+  surface_rename_frames = {},
 }
 
 local preview_size = 256
@@ -66,6 +73,12 @@ local get_teleporter_frame = function(player)
   local frame = script_data.teleporter_frames[player.index]
   if frame and frame.valid then return frame end
   script_data.teleporter_frames[player.index] = nil
+end
+
+local get_surface_rename_frame = function(player)
+  local frame = script_data.surface_rename_frames[player.index]
+  if frame and frame.valid then return frame end
+  script_data.surface_rename_frames[player.index] = nil
 end
 
 local make_rename_frame = function(player, caption)
@@ -190,10 +203,20 @@ local get_teleport_cost = function(source, destination)
   local per_use = settings.global["etech-teleporter-energy-mj"].value
   local per_100 = settings.global["etech-teleporter-energy-distance-mj"].value
   local cost = per_use
-  if per_100 > 0 and source and source.valid and source.surface == destination.surface then
+  if source and source.valid and source.surface ~= destination.surface then
+    cost = cost * settings.global["etech-teleporter-cross-surface-multiplier"].value
+  elseif per_100 > 0 and source and source.valid then
     cost = cost + per_100 * (util.distance(source.position, destination.position) / 100)
   end
   return cost * 1000000
+end
+
+-- Display name for a surface: player-set alias first, then the engine's
+-- localised name (proper planet/platform names), then the raw name.
+local get_surface_label = function(surface)
+  local alias = script_data.surface_aliases[surface.index]
+  if alias and alias ~= "" then return alias end
+  return surface.localised_name or surface.name
 end
 
 local make_teleporter_gui = function(player, source)
@@ -243,16 +266,6 @@ local make_teleporter_gui = function(player, source)
   local search_button = title_flow.add{type = "sprite-button", style = "frame_action_button", sprite = "utility/search", tooltip = {"gui.search-with-focus", {"etech-tp-search"}}}
   util.register_gui(script_data.button_actions, search_button, {type = "search_button", box = search_box})
   script_data.search_boxes[player.index] = search_box
-  local inner = frame.add{type = "frame", style = "inside_deep_frame"}
-  local scroll = inner.add{type = "scroll-pane", direction = "vertical"}
-  scroll.style.maximal_height = (player.display_resolution.height / player.display_scale) * 0.8
-  local column_count = ((player.display_resolution.width / player.display_scale) * 0.6) / preview_size
-  local holding_table = scroll.add{type = "table", column_count = column_count}
-  util.register_gui(script_data.button_actions, search_box, {type = "search_text_changed", parent = holding_table})
-  holding_table.style.horizontal_spacing = 2
-  holding_table.style.vertical_spacing = 2
-  local any = false
-
   local recent = script_data.recent[player.name] or {}
 
   local sorted = {}
@@ -265,6 +278,58 @@ local make_teleporter_gui = function(player, source)
       clear_teleporter_data(teleporter)
     end
   end
+
+  local cross_surface = settings.global["etech-teleporter-cross-surface"].value
+  local hide_platforms = settings.global["etech-teleporter-hide-platforms"].value
+
+  -- Surfaces that actually have pads, for the filter dropdown.
+  local surface_indices = {}
+  local seen_surfaces = {}
+  for _, entry in pairs (sorted) do
+    local surface_index = entry.teleporter.teleporter.surface.index
+    if not seen_surfaces[surface_index] then
+      seen_surfaces[surface_index] = true
+      surface_indices[#surface_indices + 1] = surface_index
+    end
+  end
+  table.sort(surface_indices)
+
+  local filter_index = script_data.surface_filter[player.index]
+  if filter_index and not (seen_surfaces[filter_index] and cross_surface) then
+    filter_index = nil
+    script_data.surface_filter[player.index] = nil
+  end
+
+  if cross_surface and #surface_indices > 1 then
+    local filter_flow = frame.add{type = "flow", direction = "horizontal"}
+    filter_flow.style.vertical_align = "center"
+    local items = {{"etech-tp-all-surfaces"}}
+    local index_map = {false}
+    local selected = 1
+    for _, surface_index in ipairs(surface_indices) do
+      local surf = game.surfaces[surface_index]
+      if surf and surf.valid then
+        items[#items + 1] = get_surface_label(surf)
+        index_map[#index_map + 1] = surface_index
+        if filter_index == surface_index then selected = #items end
+      end
+    end
+    local dropdown = filter_flow.add{type = "drop-down", items = items, selected_index = selected}
+    dropdown.style.horizontally_stretchable = true
+    util.register_gui(script_data.button_actions, dropdown, {type = "surface_filter", index_map = index_map})
+    local rename_surface_button = filter_flow.add{type = "sprite-button", sprite = "utility/rename_icon", style = "tool_button", tooltip = {"etech-tp-rename-surface-tooltip"}}
+    util.register_gui(script_data.button_actions, rename_surface_button, {type = "rename_surface_button"})
+  end
+
+  local inner = frame.add{type = "frame", style = "inside_deep_frame"}
+  local scroll = inner.add{type = "scroll-pane", direction = "vertical"}
+  scroll.style.maximal_height = (player.display_resolution.height / player.display_scale) * 0.8
+  local column_count = ((player.display_resolution.width / player.display_scale) * 0.6) / preview_size
+  local holding_table = scroll.add{type = "table", column_count = column_count}
+  util.register_gui(script_data.button_actions, search_box, {type = "search_text_changed", parent = holding_table})
+  holding_table.style.horizontal_spacing = 2
+  holding_table.style.vertical_spacing = 2
+  local any = false
 
   table.sort(sorted, function(a, b)
     if recent[a.unit_number] and recent[b.unit_number] then
@@ -296,9 +361,19 @@ local make_teleporter_gui = function(player, source)
       title.caption = name
       util.register_gui(script_data.button_actions, rename_button, {type = "rename_button", caption = name})
     else
+      local pad_surface = teleporter_entity.surface
+      local show
+      if not cross_surface then
+        show = pad_surface == source.surface
+      elseif filter_index then
+        show = pad_surface.index == filter_index
+      else
+        show = not (hide_platforms and pad_surface.platform)
+      end
+      if show then
       local position = teleporter_entity.position
       local area = {{position.x - preview_size / 2, position.y - preview_size / 2}, {position.x + preview_size / 2, position.y + preview_size / 2}}
-      chart(teleporter_entity.surface, area)
+      chart(pad_surface, area)
       local button = holding_table.add{type = "button", name = "_"..name}
       button.style.height = preview_size + 32 + 8
       button.style.width = preview_size + 8
@@ -331,6 +406,11 @@ local make_teleporter_gui = function(player, source)
       label.style.font_color = {}
       label.style.horizontally_stretchable = true
       label.style.maximal_width = preview_size
+      if pad_surface ~= source.surface then
+        local surface_label = inner_flow.add{type = "label", caption = get_surface_label(pad_surface)}
+        surface_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+        surface_label.style.maximal_width = preview_size
+      end
       local cost = get_teleport_cost(source, teleporter_entity)
       if cost > 0 then
         local eei = get_energy_interface(teleporter, teleporter_entity)
@@ -345,6 +425,7 @@ local make_teleporter_gui = function(player, source)
       end
       util.register_gui(script_data.button_actions, button, {type = "teleport_button", param = teleporter})
       any = true
+      end
     end
   end
   if not any then
@@ -434,6 +515,48 @@ local rename_teleporter = function(force, old_name, new_name)
   refresh_teleporter_frames()
 end
 
+-- Alias editor for the surface picked in the filter dropdown (or the
+-- player's current surface when "All surfaces" is selected). Sets a
+-- display-only alias in storage — the real surface is never renamed.
+local make_surface_rename_frame = function(player)
+  local surface_index = script_data.surface_filter[player.index] or player.surface.index
+  local surface = game.surfaces[surface_index]
+  if not (surface and surface.valid) then return end
+
+  local teleporter_frame = get_teleporter_frame(player)
+  if teleporter_frame then
+    teleporter_frame.ignored_by_interaction = true
+  end
+  player.opened = nil
+
+  local frame = player.gui.screen.add{type = "frame", caption = {"etech-tp-rename-surface", surface.localised_name or surface.name}, direction = "horizontal"}
+  frame.auto_center = true
+  player.opened = frame
+  script_data.surface_rename_frames[player.index] = frame
+
+  local textfield = frame.add{type = "textfield", text = script_data.surface_aliases[surface_index] or ""}
+  textfield.style.horizontally_stretchable = true
+  textfield.focus()
+  textfield.select_all()
+  util.register_gui(script_data.button_actions, textfield, {type = "confirm_surface_rename_textfield", textfield = textfield, surface_index = surface_index})
+
+  local confirm = frame.add{type = "sprite-button", sprite = "utility/enter", style = "tool_button", tooltip = {"gui-train-rename.perform-change"}}
+  util.register_gui(script_data.button_actions, confirm, {type = "confirm_surface_rename_button", textfield = textfield, surface_index = surface_index})
+end
+
+local apply_surface_rename = function(event, param)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  local alias
+  if param.textfield and param.textfield.valid then
+    alias = param.textfield.text
+  end
+  if alias == "" then alias = nil end
+  script_data.surface_aliases[param.surface_index] = alias
+  close_gui(get_surface_rename_frame(player))
+  check_player_linked_teleporter(player)
+end
+
 local gui_actions =
 {
   rename_button = function(event, param)
@@ -487,6 +610,12 @@ local gui_actions =
     if not (player and player.valid) then return end
 
     local source = script_data.player_linked_teleporter[player.index]
+    if not settings.global["etech-teleporter-cross-surface"].value then
+      if destination.surface ~= player.surface then
+        player.print({"etech-tp-cross-surface-disabled"})
+        return
+      end
+    end
     local cost = get_teleport_cost(source, destination)
     if cost > 0 then
       local eei = get_energy_interface(teleport_param, destination)
@@ -506,6 +635,26 @@ local gui_actions =
     player.teleport(destination_position, destination_surface)
     unlink_teleporter(player)
     add_recent(player, destination)
+  end,
+
+  surface_filter = function(event, param)
+    if event.name ~= defines.events.on_gui_selection_state_changed then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    local chosen = param.index_map[event.element.selected_index]
+    script_data.surface_filter[player.index] = chosen or nil
+    check_player_linked_teleporter(player)
+  end,
+  rename_surface_button = function(event, param)
+    make_surface_rename_frame(game.get_player(event.player_index))
+  end,
+  confirm_surface_rename_button = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    apply_surface_rename(event, param)
+  end,
+  confirm_surface_rename_textfield = function(event, param)
+    if event.name ~= defines.events.on_gui_confirmed then return end
+    apply_surface_rename(event, param)
   end,
 
   search_text_changed = function(event, param)
@@ -606,6 +755,13 @@ local on_gui_closed = function(event)
     return
   end
 
+  local surface_rename_frame = get_surface_rename_frame(player)
+  if surface_rename_frame and surface_rename_frame == element then
+    close_gui(surface_rename_frame)
+    check_player_linked_teleporter(player)
+    return
+  end
+
   local teleporter_frame = get_teleporter_frame(player)
   if teleporter_frame and teleporter_frame == element and not teleporter_frame.ignored_by_interaction then
     close_gui(teleporter_frame)
@@ -618,6 +774,8 @@ end
 local on_player_removed = function(event)
   local player = game.get_player(event.player_index)
   close_gui(get_rename_frame(player))
+  close_gui(get_surface_rename_frame(player))
+  script_data.surface_filter[player.index] = nil
   unlink_teleporter(player)
 end
 
@@ -711,6 +869,15 @@ local on_player_display_scale_changed = function(event)
   check_player_linked_teleporter(player)
 end
 
+local on_surface_deleted = function(event)
+  script_data.surface_aliases[event.surface_index] = nil
+  for player_index, surface_index in pairs (script_data.surface_filter) do
+    if surface_index == event.surface_index then
+      script_data.surface_filter[player_index] = nil
+    end
+  end
+end
+
 local on_trigger_created_entity = function(event)
   local entity = event.entity
   if not (entity and entity.valid) then return end
@@ -742,6 +909,7 @@ teleporters.events =
   [defines.events.on_gui_click] = on_gui_action,
   [defines.events.on_gui_text_changed] = on_gui_action,
   [defines.events.on_gui_confirmed] = on_gui_action,
+  [defines.events.on_gui_selection_state_changed] = on_gui_action,
   [defines.events.on_gui_closed] = on_gui_closed,
   [names.hotkeys.focus_search] = on_search_focused,
   [defines.events.on_player_display_resolution_changed] = on_player_display_resolution_changed,
@@ -754,6 +922,8 @@ teleporters.events =
   [defines.events.on_chart_tag_modified] = on_chart_tag_modified,
   [defines.events.on_chart_tag_removed] = on_chart_tag_removed,
   [defines.events.on_chart_tag_added] = on_chart_tag_added,
+
+  [defines.events.on_surface_deleted] = on_surface_deleted,
 
   [defines.events.on_trigger_created_entity] = on_trigger_created_entity
 }
@@ -770,6 +940,11 @@ teleporters.on_configuration_changed = function()
   if not storage.etech_teleporters then
     storage.etech_teleporters = script_data
   end
+  local stored = storage.etech_teleporters
+  stored.surface_aliases = stored.surface_aliases or {}
+  stored.surface_filter = stored.surface_filter or {}
+  stored.surface_rename_frames = stored.surface_rename_frames or {}
+  script_data = stored
   resync_all_teleporters()
 end
 
