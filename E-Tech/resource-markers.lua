@@ -274,14 +274,8 @@ end
 -- data, not mod data. A leftover is recognized by all three of:
 -- script-created (no last_user), not one of ours (tag_map), and an icon
 -- that is some resource's mined product. Player-placed tags always have
--- last_user, so they are never touched. Dry-run by default; "confirm"
--- deletes.
-local clean_legacy_command = function(command)
-  local player = command.player_index and game.get_player(command.player_index)
-  local out = function(msg)
-    if player and player.valid then player.print(msg) else game.print(msg) end
-  end
-
+-- last_user, so they are never touched.
+local find_legacy_tags = function()
   local product_icons = {item = {}, fluid = {}}
   for _, proto in pairs (prototypes.get_entity_filtered{{filter = "type", type = "resource"}}) do
     local mineable = proto.mineable_properties
@@ -308,20 +302,32 @@ local clean_legacy_command = function(command)
       end
     end
   end
+  return candidates
+end
 
-  if command.parameter == "confirm" then
-    local removed = 0
-    suppress = true
-    for _, tag in pairs (candidates) do
-      if tag.valid then
-        tag.destroy()
-        removed = removed + 1
-      end
+local clean_legacy = function()
+  local removed = 0
+  suppress = true
+  for _, tag in pairs (find_legacy_tags()) do
+    if tag.valid then
+      tag.destroy()
+      removed = removed + 1
     end
-    suppress = false
-    out({"etech-rm-legacy-removed", removed})
+  end
+  suppress = false
+  return removed
+end
+
+-- Dry-run by default; "confirm" deletes.
+local clean_legacy_command = function(command)
+  local player = command.player_index and game.get_player(command.player_index)
+  local out = function(msg)
+    if player and player.valid then player.print(msg) else game.print(msg) end
+  end
+  if command.parameter == "confirm" then
+    out({"etech-rm-legacy-removed", clean_legacy()})
   else
-    out({"etech-rm-legacy-found", #candidates})
+    out({"etech-rm-legacy-found", #find_legacy_tags()})
   end
 end
 
@@ -419,8 +425,21 @@ markers.add_commands = function()
   commands.add_command("etech-markers-clean-legacy", {"etech-rm-clean-legacy-help"}, clean_legacy_command)
 end
 
+-- Marker mods whose removal triggers an automatic sweep of their leftover
+-- tags ("resourceMarker" is the original Resource Map Label Marker's
+-- internal name, per the fork's incompatibility dependency).
+local LEGACY_MARKER_MODS =
+{
+  "resource-map-label-marker-fork",
+  "resourceMarker",
+}
+
 markers.on_init = function()
   storage.etech_markers = storage.etech_markers or script_data
+  local removed = clean_legacy()
+  if removed > 0 then
+    game.print({"etech-rm-legacy-removed", removed})
+  end
   full_rescan()
 end
 
@@ -428,13 +447,33 @@ markers.on_load = function()
   script_data = storage.etech_markers or script_data
 end
 
-markers.on_configuration_changed = function()
+markers.on_configuration_changed = function(data)
   if not storage.etech_markers then
-    -- toggle turned on mid-save: backfill everything already charted
+    -- toggle turned on mid-save: sweep other mods' leftovers, then
+    -- backfill everything already charted
     storage.etech_markers = script_data
+    local removed = clean_legacy()
+    if removed > 0 then
+      game.print({"etech-rm-legacy-removed", removed})
+    end
     full_rescan()
-  else
-    script_data = storage.etech_markers
+    return
+  end
+  script_data = storage.etech_markers
+
+  -- a known marker mod was just removed: sweep the tags it left behind
+  local mod_changes = data and data.mod_changes
+  if mod_changes then
+    for _, mod_name in pairs (LEGACY_MARKER_MODS) do
+      local change = mod_changes[mod_name]
+      if change and change.old_version and not change.new_version then
+        local removed = clean_legacy()
+        if removed > 0 then
+          game.print({"etech-rm-legacy-removed", removed})
+        end
+        break
+      end
+    end
   end
 end
 
