@@ -269,6 +269,62 @@ local rebuild_command = function(command)
   if player and player.valid then player.print(msg) else game.print(msg) end
 end
 
+-- Legacy cleanup: other resource-marker mods (e.g. Resource Map Label
+-- Marker) leave their chart tags in the save after removal — tags are map
+-- data, not mod data. A leftover is recognized by all three of:
+-- script-created (no last_user), not one of ours (tag_map), and an icon
+-- that is some resource's mined product. Player-placed tags always have
+-- last_user, so they are never touched. Dry-run by default; "confirm"
+-- deletes.
+local clean_legacy_command = function(command)
+  local player = command.player_index and game.get_player(command.player_index)
+  local out = function(msg)
+    if player and player.valid then player.print(msg) else game.print(msg) end
+  end
+
+  local product_icons = {item = {}, fluid = {}}
+  for _, proto in pairs (prototypes.get_entity_filtered{{filter = "type", type = "resource"}}) do
+    local mineable = proto.mineable_properties
+    for _, product in pairs (mineable and mineable.products or {}) do
+      product_icons[product.type == "fluid" and "fluid" or "item"][product.name] = true
+    end
+  end
+
+  local candidates = {}
+  for _, force in pairs (game.forces) do
+    if #force.players > 0 then
+      for _, surface in pairs (game.surfaces) do
+        for _, tag in pairs (force.find_chart_tags(surface)) do
+          if tag.valid and not tag.last_user and not script_data.tag_map[tag.tag_number] then
+            local icon = tag.icon
+            if icon and icon.name then
+              local icon_type = icon.type or "item"
+              if (icon_type == "item" or icon_type == "fluid") and product_icons[icon_type][icon.name] then
+                candidates[#candidates + 1] = tag
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if command.parameter == "confirm" then
+    local removed = 0
+    suppress = true
+    for _, tag in pairs (candidates) do
+      if tag.valid then
+        tag.destroy()
+        removed = removed + 1
+      end
+    end
+    suppress = false
+    out({"etech-rm-legacy-removed", removed})
+  else
+    out({"etech-rm-legacy-found", #candidates})
+  end
+end
+
 local on_chunk_charted = function(event)
   local surface = game.surfaces[event.surface_index]
   if not (surface and surface.valid) then return end
@@ -360,6 +416,7 @@ markers.events =
 
 markers.add_commands = function()
   commands.add_command("etech-markers-rebuild", {"etech-rm-rebuild-help"}, rebuild_command)
+  commands.add_command("etech-markers-clean-legacy", {"etech-rm-clean-legacy-help"}, clean_legacy_command)
 end
 
 markers.on_init = function()

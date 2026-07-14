@@ -31,6 +31,8 @@ Date: 2026-07-14
       first enabled on an existing save). Minimum patch size is a map setting. Written from
       scratch for E-Tech (public domain) as a 2.1-native replacement for the abandoned
       Resource Map Label Marker mod, whose fork crashes on Factorio 2.1.
+      /etech-markers-clean-legacy finds leftover markers from such removed marker mods
+      (count first, "confirm" to delete; player-placed tags are never touched).
   Changes:
     - The teleport-to-player shortcut's internals moved to an event_handler lib so both
       teleport systems can share GUI events. No behavior change.
