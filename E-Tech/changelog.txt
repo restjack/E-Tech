@@ -1,0 +1,121 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.5.3
+Date: 2026-07-11
+  Changes:
+    - Mod retitled "E-Tech: Vanilla Recipes for AAI Industry + QoL Toggles" and description
+      rewritten to reflect the expanded scope. No gameplay changes.
+---------------------------------------------------------------------------------------------------
+Version: 0.5.2
+Date: 2026-07-11
+  Bugfixes:
+    - More Factorio 2.1 fixes for the uranium bacteria recipes, now verified field-by-field
+      against the game's own 2.1 iron-bacteria recipes: removed 'result_is_always_fresh'
+      (product gets 'reset_freshness_on_craft' like vanilla cultivation), removed
+      'show_amount_in_title' (gone in 2.1), replaced removed 'organic-or-hand-crafting'
+      category with 'organic' + 'crafting', added 'auto_recycle = false' to cultivation.
+---------------------------------------------------------------------------------------------------
+Version: 0.5.1
+Date: 2026-07-11
+  Bugfixes:
+    - Fixed load error on Factorio 2.1: product 'probability' was renamed to
+      'independent_probability' (uranium bacteria recipe).
+---------------------------------------------------------------------------------------------------
+Version: 0.5.0
+Date: 2026-07-11
+  Features:
+    - Uranium bacteria on Gleba toggle (default off, needs Space Age): port of the abandoned
+      Simple Gleba Uranium mod by cindersash (MIT, see LICENSE-third-party.txt). Jelly gives a
+      1% chance of uranium bacteria (Jellynut tech), bacteria + bioflux multiplies it in a
+      biochamber (Bacteria cultivation tech), and the bacteria spoils into uranium ore.
+      Prototype names keep the original sgu_ prefix so saves from the old mod keep their items.
+---------------------------------------------------------------------------------------------------
+Version: 0.4.0
+Date: 2026-07-11
+  Features:
+    - Restore nuclear fuel crafting toggle (default off): brings back the vanilla nuclear fuel
+      item and recipe that Krastorio 2 hides. Unlocked by Kovarex enrichment like vanilla when
+      that tech is available, otherwise enabled from the start.
+    - Teleport-to-player toolbar shortcut (default off, experimental): with one other player
+      online, clicking teleports straight to them; with several, a picker window opens.
+      Works across surfaces and follows the target's physical position.
+---------------------------------------------------------------------------------------------------
+Version: 0.3.1
+Date: 2026-07-08
+  Features:
+    - Allow quality modules in asteroid crushing/reprocessing recipes (toggle, default on).
+    - Nuclear fuel stack size setting (default 1 = vanilla).
+    - Artillery shell stack size setting (default 1 = vanilla).
+    - Agricultural science pack spoilage toggle (default on = vanilla; turn off to stop spoiling).
+---------------------------------------------------------------------------------------------------
+Version: 0.3.0
+Date: 2026-07-08
+  Features:
+    - New toggle (default on): allow all module types in every beacon, including productivity
+      and quality modules. Applies to modded beacons too. Opens allowed_effects and clears
+      allowed_module_categories on every beacon prototype.
+---------------------------------------------------------------------------------------------------
+Version: 0.2.5
+Date: 2026-07-08
+  Bugfixes:
+    - Electronic circuit: with Krastorio 2 Spaced Out the baseline is iron plate 2 + copper
+      cable 4 (no wood; K2SO removes K2's wood ingredient). Wood version only applies with
+      K2 alone.
+    - AAI's redundant "Electronic circuit (Wood)" alternate recipe hidden when K2 is present
+      (K2/K2SO provide their own wood path).
+---------------------------------------------------------------------------------------------------
+Version: 0.2.4
+Date: 2026-07-08
+  Changes:
+    - With Krastorio 2: AAI's Single-cylinder engine (motor) recipe is hidden from the player
+      crafting menu (machines can still craft it - burner lab and fuel processor use it, and
+      AAI's belt-unlock trigger counts crafted motors).
+---------------------------------------------------------------------------------------------------
+Version: 0.2.3
+Date: 2026-07-08
+  Bugfixes:
+    - With Krastorio 2: recipes K2 itself modifies now restore to K2's version instead of plain
+      vanilla (the pre-AAI state of a K2 game). Fixed: engine-unit (iron plate, not steel),
+      gun-turret, assembling-machine-1, steam-turbine, electronic-circuit, solar-panel,
+      heavy-armor, roboport, laser-turret, lab.
+---------------------------------------------------------------------------------------------------
+Version: 0.2.2
+Date: 2026-07-08
+  Changes:
+    - Cosmetic restore: engine-unit and electric-engine-unit get their vanilla names and icons
+      back ("Engine unit" instead of AAI's "Multi-cylinder engine"). Same items as always -
+      AAI only renamed/reskinned them; assemblers were never switched.
+---------------------------------------------------------------------------------------------------
+Version: 0.2.1
+Date: 2026-07-08
+  Bugfixes:
+    - New K2-restore pass: AAI's own Krastorio2-compat rewrites some K2 recipes; those now get
+      K2's originals back. First entry: Chemical tech card (AAI added a multi-cylinder engine
+      and changed glass amounts; restored to K2's blank card 5 + glass 15 + adv circuit 5 +
+      sulfuric acid 50).
+---------------------------------------------------------------------------------------------------
+Version: 0.2.0
+Date: 2026-07-08
+  Major Features:
+    - Redesign: single purpose, no per-recipe toggles. All vanilla recipes AAI Industry
+      changed are unconditionally restored to their vanilla ingredients (45+ recipes:
+      logistics, inserters, drills, furnaces, assemblers, power, oil processing, science
+      packs, electric network, military, armor, vehicles).
+    - Science packs are hand-craftable again (vanilla behaviour).
+    - Everything AAI adds is kept as-is: burner assembler/lab/turbine, industrial furnace,
+      area mining drill, fuel processor, wall & gate tiers, stone path, motors, glass, sand,
+      stone tablets - including their AAI recipes, since they are new items.
+    - Tech tree and research progression are untouched; recipes unlock where AAI put them.
+    - Mod-respect guard: a recipe is only restored if it still matches AAI's version (or
+      contains an AAI-only item). Recipes rewritten by another mod (e.g. Krastorio 2) are
+      detected and left alone; skips are logged with an [E-Tech] prefix.
+  Changes:
+    - Removed all per-recipe/per-bundle startup settings. Only the crashed-ship toggle remains.
+  Info:
+    - boiler is not listed: AAI's ingredients already equal vanilla's (only its tech gate
+      differs, and tech is out of scope).
+    - offshore-pump ingredients are left as AAI's (vanilla 2.x values unverified; cheap either way).
+---------------------------------------------------------------------------------------------------
+Version: 0.1.0
+Date: 2026-07-07
+  Features:
+    - Initial release: per-recipe revert toggles, fluid-basics un-gate, crashed-ship pickup.
