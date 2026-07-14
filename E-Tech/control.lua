@@ -19,3 +19,7 @@ end
 if settings.startup["etech-resource-markers"].value then
   handler.add_lib(require("resource-markers"))
 end
+
+if settings.startup["etech-factorissimo-icons"].value and script.active_mods["factorissimo-2-notnotmelon"] then
+  handler.add_lib(require("factorissimo-icons"))
+end
