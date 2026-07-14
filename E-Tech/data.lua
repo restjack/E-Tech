@@ -1,7 +1,12 @@
 -- data.lua
--- Only prototype E-Tech adds from scratch: the optional teleport-to-player
--- toolbar shortcut (runtime logic in control.lua). Everything else the mod
--- does is field edits on existing prototypes and lives in data-final-fixes.
+-- Prototypes E-Tech adds from scratch: the optional teleport-to-player
+-- toolbar shortcut, and the teleporter pads (teleporters/data.lua).
+-- Everything else the mod does is field edits on existing prototypes and
+-- lives in data-final-fixes.
+
+if settings.startup["etech-teleporters"].value then
+  require("teleporters/data")
+end
 
 if settings.startup["etech-teleport-shortcut"].value then
   data:extend({
