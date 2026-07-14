@@ -9,6 +9,7 @@
     "base >= 2.0",
     "? aai-industry >= 0.7.0",
     "? Krastorio2",
-    "? space-age"
+    "? space-age",
+    "? factorissimo-2-notnotmelon"
   ]
 }
