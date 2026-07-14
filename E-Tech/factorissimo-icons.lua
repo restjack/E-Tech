@@ -52,7 +52,7 @@ local destroy_tag = function(data)
 end
 
 -- First signal of the factory's overlay controller (the combinator the
--- display upgrade adds inside), or nil.
+-- display upgrade adds inside) plus the factory id, or nil.
 local get_overlay_icon = function(building)
   local ok, factory = pcall(remote.call, "factorissimo", "get_factory_by_entity", building)
   if not (ok and factory) then return end
@@ -65,7 +65,7 @@ local get_overlay_icon = function(building)
       for _, filter in pairs (section.filters) do
         local value = filter.value
         if value and value.name then
-          return {type = value.type or "item", name = value.name, quality = value.quality}
+          return {type = value.type or "item", name = value.name, quality = value.quality}, factory.id
         end
       end
     end
@@ -80,7 +80,7 @@ local check_building = function(unit_number, data)
     return
   end
 
-  local icon = get_overlay_icon(building)
+  local icon, factory_id = get_overlay_icon(building)
   local icon_key = icon and ((icon.type or "item") .. ":" .. icon.name .. ":" .. (icon.quality or "")) or nil
   if icon_key == data.icon_key then return end
 
@@ -90,8 +90,15 @@ local check_building = function(unit_number, data)
   destroy_tag(data)
   if not icon_key then return end
 
+  -- A text label matters beyond looks: icon-only chart tags render at the
+  -- engine's big map-icon size, icon+text tags render in the compact pin
+  -- style. There is no API to scale a tag's icon directly.
   suppress = true
-  local tag = building.force.add_chart_tag(building.surface, {position = building.position, icon = icon})
+  local tag = building.force.add_chart_tag(building.surface, {
+    position = building.position,
+    icon = icon,
+    text = "Factory" .. (factory_id and (" " .. factory_id) or ""),
+  })
   suppress = false
   if tag then
     data.tag = tag
@@ -114,6 +121,9 @@ local scan_all = function()
     destroy_tag(data)
   end
   for unit_number, data in pairs (script_data.buildings) do
+    -- forget the cached key so every tag is recreated with the current
+    -- format (scan_all runs on init/config-change, not in the hot path)
+    data.icon_key = nil
     check_building(unit_number, data)
   end
 end
