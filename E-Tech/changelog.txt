@@ -23,6 +23,14 @@ Date: 2026-07-14
       mods are installed to convert every placed teleporter to an E-Tech pad (names recovered
       from map tags), convert teleporter items in player inventories, and carry over the
       researched technology. Then save and remove the original mod.
+    - Resource map markers toggle (default off): automatically tags resource patches on the
+      map - one marker per patch with the resource icon and total amount (infinite resources
+      like crude oil show well count and average yield). Markers update as chunks are charted,
+      ore is mined out, or chunks are deleted; deleting a marker mutes that patch;
+      /etech-markers-rebuild rescans everything (also runs automatically when the toggle is
+      first enabled on an existing save). Minimum patch size is a map setting. Written from
+      scratch for E-Tech (public domain) as a 2.1-native replacement for the abandoned
+      Resource Map Label Marker mod, whose fork crashes on Factorio 2.1.
   Changes:
     - The teleport-to-player shortcut's internals moved to an event_handler lib so both
       teleport systems can share GUI events. No behavior change.
