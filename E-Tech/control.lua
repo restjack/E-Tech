@@ -20,6 +20,12 @@ if settings.startup["etech-resource-markers"].value then
   handler.add_lib(require("resource-markers"))
 end
 
+if settings.startup["etech-jetpack-ui"].value
+  and script.active_mods["jetpack"]
+  and not script.active_mods["puppy-jetpack-ui"] then
+  handler.add_lib(require("jetpack-ui"))
+end
+
 -- One-time cleanup for saves that ran the short-lived Factorissimo map
 -- icons experiment (removed 2026-07-14): drop its tags and storage.
 handler.add_lib({

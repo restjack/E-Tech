@@ -1,6 +1,6 @@
 {
   "name": "E-Tech",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "title": "E-Tech: Vanilla Recipes for AAI Industry + QoL Toggles",
   "author": "Eli Tellez",
   "factorio_version": "2.1",
@@ -9,6 +9,7 @@
     "base >= 2.0",
     "? aai-industry >= 0.7.0",
     "? Krastorio2",
-    "? space-age"
+    "? space-age",
+    "? jetpack"
   ]
 }
