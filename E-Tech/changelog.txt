@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.6.3
+Date: 2026-07-14
+  Changes:
+    - New map setting "Factorissimo icons: show on map" (default on): unchecking hides all
+      factory markers immediately, no restart. The game's "show recipe icons" map toggle only
+      affects the engine's recipe overlay and can't touch map tags, so the markers get their
+      own switch. Force-wide, since map tags are per force.
+---------------------------------------------------------------------------------------------------
 Version: 0.6.2
 Date: 2026-07-14
   Changes:

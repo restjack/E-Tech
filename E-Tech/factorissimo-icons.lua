@@ -80,6 +80,12 @@ local check_building = function(unit_number, data)
     return
   end
 
+  if not settings.global["etech-factorissimo-icons-visible"].value then
+    destroy_tag(data)
+    data.icon_key = nil
+    return
+  end
+
   local icon, factory_id = get_overlay_icon(building)
   local icon_key = icon and ((icon.type or "item") .. ":" .. icon.name .. ":" .. (icon.quality or "")) or nil
   if icon_key == data.icon_key then return end
@@ -168,6 +174,15 @@ local update_all = function()
   end
 end
 
+-- apply the visibility setting the moment it's flipped
+local on_setting_changed = function(event)
+  if event.setting ~= "etech-factorissimo-icons-visible" then return end
+  for unit_number, data in pairs (script_data.buildings) do
+    data.icon_key = nil
+    check_building(unit_number, data)
+  end
+end
+
 local icons = {}
 
 icons.events =
@@ -186,6 +201,7 @@ icons.events =
   [defines.events.on_space_platform_mined_entity] = on_removed,
 
   [defines.events.on_chart_tag_removed] = on_chart_tag_removed,
+  [defines.events.on_runtime_mod_setting_changed] = on_setting_changed,
 }
 
 icons.on_nth_tick =
