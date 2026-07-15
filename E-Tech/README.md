@@ -29,6 +29,11 @@ Everything is a startup setting, and every recipe change is guarded so it never 
 | Total productivity | off | Productivity modules allowed on recipes the game normally forbids — belts, inserters, rails, pipes, solar, walls, ammo, equipment — with four category group toggles. Port of [Total Productivity](https://mods.factorio.com/mod/Productivity) by AivanF (LGPLv3 — see `LICENSE-third-party.txt`); auto-skipped if the original is installed |
 | Jetpack fuel HUD | off | Needs [Jetpack](https://mods.factorio.com/mod/jetpack). Movable in-flight window with fuel, count, burn bar, and remaining flight time. Port of [Puppy's Jetpack UI](https://mods.factorio.com/mod/puppy-jetpack-ui) (MIT) with the window-position reset bug fixed and no flib dependency; auto-skipped if the original is installed |
 | Uranium bacteria on Gleba | off | Needs Space Age. Mirrors iron/copper bacteria: jelly → 1% uranium bacteria (Jellynut tech), bacteria + bioflux → ×4 in a biochamber (Bacteria cultivation tech), spoils into uranium ore. Port of the abandoned [Simple Gleba Uranium](https://mods.factorio.com/mod/simple-gleba-uranium) by cindersash (MIT — see `LICENSE-third-party.txt`); saves from that mod keep their items |
+| Void chest & void pipe | off | Cheap void chest (destroys any item put in) and void pipe (destroys any fluid pumped in), unlocked by a small early tech. Port of [Easy Void](https://mods.factorio.com/mod/easyvoid) by zoryn (MIT); prototype names unchanged so placed voids from the original survive the switch; auto-skipped if the original is installed |
+| Edit map settings in-game | off | Toolbar shortcut opens an editor for map settings (pollution, evolution, expansion, peaceful/no-enemies, spoilage rate) and per-surface map gen settings; applying requires admin. Port of [Edit Map Settings](https://mods.factorio.com/mod/EditMapSettings) by Morsk (MIT) with the top-left mod-gui button replaced by the shortcut; auto-skipped if the original is installed |
+| FPS-friendly thrusters | off | Removes the animated exhaust plumes from space platform thrusters — the big FPS drain on large platforms. Port of [FPS Friendly Thrusters](https://mods.factorio.com/mod/FPS_Friendly_Thrusters) by RockPaperKatana (MIT); auto-skipped if the original is installed |
+| Pass-through fusion generators | off | Fusion generators get input-output plasma connections on all four sides so they chain without separate plasma lines. Port of [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT); auto-skipped if the original is installed |
+| Colorful biochamber | off | Needs Space Age. Recolors the biochamber's pools, dome and windows per recipe so you can tell what it's making at a glance. Port of [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray (public domain); auto-skipped if the original is installed |
 
 Stack-size and spoilage defaults match vanilla, so installing the mod changes nothing until you move a slider or flip a switch — safe to share with friends who want different settings.
 
@@ -57,4 +62,20 @@ Every recipe restore is guarded by a fingerprint check: a recipe is only touched
 
 ## License
 
-None (public domain). Do whatever you want with it. Exceptions (see `LICENSE-third-party.txt`): the Gleba uranium feature (code + icons) is ported from Simple Gleba Uranium by cindersash under the MIT license, and the teleporter pads (everything under `teleporters/`) are adapted from Teleporters by Klonan under LGPLv3.
+None (public domain). Do whatever you want with it. Exceptions: the ported features listed below keep their original licenses — full texts and per-port modification notes in `LICENSE-third-party.txt`.
+
+## Credits — mods absorbed into E-Tech
+
+E-Tech carries forward these abandoned/orphaned mods as optional toggles. All credit for the original ideas and code goes to their authors:
+
+- [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3) — teleporter pads
+- [Total Productivity](https://mods.factorio.com/mod/Productivity) by AivanF (LGPLv3) — total productivity
+- [Puppy's Jetpack UI](https://mods.factorio.com/mod/puppy-jetpack-ui) by Puppy (MIT) — jetpack fuel HUD
+- [Simple Gleba Uranium](https://mods.factorio.com/mod/simple-gleba-uranium) by cindersash (MIT) — uranium bacteria on Gleba
+- [Easy Void](https://mods.factorio.com/mod/easyvoid) by zoryn (MIT) — void chest & void pipe (in turn credits JDOGG, Optera, kendfrey, Rseding91 for the original void mods)
+- [Edit Map Settings](https://mods.factorio.com/mod/EditMapSettings) by Morsk (MIT, a fork of Change Map Settings by Erik Wellmann) — in-game map settings editor
+- [FPS Friendly Thrusters](https://mods.factorio.com/mod/FPS_Friendly_Thrusters) by RockPaperKatana (MIT) — plume-free thrusters
+- [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT) — pass-through fusion generators
+- [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray (Unlicense) — per-recipe biochamber colors
+
+Inspired-by (rewritten from scratch, not ports): [Resource Map Label Marker](https://mods.factorio.com/mod/resourceMarker) — resource map markers.
