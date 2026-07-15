@@ -1,4 +1,23 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.8.0
+Date: 2026-07-15
+  Features:
+    - Absorbed five abandoned 2.0-era mods as optional toggles (all default off, each skipped
+      automatically when the original mod is still enabled; prototype names kept identical so
+      entities already placed in a save survive the switch):
+    - Void chest & void pipe (port of Easy Void by zoryn, MIT). Settings renamed to
+      etech-void-* (tint RGB + chest slots), so re-set them if you changed the defaults.
+    - In-game map settings editor (port of Edit Map Settings by Morsk, MIT): pollution,
+      evolution, expansion, peaceful/no-enemies, spoilage rate, and per-surface map gen
+      settings. E-Tech change: the top-left mod-gui button is replaced by a toolbar
+      shortcut (like the teleporter remote); the window otherwise works as before.
+    - FPS-friendly thrusters (port of FPS Friendly Thrusters by RockPaperKatana, MIT):
+      strips thruster exhaust plumes.
+    - Pass-through fusion generators (port of pass-through-fusion-generator by daahl, MIT):
+      input-output plasma connections on all sides so generators chain.
+    - Colorful biochamber (port of Colorful Biochamber by meifray, public domain):
+      per-recipe RGB recolor of the biochamber pools/dome/windows.
+---------------------------------------------------------------------------------------------------
 Version: 0.7.1
 Date: 2026-07-14
   Bugfixes:

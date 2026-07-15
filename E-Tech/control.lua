@@ -7,6 +7,8 @@
 --   teleporters/control.lua - teleporter pads (only when the setting is on;
 --                             prototypes don't exist otherwise)
 --   resource-markers.lua  - automatic map markers on resource patches
+--   voidchest/control.lua - void chest/pipe port (Easy Void)
+--   edit-map-settings/control.lua - map settings editor port (Edit Map Settings)
 
 local handler = require("event_handler")
 
@@ -14,6 +16,16 @@ handler.add_lib(require("teleport-player"))
 
 if settings.startup["etech-teleporters"].value then
   handler.add_lib(require("teleporters/control"))
+end
+
+if settings.startup["etech-void"].value
+  and not script.active_mods["easyvoid"] then
+  handler.add_lib(require("voidchest/control"))
+end
+
+if settings.startup["etech-map-settings"].value
+  and not script.active_mods["EditMapSettings"] then
+  handler.add_lib(require("edit-map-settings/control"))
 end
 
 if settings.startup["etech-resource-markers"].value then
