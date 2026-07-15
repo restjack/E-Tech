@@ -97,3 +97,42 @@ if not settings.startup["etech-ag-science-spoils"].value then
     elog("disabled spoilage on agricultural-science-pack")
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- FPS-friendly thrusters (port of FPS Friendly Thrusters, MIT — see
+-- LICENSE-third-party.txt). Strips the animated exhaust plumes, the big
+-- FPS cost on large platforms. Skipped when the original mod is enabled.
+-- ---------------------------------------------------------------------------
+if settings.startup["etech-fps-thrusters"].value then
+  if mods["FPS_Friendly_Thrusters"] then
+    elog("fps-thrusters setting on but the original FPS Friendly Thrusters mod is installed - skipped (disable one of the two)")
+  elseif data.raw.thruster and data.raw.thruster.thruster then
+    data.raw.thruster.thruster.plumes = nil
+    elog("thruster plumes removed")
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- Pass-through fusion generators (port of pass-through-fusion-generator,
+-- MIT — see LICENSE-third-party.txt). Replaces the fusion generator's input
+-- fluid box connections with input-output ones on all four sides so
+-- generators chain without separate plasma lines. Connection table verbatim
+-- from the original. Skipped when the original mod is enabled.
+-- ---------------------------------------------------------------------------
+if settings.startup["etech-fusion-passthrough"].value then
+  local generator = data.raw["fusion-generator"] and data.raw["fusion-generator"]["fusion-generator"]
+  if mods["pass-through-fusion-generator"] then
+    elog("fusion-passthrough setting on but the original pass-through-fusion-generator mod is installed - skipped (disable one of the two)")
+  elseif generator then
+    generator.input_fluid_box.pipe_connections = {
+      { flow_direction="input-output", direction = defines.direction.south, position = {-1,  2}, connection_category = {"fusion-plasma"} },
+      { flow_direction="input-output", direction = defines.direction.south, position = { 1,  2}, connection_category = {"fusion-plasma"} },
+      { flow_direction="input-output", direction = defines.direction.north, position = { 0, -2}, connection_category = {"fusion-plasma"} },
+      { flow_direction="input-output", direction = defines.direction.west,  position = {-1,  0}, connection_category = {"fusion-plasma"} },
+      { flow_direction="input-output", direction = defines.direction.east,  position = { 1,  0}, connection_category = {"fusion-plasma"} },
+      { flow_direction="input-output", direction = defines.direction.west,  position = {-1, -1}, connection_category = {"fusion-plasma"} },
+      { flow_direction="input-output", direction = defines.direction.east,  position = { 1, -1}, connection_category = {"fusion-plasma"} },
+    }
+    elog("fusion generator pass-through connections applied")
+  end
+end

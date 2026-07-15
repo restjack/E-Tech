@@ -1,7 +1,7 @@
 Third-party content included in E-Tech
 ======================================
 
-Everything in E-Tech is public domain (see LICENSE.txt) EXCEPT the two
+Everything in E-Tech is public domain (see LICENSE.txt) EXCEPT the
 ported features below, which keep their original licenses.
 
 1. Uranium bacteria on Gleba (gleba-uranium.lua and graphics/icons/
@@ -44,6 +44,45 @@ ported features below, which keep their original licenses.
    reset bug fixed (saved position is always restored and clamped on the
    display-resolution/scale events instead of being discarded against a
    possibly-stale display_resolution at window creation).
+
+5. Void chest & void pipe (everything under voidchest/, incl. the technology
+   icon) is adapted from the mod "Easy Void" 2.0.1 by zoryn
+   (https://mods.factorio.com/mod/easyvoid), used under the MIT License —
+   same license text as reproduced below. Easy Void itself credits JDOGG,
+   Optera, kendfrey and Rseding91 for the original void mods.
+   Modifications by E-Tech: settings renamed etech-void-*, converted to an
+   event_handler lib, and a surface rescan on init/configuration-changed to
+   migrate saves coming from the original mod (per-mod storage does not
+   carry over). Prototype names unchanged (void-chest, void-pipe, tech
+   "void") so placed entities survive the switch.
+
+6. In-game map settings editor (everything under edit-map-settings/) is
+   adapted from the mod "Edit Map Settings" 0.1.6 by Morsk
+   (https://mods.factorio.com/mod/EditMapSettings,
+   https://github.com/morsk/ChangeMapSettings-morsk/tree/ems, itself a fork
+   of Change Map Settings by Erik Wellmann), used under the MIT License
+   (Copyright (c) 2017-2022 Erik Wellmann, Copyright (c) 2024 Morsk) — same
+   license text as reproduced below.
+   Modifications by E-Tech: the mod-gui top-left toggle button replaced by
+   the etech-map-settings toolbar shortcut, converted to an event_handler
+   lib, GUI element names and locale keys otherwise unchanged.
+
+7. FPS-friendly thrusters (the plume strip in misc-tweaks.lua) is the
+   one-liner from the mod "FPS Friendly Thrusters" 0.1.1 by RockPaperKatana
+   (https://mods.factorio.com/mod/FPS_Friendly_Thrusters), used under the
+   MIT License (Copyright (c) 2024 RockPaperKatana) — same license text as
+   reproduced below.
+
+8. Pass-through fusion generators (the connection table in misc-tweaks.lua)
+   is from the mod "pass-through-fusion-generator" 1.1.0 by daahl
+   (https://mods.factorio.com/mod/pass-through-fusion-generator), used under
+   the MIT License — same license text as reproduced below.
+
+9. Colorful biochamber (everything under biochamber/ — code and sprites) is
+   from the mod "Colorful Biochamber" 1.1.4 by meifray
+   (https://mods.factorio.com/mod/colorful_biochamber), released under the
+   Unlicense (public domain). Only sprite paths were rewritten; the
+   sei-biochamber support file (for a mod not in use here) was dropped.
 
 MIT License
 
