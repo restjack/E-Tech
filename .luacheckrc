@@ -4,9 +4,8 @@
 
 std = "lua52"
 
--- Factorio runtime/data-stage globals.
+-- Factorio runtime/data-stage globals (read-only).
 read_globals = {
-  "data",
   "mods",
   "settings",
   "script",
@@ -25,9 +24,14 @@ read_globals = {
   -- data-stage style globals used by base-game gui styles
   "default_inner_shadow",
   "hard_shadow_color",
+  -- AAI Industry publishes its resolved item names as data-stage globals
+  "aai_glass_name",
+  "aai_sand_name",
 }
 
+-- Mutable globals: editing data.raw and storage is the whole point.
 globals = {
+  "data",
   "storage",
   -- table.deepcopy / table.unpack extensions land on the table lib
   table = { fields = { "deepcopy", "unpack" } },
@@ -38,6 +42,8 @@ max_line_length = false
 unused = false
 unused_args = false
 redefined = false
+-- 61x: whitespace-only / trailing-whitespace lines (upstream formatting)
+ignore = { "611", "612", "613", "614" }
 
 exclude_files = {
   "E-Tech/releases",
