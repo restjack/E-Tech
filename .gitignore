@@ -5,3 +5,6 @@ E-Tech/releases/*.zip
 Thumbs.db
 Desktop.ini
 *.swp
+
+# Local convenience shortcuts
+*.lnk
