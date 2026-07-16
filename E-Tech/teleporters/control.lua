@@ -565,10 +565,13 @@ local make_teleporter_gui = function(player, source)
       local cost = get_teleport_cost(source, teleporter_entity, player)
       local button = holding_table.add{type = "button", name = "_"..name}
       -- Buttons clip their children to the button's own size, so the height
-      -- must account for every label row: name + distance/surface line.
+      -- must account for every label row: name + distance/surface line,
+      -- plus the button's own vertical padding (zeroed below, headroom kept).
       -- The energy cost lives in the tooltip, not a label.
-      button.style.height = preview_size + 54
+      button.style.height = preview_size + 64
       button.style.width = preview_size + 8
+      button.style.top_padding = 2
+      button.style.bottom_padding = 2
       button.style.left_padding = 0
       button.style.right_padding = 0
       local inner_flow = button.add{type = "flow", direction = "vertical", ignored_by_interaction = true}

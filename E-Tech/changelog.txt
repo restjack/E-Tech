@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.10.4
+Date: 2026-07-15
+  Bugfixes:
+    - Teleporter GUI: the "N tiles away" line was still clipped at the bottom of each pad
+      button - the button's own vertical padding ate the row. Padding zeroed + more headroom.
+---------------------------------------------------------------------------------------------------
 Version: 0.10.3
 Date: 2026-07-15
   Changes:
