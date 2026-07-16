@@ -1,4 +1,30 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.10.0
+Date: 2026-07-15
+  Features:
+    - Teleporters: SHIFT+T hotkey opens the remote (same as the toolbar shortcut, rebindable).
+    - Teleporters: distance shown on every same-surface pad ("N tiles away").
+    - Teleporters: sort dropdown - recently used (default), A-Z, or nearest first. Starred
+      pads always come first.
+    - Teleporters: Shift+right-click a pad in the list to rename it (no more walking to the
+      pad or editing the map tag).
+    - Teleporters: return history holds the last 3 remote-jump origins (was a single slot);
+      each shows its own camera button and is consumed on use.
+    - Teleporters: unpowered-pad map alerts - while a pad's buffer is empty (and teleporting
+      costs energy), the owning force gets a custom alert. Toggleable map setting.
+    - Teleporters: teleport sound volume map setting (0-2).
+    - Teleport-to-player shortcut now shows the teleport flash at both ends (when the pads
+      toggle is on) in addition to the sound.
+    - Void: optional filtered void chest (greenish) - destroys only items you pick via
+      infinity filters set to "exactly 0"; everything else sits. Same tech unlock.
+  Bugfixes:
+    - Teleporter GUI search hotkey registered "Control + F", which Factorio 2.1 rejects
+      (logged "unknown key_sequence" and the Ctrl+F link never worked) - now "CONTROL + F".
+  Changes:
+    - One-shot save cleanups moved to migrations/ (run once per save instead of on every
+      mod-set change).
+    - Repo: luacheck lint config + GitHub Actions workflow; dev module map in the README.
+---------------------------------------------------------------------------------------------------
 Version: 0.9.0
 Date: 2026-07-15
   Features:

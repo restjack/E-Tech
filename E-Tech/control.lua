@@ -43,16 +43,6 @@ if settings.startup["etech-jetpack-ui"].value
   handler.add_lib(require("jetpack-ui"))
 end
 
--- One-time cleanup for saves that ran the short-lived Factorissimo map
--- icons experiment (removed 2026-07-14): drop its tags and storage.
-handler.add_lib({
-  on_configuration_changed = function()
-    local leftover = storage.etech_factorissimo_icons
-    if not leftover then return end
-    for _, data in pairs (leftover.buildings or {}) do
-      local tag = data.tag
-      if tag and tag.valid then tag.destroy() end
-    end
-    storage.etech_factorissimo_icons = nil
-  end,
-})
+-- One-time save cleanups live in migrations/ (run once per save by the
+-- engine, unlike on_configuration_changed which fires on every mod-set
+-- change).

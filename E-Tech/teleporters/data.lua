@@ -168,7 +168,18 @@ local hotkey =
   type = "custom-input",
   name = names.hotkeys.focus_search,
   linked_game_control = "focus-search",
-  key_sequence = "Control + F"
+  -- 2.1 rejects "Control" — modifier must be spelled CONTROL
+  key_sequence = "CONTROL + F"
+}
+
+-- Keyboard alternative to the toolbar remote shortcut.
+local remote_hotkey =
+{
+  type = "custom-input",
+  name = names.hotkeys.open_remote,
+  key_sequence = "SHIFT + T",
+  localised_name = {"", "Open teleporter remote"},
+  localised_description = {"", "Opens the teleporter destination list from anywhere (same as the toolbar shortcut)."},
 }
 
 -- Invisible electric buffer placed on top of each pad by the control stage.
@@ -232,6 +243,7 @@ data:extend
   recipe,
   technology,
   hotkey,
+  remote_hotkey,
   sticker,
   energy_interface,
   remote_shortcut

@@ -1,0 +1,22 @@
+name: luacheck
+
+on:
+  push:
+    paths:
+      - "E-Tech/**/*.lua"
+      - ".luacheckrc"
+      - ".github/workflows/luacheck.yml"
+  pull_request:
+    paths:
+      - "E-Tech/**/*.lua"
+      - ".luacheckrc"
+
+jobs:
+  luacheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run luacheck
+        uses: lunarmodules/luacheck@v1
+        with:
+          args: E-Tech --config .luacheckrc

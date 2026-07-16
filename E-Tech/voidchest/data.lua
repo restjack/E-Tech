@@ -71,6 +71,49 @@ void_chest_item.icons = {
     { icon = "__base__/graphics/icons/iron-chest.png", icon_size = 64, tint = voidTint },
 }
 
+-- Filtered void chest (optional): opens like an infinity chest so the
+-- player picks WHICH items get destroyed (set a filter to "exactly 0" for
+-- each item to void); everything else just sits. E-Tech addition on top of
+-- the Easy Void port.
+local filtered = {}
+if settings.startup["etech-void-filtered"].value then
+    local filteredTint = {
+        r = voidTint.r,
+        g = math.min(1, voidTint.g + 0.5),
+        b = voidTint.b,
+        a = 1
+    }
+    local void_chest_filtered = table.deepcopy(void_chest)
+    void_chest_filtered.name = "void-chest-filtered"
+    void_chest_filtered.minable.result = "void-chest-filtered"
+    void_chest_filtered.order = "a[items]-c[void-chest-b]"
+    void_chest_filtered.gui_mode = "all"
+    void_chest_filtered.picture.layers[1].tint = filteredTint
+
+    local void_chest_filtered_item = table.deepcopy(void_chest_item)
+    void_chest_filtered_item.name = "void-chest-filtered"
+    void_chest_filtered_item.place_result = "void-chest-filtered"
+    void_chest_filtered_item.order = "a[items]-c[void-chest-b]"
+    void_chest_filtered_item.icons[2].tint = filteredTint
+
+    filtered = {
+        void_chest_filtered,
+        void_chest_filtered_item,
+        {
+            type = "recipe",
+            name = "void-chest-filtered",
+            enabled = false,
+            ingredients =
+            {
+                {type = "item", name = "iron-chest", amount = 1},
+                {type = "item", name = "stone-furnace", amount = 1},
+                {type = "item", name = "electronic-circuit", amount = 1}
+            },
+            results = {{type="item", name="void-chest-filtered", amount=1}},
+        },
+    }
+end
+
 -- recipes + technology ------------------------------------------------------
 
 data:extend({
@@ -125,3 +168,9 @@ data:extend({
         order = "c-a",
     },
 })
+
+if #filtered > 0 then
+    data:extend(filtered)
+    table.insert(data.raw.technology["void"].effects,
+        { type = "unlock-recipe", recipe = "void-chest-filtered" })
+end

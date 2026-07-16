@@ -15,6 +15,15 @@ local FRAME = "etech-tp-frame"
 local BTN_PREFIX = "etech-tp-player-"
 local CANCEL = "etech-tp-cancel"
 
+-- Teleport flash at both ends, when the explosion prototypes exist (they're
+-- part of the teleporter-pads toggle; this shortcut can be enabled alone).
+local FLASH = "etech-teleporter-explosion"
+local function flash_at(surface, position)
+  if prototypes.entity[FLASH] then
+    surface.create_entity{name = FLASH, position = position}
+  end
+end
+
 -- Teleport `player` next to `target`. Uses the target's physical position and
 -- surface so it works while the target is in remote view or on another
 -- surface (character cross-surface teleport is supported since 2.0).
@@ -22,6 +31,8 @@ local function teleport_to(player, target)
   local surface = target.physical_surface or target.surface
   local pos = target.physical_position or target.position
   local dest = surface.find_non_colliding_position("character", pos, 16, 0.5) or pos
+  local from_surface = player.physical_surface or player.surface
+  local from_position = player.physical_position or player.position
   local ok, err = pcall(function()
     if player.character then
       player.character.teleport(dest, surface)
@@ -30,7 +41,9 @@ local function teleport_to(player, target)
     end
   end)
   if ok then
-    player.play_sound{path = "etech-teleporter-sound"}
+    flash_at(from_surface, from_position)
+    flash_at(surface, dest)
+    player.play_sound{path = "etech-teleporter-sound", volume_modifier = settings.global["etech-teleporter-sound-volume"].value}
     player.print("[E-Tech] Teleported to " .. target.name .. ".")
   else
     player.print("[E-Tech] Teleport failed: " .. tostring(err))

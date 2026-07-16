@@ -24,12 +24,13 @@ Everything is a startup setting, and every recipe change is guarded so it never 
 | Agricultural science pack spoils | on (vanilla) | Turn off to stop agricultural science packs from spoiling |
 | Restore nuclear fuel crafting (K2) | off | Brings back the vanilla nuclear fuel item/recipe that Krastorio 2 hides, unlocked by Kovarex enrichment as in vanilla. Off by default â€” hiding it is a deliberate K2 balance choice |
 | Teleport-to-player shortcut | off (experimental) | Toolbar shortcut for multiplayer: one other player online = click teleports to them; several = a picker window opens |
-| Teleporter pads | off | Buildable teleporter pads (chemical science tech) â€” walk onto one, pick a destination from a map GUI. Port of [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3 â€” see [LICENSE-third-party.txt](https://github.com/restjack/E-Tech/blob/main/E-Tech/LICENSE-third-party.txt)) extended with: energy cost drained from the destination pad (map settings, 0 = free), cross-surface teleporting with a surface filter + custom surface display names, a wireless-remote toolbar shortcut, a free return teleport with live camera preview, and your team's players in the list. Coming from the original mod? Run `/etech-migrate-teleporters` while both mods are installed â€” placed pads (names included), inventory items, and research carry over; then remove the original |
+| Teleporter pads | off | Buildable teleporter pads (chemical science tech) â€” walk onto one, pick a destination from a map GUI. Port of [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3 â€” see [LICENSE-third-party.txt](https://github.com/restjack/E-Tech/blob/main/E-Tech/LICENSE-third-party.txt)) extended with: energy cost drained from the destination pad (map settings, 0 = free), cross-surface teleporting with a surface filter + custom surface display names, a wireless-remote toolbar shortcut, a free return teleport with live camera preview, and your team's players in the list. Coming from the original mod? Run `/etech-migrate-teleporters` while both mods are installed â€” placed pads (names included), inventory items, and research carry over; then remove the original. QoL: right-click a pad in the list to star it (starred sort first), Shift+right-click renames, sort dropdown (recent / Aâ€“Z / nearest), distance shown per pad, up to 3 stacked return slots, unpowered-pad map alerts, teleport sound with volume setting, and a SHIFT+T hotkey for the remote |
 | Resource map markers | off | Auto-tags resource patches on the map: one marker per patch with icon + total amount (oil shows well count and average yield). Updates as you chart and mine; delete a marker to mute that patch; `/etech-markers-rebuild` rescans. Written from scratch for E-Tech as a 2.1 replacement for the abandoned Resource Map Label Marker mod |
 | Total productivity | off | Productivity modules allowed on recipes the game normally forbids â€” belts, inserters, rails, pipes, solar, walls, ammo, equipment â€” with four category group toggles. Port of [Total Productivity](https://mods.factorio.com/mod/Productivity) by AivanF (LGPLv3 â€” see [LICENSE-third-party.txt](https://github.com/restjack/E-Tech/blob/main/E-Tech/LICENSE-third-party.txt)); auto-skipped if the original is installed |
 | Jetpack fuel HUD | off | Needs [Jetpack](https://mods.factorio.com/mod/jetpack). Movable in-flight window with fuel, count, burn bar, and remaining flight time. Port of [Puppy's Jetpack UI](https://mods.factorio.com/mod/puppy-jetpack-ui) (MIT) with the window-position reset bug fixed and no flib dependency; auto-skipped if the original is installed |
 | Uranium bacteria on Gleba | off | Needs Space Age. Mirrors iron/copper bacteria: jelly â†’ 1% uranium bacteria (Jellynut tech), bacteria + bioflux â†’ Ã—4 in a biochamber (Bacteria cultivation tech), spoils into uranium ore. Port of the abandoned [Simple Gleba Uranium](https://mods.factorio.com/mod/simple-gleba-uranium) by cindersash (MIT â€” see [LICENSE-third-party.txt](https://github.com/restjack/E-Tech/blob/main/E-Tech/LICENSE-third-party.txt)); saves from that mod keep their items |
 | Void chest & void pipe | off | Cheap void chest (destroys any item put in) and void pipe (destroys any fluid pumped in), unlocked by a small early tech. Port of [Easy Void](https://mods.factorio.com/mod/easyvoid) by zoryn (MIT); prototype names unchanged so placed voids from the original survive the switch; auto-skipped if the original is installed |
+| Void: filtered void chest | off | Second (greenish) void chest that destroys only the items you pick â€” set an infinity filter to "exactly 0" per item to void; everything else sits. Same tech unlock. E-Tech addition on top of the Easy Void port |
 | Edit map settings in-game | off | Toolbar shortcut opens an editor for map settings (pollution, evolution, expansion, peaceful/no-enemies, spoilage rate) and per-surface map gen settings; applying requires admin. Port of [Edit Map Settings](https://mods.factorio.com/mod/EditMapSettings) by Morsk (MIT) with the top-left mod-gui button replaced by the shortcut; auto-skipped if the original is installed |
 | FPS-friendly thrusters | off | Removes the animated exhaust plumes from space platform thrusters â€” the big FPS drain on large platforms. Port of [FPS Friendly Thrusters](https://mods.factorio.com/mod/FPS_Friendly_Thrusters) by RockPaperKatana (MIT); auto-skipped if the original is installed |
 | Pass-through fusion generators | off | Fusion generators get input-output plasma connections on all four sides so they chain without separate plasma lines. Port of [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT); auto-skipped if the original is installed |
@@ -62,6 +63,28 @@ Every recipe restore is guarded by a fingerprint check: a recipe is only touched
 - [data-final-fixes.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/data-final-fixes.lua) â€” the engine that applies the restores.
 - [beacons.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/beacons.lua), [misc-tweaks.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/misc-tweaks.lua), [crash-ship.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/crash-ship.lua) â€” the optional tweaks.
 - `build.ps1` â€” packages `E-Tech_<version>.zip` into your Factorio mods folder and archives a copy in `releases/`.
+
+### Module map
+
+Every feature is a self-contained module: a startup toggle in `settings.lua`, its data-stage file required from `data.lua`/`data-final-fixes.lua`, and (if it has runtime logic) an event_handler lib registered in `control.lua`. Absorbed ports auto-skip when their original mod is enabled.
+
+| Module | Files | Toggle | Storage keys |
+|---|---|---|---|
+| Recipe restore | `data-final-fixes.lua`, `vanilla-recipes.lua` | always on | â€” |
+| Misc tweaks + compat fixes | `misc-tweaks.lua` | per-tweak | â€” |
+| Crashed ship / beacons | `crash-ship.lua`, `beacons.lua` | `etech-pickup-crashed-ship`, `etech-beacon-all-modules` | â€” |
+| Teleport-to-player | `teleport-player.lua` | `etech-teleport-shortcut` | â€” |
+| Teleporter pads | `teleporters/` | `etech-teleporters` | `storage.etech_teleporters` |
+| Resource markers | `resource-markers.lua` | `etech-resource-markers` | `storage.etech_resource_markers` |
+| Jetpack HUD | `jetpack-ui.lua` | `etech-jetpack-ui` | `storage.etech_jetpack_ui` |
+| Total productivity | `productivity/data.lua` | `etech-total-productivity` | â€” |
+| Gleba uranium | `gleba-uranium.lua` | `etech-gleba-uranium` | â€” |
+| Void chest/pipe | `voidchest/` | `etech-void` (+`-filtered`) | `storage.pipes` |
+| Map settings editor | `edit-map-settings/` | `etech-map-settings` | â€” (GUI only) |
+| Copy modules | `copy-paste-modules.lua` | `etech-copy-paste-modules` | â€” |
+| Colorful biochamber | `biochamber/` | `etech-colorful-biochamber` | â€” |
+
+One-shot save cleanups go in `migrations/` (run once per save), not `on_configuration_changed`. Lua is linted by luacheck in CI (`.luacheckrc`).
 
 ## License
 

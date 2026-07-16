@@ -36,19 +36,24 @@ local script_data =
   -- Players whose destination GUI was opened via the wireless-remote
   -- shortcut (no source pad, character not frozen).
   remote_open = {},
-  -- Per-player return slot after a remote teleport:
-  -- {surface_index, position, tick}.
+  -- Per-player return history after remote teleports: an ARRAY of
+  -- {surface_index, position, tick}, newest first, capped at 3.
   returns = {},
   -- Per-player favorite pads ([player.name][unit_number] = true) — starred
   -- via right-click in the destination GUI, listed before everything else.
   favorites = {},
+  -- Per-player sort mode for the destination list (1 = recent, 2 = A-Z,
+  -- 3 = distance). Favorites always sort first regardless.
+  sort_mode = {},
 }
+
+local RETURN_SLOTS = 3
 
 -- The teleport sound the player themselves hears. The world flash's own
 -- sound plays at the destination BEFORE the player arrives, so it's
 -- inaudible cross-surface — this one follows the player.
 local play_teleport_sound = function(player)
-  player.play_sound{path = "etech-teleporter-sound"}
+  player.play_sound{path = "etech-teleporter-sound", volume_modifier = settings.global["etech-teleporter-sound-volume"].value}
 end
 
 local preview_size = 256
@@ -260,23 +265,35 @@ local get_surface_label = function(surface)
   return surface.localised_name or surface.name
 end
 
--- The player's return slot, if it's still usable (setting on, surface still
--- exists, grace period not expired). Cleans up dead slots as a side effect.
-local get_valid_return = function(player)
-  local ret = script_data.returns[player.index]
-  if not ret then return end
-  if not settings.global["etech-teleporter-return-enabled"].value then return end
-  local surface = game.surfaces[ret.surface_index]
-  if not (surface and surface.valid) then
-    script_data.returns[player.index] = nil
-    return
-  end
+-- The player's still-usable return slots (setting on, surface exists, grace
+-- period not expired), newest first. Prunes dead entries as a side effect.
+local get_valid_returns = function(player)
+  local rets = script_data.returns[player.index]
+  if not rets then return {} end
+  if not settings.global["etech-teleporter-return-enabled"].value then return {} end
   local grace = settings.global["etech-teleporter-return-grace-min"].value
-  if grace > 0 and game.tick > ret.tick + grace * 60 * 60 then
-    script_data.returns[player.index] = nil
-    return
+  local valid = {}
+  for _, ret in ipairs(rets) do
+    local surface = game.surfaces[ret.surface_index]
+    if surface and surface.valid
+       and not (grace > 0 and game.tick > ret.tick + grace * 60 * 60) then
+      valid[#valid + 1] = ret
+    end
   end
-  return ret, surface
+  script_data.returns[player.index] = (#valid > 0) and valid or nil
+  return valid
+end
+
+local push_return = function(player, surface_index, position)
+  local rets = script_data.returns[player.index]
+  if not rets then
+    rets = {}
+    script_data.returns[player.index] = rets
+  end
+  table.insert(rets, 1, {surface_index = surface_index, position = position, tick = game.tick})
+  while #rets > RETURN_SLOTS do
+    table.remove(rets)
+  end
 end
 
 local make_teleporter_gui = function(player, source)
@@ -373,9 +390,18 @@ local make_teleporter_gui = function(player, source)
     script_data.surface_filter[player.index] = nil
   end
 
+  local filter_flow = frame.add{type = "flow", direction = "horizontal"}
+  filter_flow.style.vertical_align = "center"
+
+  -- Sort mode dropdown (favorites always pin first).
+  local sort_mode = script_data.sort_mode[player.index] or 1
+  local sort_dropdown = filter_flow.add{type = "drop-down",
+    items = {{"etech-tp-sort-recent"}, {"etech-tp-sort-name"}, {"etech-tp-sort-distance"}},
+    selected_index = sort_mode,
+    tooltip = {"etech-tp-sort-tooltip"}}
+  util.register_gui(script_data.button_actions, sort_dropdown, {type = "sort_mode"})
+
   if cross_surface and #surface_indices > 1 then
-    local filter_flow = frame.add{type = "flow", direction = "horizontal"}
-    filter_flow.style.vertical_align = "center"
     local items = {{"etech-tp-all-surfaces"}}
     local index_map = {false}
     local selected = 1
@@ -427,13 +453,14 @@ local make_teleporter_gui = function(player, source)
     util.register_gui(script_data.button_actions, button, action)
   end
 
-  local ret, ret_surface = get_valid_return(player)
-  if ret then
+  local rets = get_valid_returns(player)
+  for i, ret in ipairs(rets) do
+    local caption = (#rets > 1) and {"", {"etech-tp-return"}, " " .. i} or {"etech-tp-return"}
     add_preview_button(get_special_flow(),
       {type = "camera", position = ret.position, surface_index = ret.surface_index, zoom = 0.2},
-      {"etech-tp-return"},
-      {"etech-tp-return-tooltip", get_surface_label(ret_surface)},
-      {type = "return_button"})
+      caption,
+      {"etech-tp-return-tooltip", get_surface_label(game.surfaces[ret.surface_index])},
+      {type = "return_button", index = i})
   end
 
   if settings.global["etech-teleporter-players-section"].value then
@@ -460,7 +487,17 @@ local make_teleporter_gui = function(player, source)
   holding_table.style.vertical_spacing = 2
   local any = false
 
-  -- Favorites first (alphabetical), then recently used, then the rest.
+  -- Anchor for distances: the pad the player stands on, or the player.
+  local anchor_position = source and source.position or player.position
+  local distance_to = function(entry)
+    local entity = entry.teleporter.teleporter
+    if entity.surface ~= here_surface then return nil end
+    return util.distance(anchor_position, entity.position)
+  end
+
+  -- Favorites always first (alphabetical); the rest per the sort dropdown:
+  -- 1 = recently used then A-Z, 2 = A-Z, 3 = distance (same surface by
+  -- range, other surfaces after, A-Z).
   table.sort(sorted, function(a, b)
     local fav_a = favorites[a.unit_number] and true or false
     local fav_b = favorites[b.unit_number] and true or false
@@ -471,16 +508,25 @@ local make_teleporter_gui = function(player, source)
       return a.name:lower() < b.name:lower()
     end
 
-    if recent[a.unit_number] and recent[b.unit_number] then
-      return recent[a.unit_number] > recent[b.unit_number]
+    if sort_mode == 3 then
+      local dist_a = distance_to(a)
+      local dist_b = distance_to(b)
+      if dist_a and dist_b then return dist_a < dist_b end
+      if dist_a then return true end
+      if dist_b then return false end
+      return a.name:lower() < b.name:lower()
     end
 
-    if recent[a.unit_number] then
-      return true
-    end
-
-    if recent[b.unit_number] then
-      return false
+    if sort_mode == 1 then
+      if recent[a.unit_number] and recent[b.unit_number] then
+        return recent[a.unit_number] > recent[b.unit_number]
+      end
+      if recent[a.unit_number] then
+        return true
+      end
+      if recent[b.unit_number] then
+        return false
+      end
     end
 
     return a.name:lower() < b.name:lower()
@@ -553,6 +599,11 @@ local make_teleporter_gui = function(player, source)
         local surface_label = inner_flow.add{type = "label", caption = get_surface_label(pad_surface)}
         surface_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
         surface_label.style.maximal_width = preview_size
+      else
+        local dist = util.distance(anchor_position, position)
+        local distance_label = inner_flow.add{type = "label", caption = {"etech-tp-distance", string.format("%.0f", dist)}}
+        distance_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+        distance_label.style.maximal_width = preview_size
       end
       local cost = get_teleport_cost(source, teleporter_entity, player)
       if cost > 0 then
@@ -762,8 +813,18 @@ local gui_actions =
     local player = game.players[event.player_index]
     if not (player and player.valid) then return end
 
-    -- Right-click stars/unstars the pad instead of teleporting.
+    -- Right-click stars/unstars the pad; shift+right-click renames it.
     if event.name == defines.events.on_gui_click and event.button == defines.mouse_button_type.right then
+      if event.shift then
+        local network = script_data.networks[player.force.name] or {}
+        for name, teleporter_data in pairs(network) do
+          if teleporter_data == teleport_param then
+            make_rename_frame(player, name)
+            return
+          end
+        end
+        return
+      end
       local favorites = get_favorites(player)
       local unit_number = destination.unit_number
       favorites[unit_number] = not favorites[unit_number] or nil
@@ -804,12 +865,7 @@ local gui_actions =
     add_recent(player, destination)
 
     if remote and settings.global["etech-teleporter-return-enabled"].value then
-      script_data.returns[player.index] =
-      {
-        surface_index = from_surface.index,
-        position = from_position,
-        tick = game.tick,
-      }
+      push_return(player, from_surface.index, from_position)
     end
   end,
 
@@ -817,18 +873,21 @@ local gui_actions =
     if event.name ~= defines.events.on_gui_click then return end
     local player = game.get_player(event.player_index)
     if not (player and player.valid) then return end
-    local ret, surface = get_valid_return(player)
+    local rets = get_valid_returns(player)
+    local ret = rets[param.index or 1]
     if not ret then
       player.print({"etech-tp-return-expired"})
       check_player_linked_teleporter(player)
       return
     end
+    local surface = game.surfaces[ret.surface_index]
     local position = surface.find_non_colliding_position("character", ret.position, 16, 0.5) or ret.position
     create_flash(player.surface, player.position)
     create_flash(surface, position)
     player.teleport(position, surface)
     play_teleport_sound(player)
-    script_data.returns[player.index] = nil
+    table.remove(rets, param.index or 1)
+    script_data.returns[player.index] = (#rets > 0) and rets or nil
     unlink_teleporter(player)
   end,
   player_button = function(event, param)
@@ -867,6 +926,13 @@ local gui_actions =
     if not (player and player.valid) then return end
     local chosen = param.index_map[event.element.selected_index]
     script_data.surface_filter[player.index] = chosen or nil
+    check_player_linked_teleporter(player)
+  end,
+  sort_mode = function(event, param)
+    if event.name ~= defines.events.on_gui_selection_state_changed then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    script_data.sort_mode[player.index] = event.element.selected_index
     check_player_linked_teleporter(player)
   end,
   rename_surface_button = function(event, param)
@@ -1001,6 +1067,7 @@ local on_player_removed = function(event)
   close_gui(get_rename_frame(player))
   close_gui(get_surface_rename_frame(player))
   script_data.surface_filter[player.index] = nil
+  script_data.sort_mode[player.index] = nil
   unlink_teleporter(player)
 end
 
@@ -1096,9 +1163,8 @@ end
 
 -- Wireless remote: open the destination GUI from anywhere. Gated on the
 -- runtime setting and on the Teleporter technology being researched.
-local on_lua_shortcut = function(event)
-  if event.prototype_name ~= names.shortcuts.remote then return end
-  local player = game.get_player(event.player_index)
+-- Reached from the toolbar shortcut and the SHIFT+T hotkey alike.
+local open_remote = function(player)
   if not (player and player.valid) then return end
   if not settings.global["etech-teleporter-remote"].value then
     player.print({"etech-tp-remote-disabled"})
@@ -1120,6 +1186,41 @@ local on_lua_shortcut = function(event)
   end
   script_data.remote_open[player.index] = true
   make_teleporter_gui(player, nil)
+end
+
+local on_lua_shortcut = function(event)
+  if event.prototype_name ~= names.shortcuts.remote then return end
+  open_remote(game.get_player(event.player_index))
+end
+
+local on_remote_hotkey = function(event)
+  open_remote(game.get_player(event.player_index))
+end
+
+-- Unpowered-pad alert: a pad with an empty energy buffer can't be teleported
+-- to, and you only find out by opening the GUI. Raise a custom alert for the
+-- owning force while a pad sits at zero (only when teleports actually cost
+-- energy, and gated by a map setting).
+local check_pad_alerts = function()
+  if not settings.global["etech-teleporter-alerts"].value then return end
+  if settings.global["etech-teleporter-energy-mj"].value <= 0
+     and settings.global["etech-teleporter-energy-distance-mj"].value <= 0 then
+    return
+  end
+  for force_name, network in pairs (script_data.networks) do
+    local force = game.forces[force_name]
+    if force and force.valid then
+      for name, teleporter_data in pairs (network) do
+        local entity = teleporter_data.teleporter
+        local eei = teleporter_data.energy_interface
+        if entity and entity.valid and eei and eei.valid and eei.energy <= 0 then
+          for _, player in pairs (force.connected_players) do
+            player.add_custom_alert(entity, {type = "item", name = teleporter_name}, {"etech-tp-alert-unpowered", name}, true)
+          end
+        end
+      end
+    end
+  end
 end
 
 local on_surface_deleted = function(event)
@@ -1262,8 +1363,14 @@ teleporters.events =
 
   [defines.events.on_surface_deleted] = on_surface_deleted,
   [defines.events.on_lua_shortcut] = on_lua_shortcut,
+  [names.hotkeys.open_remote] = on_remote_hotkey,
 
   [defines.events.on_trigger_created_entity] = on_trigger_created_entity
+}
+
+teleporters.on_nth_tick =
+{
+  [601] = check_pad_alerts,
 }
 
 teleporters.on_init = function()
@@ -1285,6 +1392,13 @@ teleporters.on_configuration_changed = function()
   stored.remote_open = stored.remote_open or {}
   stored.returns = stored.returns or {}
   stored.favorites = stored.favorites or {}
+  stored.sort_mode = stored.sort_mode or {}
+  -- 0.10.0: returns went from a single slot to a newest-first array.
+  for player_index, ret in pairs (stored.returns) do
+    if ret.surface_index then
+      stored.returns[player_index] = {ret}
+    end
+  end
   script_data = stored
   resync_all_teleporters()
 end

@@ -30,6 +30,11 @@ local function createEntity(entity)
         entity.infinity_container_filters = {}
         entity.remove_unfiltered_items = true
     end
+    -- void-chest-filtered: deliberately untouched — the player sets the
+    -- infinity filters ("exactly 0" per item to void); unfiltered items sit.
+    if entity.name == "void-chest-filtered" then
+        entity.remove_unfiltered_items = false
+    end
     if entity.name == "void-pipe" then
         if storage.pipes == nil then
             storage.pipes = {}
