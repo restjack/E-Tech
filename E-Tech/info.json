@@ -1,10 +1,10 @@
 {
   "name": "E-Tech",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "title": "E-Tech: Vanilla Recipes for AAI Industry + QoL Toggles",
   "author": "Eli Tellez",
   "factorio_version": "2.1",
-  "description": "Restores vanilla recipes while keeping everything AAI Industry adds (Krastorio 2 aware - restores to K2's values when K2 is installed, and never stomps recipes other mods own). Plus optional startup toggles, all defaulting to vanilla behavior: pick up/re-place the crashed ship, all modules in beacons, quality in asteroid crushing/reprocessing, nuclear fuel & artillery shell stack sizes, agricultural science pack spoilage, restore the nuclear fuel crafting Krastorio 2 removes, uranium bacteria on Gleba (revival of the abandoned Simple Gleba Uranium mod), void chest & pipe (Easy Void), an in-game map settings editor on a toolbar shortcut (Edit Map Settings), plume-free thrusters (FPS Friendly Thrusters), pass-through fusion generators, per-recipe biochamber colors (Colorful Biochamber), and an experimental teleport-to-player toolbar shortcut for multiplayer.",
+  "description": "Restores vanilla recipes while keeping everything AAI Industry adds (Krastorio 2 aware - restores to K2's values when K2 is installed, and never stomps recipes other mods own). Plus optional startup toggles, all defaulting to vanilla behavior: pick up/re-place the crashed ship, all modules in beacons, quality in asteroid crushing/reprocessing, nuclear fuel & artillery shell stack sizes, agricultural science pack spoilage, restore the nuclear fuel crafting Krastorio 2 removes, uranium bacteria on Gleba (revival of the abandoned Simple Gleba Uranium mod), void chest & pipe (Easy Void), an in-game map settings editor on a toolbar shortcut (Edit Map Settings), plume-free thrusters (FPS Friendly Thrusters), pass-through fusion generators, per-recipe biochamber colors (Colorful Biochamber), copy modules with machine settings (Copy Paste Modules), a Krastorio 2 + Cerys nitric acid compat fix, and an experimental teleport-to-player toolbar shortcut for multiplayer.",
   "dependencies": [
     "base >= 2.0",
     "? aai-industry >= 0.7.0",

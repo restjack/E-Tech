@@ -1,4 +1,29 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.9.0
+Date: 2026-07-15
+  Features:
+    - Copy modules with machine settings toggle (default off): shift-click paste moves modules
+      straight from your inventory (old modules handed back, bot request for what's missing),
+      handles ghosts and remote view, and makes furnaces/labs/beacons cross-pastable. Port of
+      the abandoned Copy Paste Modules mod by kajacx (MIT); auto-skipped if the original is
+      installed. Per-player runtime switch included.
+    - Teleporters: favorite pads. Right-click a pad in the destination list to star it -
+      starred pads sort before everything else and show a star prefix.
+    - Teleporters: the teleporting player now always hears the teleport sound. The world-side
+      flash sound plays at the destination before you arrive (inaudible cross-surface); a
+      direct sound now follows the player on pad, remote, return, player-to-player, and
+      teleport-to-player shortcut jumps.
+  Bugfixes:
+    - Krastorio 2 + Cerys: nitric acid works in K2 recipes again. Cerys redefines K2's
+      kr-nitric-acid fluid with default_temperature 15 and drops K2's other fields, so all
+      Cerys-produced acid arrived at 15C - below the 25C minimum K2 recipes expect (imersite
+      crystal plants showed permanent fluid shortage), and the fluid tooltip lost its info.
+      E-Tech now restores K2's full fluid definition after Cerys and strips temperature bounds
+      from recipes consuming it, so cold acid already in pipes stays usable. Active only when
+      both mods are present.
+    - Jetpack fuel HUD no longer draws over the map/remote view; it hides until you're back in
+      the world.
+---------------------------------------------------------------------------------------------------
 Version: 0.8.0
 Date: 2026-07-15
   Features:

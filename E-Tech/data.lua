@@ -6,6 +6,19 @@
 -- and misc-tweaks. Each port is skipped when its original mod is still
 -- enabled so the two never define the same prototype names.
 
+-- Teleport sound, heard by the teleporting player themselves (the world
+-- flash's sound plays at the destination before arrival, inaudible
+-- cross-surface). Defined unconditionally: both the pad GUI and the
+-- teleport-to-player shortcut use it, and each can be enabled alone.
+data:extend({
+  {
+    type = "sound",
+    name = "etech-teleporter-sound",
+    filename = "__E-Tech__/teleporters/graphics/teleporter-explosion.ogg",
+    volume = 0.6,
+  },
+})
+
 if settings.startup["etech-teleporters"].value then
   require("teleporters/data")
 end

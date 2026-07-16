@@ -28,6 +28,11 @@ if settings.startup["etech-map-settings"].value
   handler.add_lib(require("edit-map-settings/control"))
 end
 
+if settings.startup["etech-copy-paste-modules"].value
+  and not script.active_mods["CopyPasteModules"] then
+  handler.add_lib(require("copy-paste-modules"))
+end
+
 if settings.startup["etech-resource-markers"].value then
   handler.add_lib(require("resource-markers"))
 end

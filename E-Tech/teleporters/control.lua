@@ -39,7 +39,17 @@ local script_data =
   -- Per-player return slot after a remote teleport:
   -- {surface_index, position, tick}.
   returns = {},
+  -- Per-player favorite pads ([player.name][unit_number] = true) — starred
+  -- via right-click in the destination GUI, listed before everything else.
+  favorites = {},
 }
+
+-- The teleport sound the player themselves hears. The world flash's own
+-- sound plays at the destination BEFORE the player arrives, so it's
+-- inaudible cross-surface — this one follows the player.
+local play_teleport_sound = function(player)
+  player.play_sound{path = "etech-teleporter-sound"}
+end
 
 local preview_size = 256
 
@@ -123,6 +133,15 @@ local get_force_color = function(force)
     return player.chat_color
   end
   return {r = 1, b = 1, g = 1}
+end
+
+local get_favorites = function(player)
+  local favorites = script_data.favorites[player.name]
+  if not favorites then
+    favorites = {}
+    script_data.favorites[player.name] = favorites
+  end
+  return favorites
 end
 
 local add_recent = function(player, teleporter)
@@ -320,6 +339,7 @@ local make_teleporter_gui = function(player, source)
   util.register_gui(script_data.button_actions, search_button, {type = "search_button", box = search_box})
   script_data.search_boxes[player.index] = search_box
   local recent = script_data.recent[player.name] or {}
+  local favorites = get_favorites(player)
 
   local sorted = {}
   local i = 1
@@ -440,7 +460,17 @@ local make_teleporter_gui = function(player, source)
   holding_table.style.vertical_spacing = 2
   local any = false
 
+  -- Favorites first (alphabetical), then recently used, then the rest.
   table.sort(sorted, function(a, b)
+    local fav_a = favorites[a.unit_number] and true or false
+    local fav_b = favorites[b.unit_number] and true or false
+    if fav_a ~= fav_b then
+      return fav_a
+    end
+    if fav_a then
+      return a.name:lower() < b.name:lower()
+    end
+
     if recent[a.unit_number] and recent[b.unit_number] then
       return recent[a.unit_number] > recent[b.unit_number]
     end
@@ -509,6 +539,10 @@ local make_teleporter_gui = function(player, source)
       if recent[teleporter_entity.unit_number] then
         caption = "[img=quantity-time] "..name
       end
+      if favorites[teleporter_entity.unit_number] then
+        caption = "★ "..caption
+      end
+      button.tooltip = {"etech-tp-favorite-tooltip"}
       local label = inner_flow.add{type = "label", caption = caption}
       label.style.horizontally_stretchable = true
       label.style.font = "default-dialog-button"
@@ -728,6 +762,15 @@ local gui_actions =
     local player = game.players[event.player_index]
     if not (player and player.valid) then return end
 
+    -- Right-click stars/unstars the pad instead of teleporting.
+    if event.name == defines.events.on_gui_click and event.button == defines.mouse_button_type.right then
+      local favorites = get_favorites(player)
+      local unit_number = destination.unit_number
+      favorites[unit_number] = not favorites[unit_number] or nil
+      check_player_linked_teleporter(player)
+      return
+    end
+
     local source = script_data.player_linked_teleporter[player.index]
     local remote = not source and script_data.remote_open[player.index]
     if not settings.global["etech-teleporter-cross-surface"].value then
@@ -756,6 +799,7 @@ local gui_actions =
     create_flash(destination_surface, destination_position)
     create_flash(from_surface, from_position)
     player.teleport(destination_position, destination_surface)
+    play_teleport_sound(player)
     unlink_teleporter(player)
     add_recent(player, destination)
 
@@ -783,6 +827,7 @@ local gui_actions =
     create_flash(player.surface, player.position)
     create_flash(surface, position)
     player.teleport(position, surface)
+    play_teleport_sound(player)
     script_data.returns[player.index] = nil
     unlink_teleporter(player)
   end,
@@ -812,6 +857,7 @@ local gui_actions =
       player.print({"etech-tp-player-teleport-failed"})
       return
     end
+    play_teleport_sound(player)
     unlink_teleporter(player)
   end,
 
@@ -1238,6 +1284,7 @@ teleporters.on_configuration_changed = function()
   stored.surface_rename_frames = stored.surface_rename_frames or {}
   stored.remote_open = stored.remote_open or {}
   stored.returns = stored.returns or {}
+  stored.favorites = stored.favorites or {}
   script_data = stored
   resync_all_teleporters()
 end

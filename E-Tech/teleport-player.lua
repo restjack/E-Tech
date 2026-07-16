@@ -30,6 +30,7 @@ local function teleport_to(player, target)
     end
   end)
   if ok then
+    player.play_sound{path = "etech-teleporter-sound"}
     player.print("[E-Tech] Teleported to " .. target.name .. ".")
   else
     player.print("[E-Tech] Teleport failed: " .. tostring(err))

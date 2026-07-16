@@ -166,6 +166,13 @@ local sync = function()
       if state.estimated_consumption and state.estimated_consumption > 0 then
         ensure_window(player, state)
         update_window(player, state)
+        -- Hide the HUD while the player is in map/remote view — a screen-gui
+        -- window otherwise draws on top of the map.
+        local in_world = player.render_mode == defines.render_mode.game
+        local frame = state.gui and state.gui.frame
+        if frame and frame.valid and frame.visible ~= in_world then
+          frame.visible = in_world
+        end
       end
     end
   end

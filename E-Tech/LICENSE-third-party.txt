@@ -84,6 +84,16 @@ ported features below, which keep their original licenses.
    Unlicense (public domain). Only sprite paths were rewritten; the
    sei-biochamber support file (for a mod not in use here) was dropped.
 
+10. Copy modules with machine settings (copy-paste-modules.lua and the
+    cross-paste registration in misc-tweaks.lua) is adapted from the mod
+    "Copy Paste Modules" 0.2.x by kajacx
+    (https://mods.factorio.com/mod/CopyPasteModules,
+    https://github.com/kajacx/CopyPasteModules), used under the MIT License —
+    same license text as reproduced below.
+    Modifications by E-Tech: converted to an event_handler lib, per-user
+    setting renamed etech-cpm-enabled, locale keys renamed etech-cpm-*, two
+    unused settings dropped.
+
 MIT License
 
 Copyright (c) 2025 cindersash

@@ -113,6 +113,66 @@ if settings.startup["etech-fps-thrusters"].value then
 end
 
 -- ---------------------------------------------------------------------------
+-- Krastorio 2 + Cerys nitric acid compat fix (always on when both present).
+-- Cerys loads after K2 (optional dependency on K2SO) and redefines the
+-- kr-nitric-acid fluid with default_temperature = 15 and none of K2's other
+-- fields — so all Cerys-produced acid comes out at 15°C, below the 25°C
+-- minimum K2's recipes expect, and the fluid tooltip loses K2's info.
+-- Restore K2's full definition, and strip temperature bounds from recipes
+-- consuming it so cold acid already in pipes/save stays usable.
+-- ---------------------------------------------------------------------------
+if mods["Krastorio2"] and mods["Cerys-Moon-of-Fulgora"] then
+  local fluid = data.raw.fluid["kr-nitric-acid"]
+  if fluid then
+    fluid.default_temperature = 25
+    fluid.gas_temperature = 25
+    fluid.max_temperature = 100
+    fluid.icon = "__Krastorio2Assets__/icons/fluids/nitric-acid.png"
+    fluid.base_color = { r = 0.752, g = 0.215, b = 0.337, a = 1.0 }
+    fluid.flow_color = { r = 0.752, g = 0.215, b = 0.337, a = 0.8 }
+    fluid.auto_barrel = true
+    elog("kr-nitric-acid: restored K2's definition over Cerys's 15C overwrite")
+  end
+  for name, recipe in pairs(data.raw.recipe) do
+    for _, ing in pairs(recipe.ingredients or {}) do
+      if ing.type == "fluid" and ing.name == "kr-nitric-acid"
+         and (ing.minimum_temperature or ing.maximum_temperature or ing.temperature) then
+        ing.minimum_temperature = nil
+        ing.maximum_temperature = nil
+        ing.temperature = nil
+        elog("removed nitric acid temperature bounds from recipe: " .. name)
+      end
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- Copy-paste modules: make furnaces, labs and beacons cross-pastable so
+-- module sets copy between them (data-stage half of the Copy Paste Modules
+-- port; runtime half in copy-paste-modules.lua). Skipped when the original
+-- mod is enabled.
+-- ---------------------------------------------------------------------------
+if settings.startup["etech-copy-paste-modules"].value then
+  if mods["CopyPasteModules"] then
+    elog("copy-paste-modules setting on but the original Copy Paste Modules mod is installed - skipped (disable one of the two)")
+  else
+    for _, type_name in pairs({ "furnace", "lab", "beacon" }) do
+      local raw_entities = data.raw[type_name]
+      if raw_entities then
+        local entity_names = {}
+        for _, entity in pairs(raw_entities) do
+          table.insert(entity_names, entity.name)
+        end
+        for _, entity in pairs(raw_entities) do
+          entity.additional_pastable_entities = entity_names
+        end
+      end
+    end
+    elog("copy-paste-modules: furnaces/labs/beacons made cross-pastable")
+  end
+end
+
+-- ---------------------------------------------------------------------------
 -- Pass-through fusion generators (port of pass-through-fusion-generator,
 -- MIT — see LICENSE-third-party.txt). Replaces the fusion generator's input
 -- fluid box connections with input-output ones on all four sides so

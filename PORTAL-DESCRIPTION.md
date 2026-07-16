@@ -34,6 +34,9 @@ Everything is a startup setting, and every recipe change is guarded so it never 
 | FPS-friendly thrusters | off | Removes the animated exhaust plumes from space platform thrusters â€” the big FPS drain on large platforms. Port of [FPS Friendly Thrusters](https://mods.factorio.com/mod/FPS_Friendly_Thrusters) by RockPaperKatana (MIT); auto-skipped if the original is installed |
 | Pass-through fusion generators | off | Fusion generators get input-output plasma connections on all four sides so they chain without separate plasma lines. Port of [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT); auto-skipped if the original is installed |
 | Colorful biochamber | off | Needs Space Age. Recolors the biochamber's pools, dome and windows per recipe so you can tell what it's making at a glance. Port of [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray (public domain); auto-skipped if the original is installed |
+| Copy modules with machine settings | off | Shift-click paste moves modules straight from your inventory (old modules handed back, bot request for what's missing); handles ghosts and remote view; furnaces/labs/beacons cross-pastable. Per-player runtime switch. Port of [Copy Paste Modules](https://mods.factorio.com/mod/CopyPasteModules) by kajacx (MIT); auto-skipped if the original is installed |
+
+Always-on compat fix: with **Krastorio 2 + Cerys** together, Cerys redefines K2's nitric acid at 15Â°C (below the 25Â°C minimum K2 recipes expect, starving imersite crystal plants) and drops the fluid's tooltip data. E-Tech restores K2's definition and strips the stale temperature bounds so cold acid in existing pipes stays usable.
 
 Stack-size and spoilage defaults match vanilla, so installing the mod changes nothing until you move a slider or flip a switch â€” safe to share with friends who want different settings.
 
@@ -55,9 +58,9 @@ Every recipe restore is guarded by a fingerprint check: a recipe is only touched
 
 ## For developers / friends who want to tweak
 
-- [vanilla-recipes.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/anilla-recipes.lua) â€” the recipe data: recipe name â†’ vanilla/K2 values + AAI fingerprint. Add/remove entries freely.
+- [vanilla-recipes.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/vanilla-recipes.lua) â€” the recipe data: recipe name â†’ vanilla/K2 values + AAI fingerprint. Add/remove entries freely.
 - [data-final-fixes.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/data-final-fixes.lua) â€” the engine that applies the restores.
-- [beacons.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/eacons.lua), [misc-tweaks.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/misc-tweaks.lua), [crash-ship.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/crash-ship.lua) â€” the optional tweaks.
+- [beacons.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/beacons.lua), [misc-tweaks.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/misc-tweaks.lua), [crash-ship.lua](https://github.com/restjack/E-Tech/blob/main/E-Tech/crash-ship.lua) â€” the optional tweaks.
 - `build.ps1` â€” packages `E-Tech_<version>.zip` into your Factorio mods folder and archives a copy in `releases/`.
 
 ## License
@@ -77,6 +80,7 @@ E-Tech carries forward these abandoned/orphaned mods as optional toggles. All cr
 - [FPS Friendly Thrusters](https://mods.factorio.com/mod/FPS_Friendly_Thrusters) by RockPaperKatana (MIT) â€” plume-free thrusters
 - [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT) â€” pass-through fusion generators
 - [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray (Unlicense) â€” per-recipe biochamber colors
+- [Copy Paste Modules](https://mods.factorio.com/mod/CopyPasteModules) by kajacx (MIT) â€” copy modules with machine settings
 
 Inspired-by (rewritten from scratch, not ports): [Resource Map Label Marker](https://mods.factorio.com/mod/resourceMarker) â€” resource map markers.
 
