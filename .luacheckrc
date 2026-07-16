@@ -9,7 +9,6 @@ read_globals = {
   "mods",
   "settings",
   "script",
-  "game",
   "defines",
   "prototypes",
   "helpers",
@@ -27,12 +26,16 @@ read_globals = {
   -- AAI Industry publishes its resolved item names as data-stage globals
   "aai_glass_name",
   "aai_sand_name",
+  -- Factorio core unit constants (weights/time) available in the data stage
+  "kg", "grams", "tons", "second", "minute", "hour",
 }
 
--- Mutable globals: editing data.raw and storage is the whole point.
+-- Mutable globals: editing data.raw, storage, and game.map_settings and
+-- friends is legitimate runtime/data-stage API.
 globals = {
   "data",
   "storage",
+  "game",
   -- table.deepcopy / table.unpack extensions land on the table lib
   table = { fields = { "deepcopy", "unpack" } },
 }
@@ -43,7 +46,8 @@ unused = false
 unused_args = false
 redefined = false
 -- 61x: whitespace-only / trailing-whitespace lines (upstream formatting)
-ignore = { "611", "612", "613", "614" }
+-- 542: empty if branch (used deliberately with a comment for skip cases)
+ignore = { "611", "612", "613", "614", "542" }
 
 exclude_files = {
   "E-Tech/releases",
