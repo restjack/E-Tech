@@ -11,6 +11,7 @@ version +1 patch bump), pulled from the live mods folder after the switch.
 | FPS_Friendly_Thrusters_0.1.2.zip | misc-tweaks.lua — etech-fps-thrusters | MIT |
 | pass-through-fusion-generator_1.1.1.zip | misc-tweaks.lua — etech-fusion-passthrough | MIT |
 | colorful_biochamber_1.1.5.zip | `biochamber/` — etech-colorful-biochamber | Unlicense |
+| CopyPasteModules_0.2.1.zip | `copy-paste-modules.lua` — etech-copy-paste-modules (added in 0.9.0, 2026-07-15) | MIT |
 
 Full attribution + license texts: `E-Tech/LICENSE-third-party.txt`.
 Other retired zips (swap-replaced, rejected, superseded builds) live in
