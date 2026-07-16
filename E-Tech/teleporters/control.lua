@@ -565,9 +565,9 @@ local make_teleporter_gui = function(player, source)
       local cost = get_teleport_cost(source, teleporter_entity, player)
       local button = holding_table.add{type = "button", name = "_"..name}
       -- Buttons clip their children to the button's own size, so the height
-      -- must account for every label row: name + distance/surface line,
-      -- plus the energy line when teleporting costs anything.
-      button.style.height = preview_size + 54 + (cost > 0 and 18 or 0)
+      -- must account for every label row: name + distance/surface line.
+      -- The energy cost lives in the tooltip, not a label.
+      button.style.height = preview_size + 54
       button.style.width = preview_size + 8
       button.style.left_padding = 0
       button.style.right_padding = 0
@@ -615,12 +615,12 @@ local make_teleporter_gui = function(player, source)
       if cost > 0 then
         local eei = get_energy_interface(teleporter, teleporter_entity)
         local stored = (eei and eei.valid and eei.energy) or 0
-        local energy_label = inner_flow.add{type = "label", caption = {"etech-tp-energy-label", string.format("%.0f", cost / 1000000), string.format("%.0f", stored / 1000000)}}
-        energy_label.style.maximal_width = preview_size
+        local energy_line = {"etech-tp-energy-label", string.format("%.0f", cost / 1000000), string.format("%.0f", stored / 1000000)}
         if stored < cost then
-          energy_label.style.font_color = {r = 1, g = 0.3, b = 0.3}
           button.enabled = false
-          button.tooltip = {"etech-tp-not-enough-energy"}
+          button.tooltip = {"", {"etech-tp-not-enough-energy"}, "\n", energy_line}
+        else
+          button.tooltip = {"", {"etech-tp-favorite-tooltip"}, "\n", energy_line}
         end
       end
       util.register_gui(script_data.button_actions, button, {type = "teleport_button", param = teleporter})

@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.10.3
+Date: 2026-07-15
+  Changes:
+    - Teleporter GUI: energy line removed from the pad buttons (it kept getting clipped) -
+      cost and stored MJ now show in the pad's hover tooltip instead. Unaffordable pads stay
+      greyed out with the cost in their tooltip.
+---------------------------------------------------------------------------------------------------
 Version: 0.10.2
 Date: 2026-07-15
   Bugfixes:
