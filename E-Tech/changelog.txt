@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.10.2
+Date: 2026-07-15
+  Bugfixes:
+    - Teleporter GUI: distance/surface/energy labels actually visible this time. Factorio
+      buttons clip children to the button's own size (minimal_height doesn't grow with
+      content), so each pad button's height is now computed from its label rows.
+  Changes:
+    - Pad preview size default 200 (was 160 in 0.10.1).
+---------------------------------------------------------------------------------------------------
 Version: 0.10.1
 Date: 2026-07-15
   Bugfixes:

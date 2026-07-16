@@ -436,7 +436,7 @@ local make_teleporter_gui = function(player, source)
 
   local add_preview_button = function(parent, view_spec, caption, tooltip, action)
     local button = parent.add{type = "button"}
-    button.style.minimal_height = special_size + 32 + 8
+    button.style.height = special_size + 32 + 8
     button.style.width = special_size + 8
     button.style.left_padding = 0
     button.style.right_padding = 0
@@ -562,10 +562,12 @@ local make_teleporter_gui = function(player, source)
       local position = teleporter_entity.position
       local area = {{position.x - preview_size / 2, position.y - preview_size / 2}, {position.x + preview_size / 2, position.y + preview_size / 2}}
       chart(pad_surface, area)
+      local cost = get_teleport_cost(source, teleporter_entity, player)
       local button = holding_table.add{type = "button", name = "_"..name}
-      -- minimal (not fixed) height: the name + distance/surface + energy
-      -- labels stack below the minimap and were clipped by a fixed height
-      button.style.minimal_height = preview_size + 32 + 8
+      -- Buttons clip their children to the button's own size, so the height
+      -- must account for every label row: name + distance/surface line,
+      -- plus the energy line when teleporting costs anything.
+      button.style.height = preview_size + 54 + (cost > 0 and 18 or 0)
       button.style.width = preview_size + 8
       button.style.left_padding = 0
       button.style.right_padding = 0
@@ -610,7 +612,6 @@ local make_teleporter_gui = function(player, source)
         distance_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
         distance_label.style.maximal_width = preview_size
       end
-      local cost = get_teleport_cost(source, teleporter_entity, player)
       if cost > 0 then
         local eei = get_energy_interface(teleporter, teleporter_entity)
         local stored = (eei and eei.valid and eei.energy) or 0
