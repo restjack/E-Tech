@@ -189,6 +189,17 @@ data:extend({
     localised_description = {"", "Raises a map alert while a teleporter pad's energy buffer sits empty (only when teleporting costs energy). An unpowered pad can't be teleported to."},
   },
   {
+    type = "int-setting",
+    name = "etech-teleporter-preview-size",
+    setting_type = "runtime-global",
+    default_value = 160,
+    minimum_value = 96,
+    maximum_value = 512,
+    order = "tk-1b",
+    localised_name = {"", "Teleporter: pad preview size (px)"},
+    localised_description = {"", "Size of the minimap preview per pad in the destination list. Smaller = more pads on screen. Was 256 before 0.10.1; default is now 160."},
+  },
+  {
     type = "double-setting",
     name = "etech-teleporter-sound-volume",
     setting_type = "runtime-global",

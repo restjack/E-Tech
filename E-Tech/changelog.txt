@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.10.1
+Date: 2026-07-15
+  Bugfixes:
+    - Teleporter GUI: the distance / surface / energy labels under each pad were invisible -
+      the pad buttons had a FIXED height sized for the name row only, clipping everything
+      below it (the energy line had been clipped since the original port). Buttons now use a
+      minimal height and grow to fit their labels.
+  Changes:
+    - Teleporter GUI: pad preview size is a map setting (96-512 px). Default shrunk from the
+      original's 256 to 160 - the old size made the window enormous with many pads.
+---------------------------------------------------------------------------------------------------
 Version: 0.10.0
 Date: 2026-07-15
   Features:

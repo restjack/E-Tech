@@ -56,7 +56,8 @@ local play_teleport_sound = function(player)
   player.play_sound{path = "etech-teleporter-sound", volume_modifier = settings.global["etech-teleporter-sound-volume"].value}
 end
 
-local preview_size = 256
+-- Pad preview size comes from the etech-teleporter-preview-size map setting
+-- (read per GUI build in make_teleporter_gui).
 
 local debug_print = false
 local print = function(string)
@@ -328,6 +329,8 @@ local make_teleporter_gui = function(player, source)
   -- for remote use).
   local here_surface = source and source.surface or player.surface
 
+  local preview_size = settings.global["etech-teleporter-preview-size"].value
+
   local gui = player.gui.screen
   local frame = gui.add{type = "frame", direction = "vertical", ignored_by_interaction = false}
   if location then
@@ -421,7 +424,7 @@ local make_teleporter_gui = function(player, source)
   end
 
   -- Return slot + same-force players, in one row above the pad list.
-  local special_size = 128
+  local special_size = math.min(128, preview_size)
   local special_flow
   local get_special_flow = function()
     if special_flow and special_flow.valid then return special_flow end
@@ -433,7 +436,7 @@ local make_teleporter_gui = function(player, source)
 
   local add_preview_button = function(parent, view_spec, caption, tooltip, action)
     local button = parent.add{type = "button"}
-    button.style.height = special_size + 32 + 8
+    button.style.minimal_height = special_size + 32 + 8
     button.style.width = special_size + 8
     button.style.left_padding = 0
     button.style.right_padding = 0
@@ -560,7 +563,9 @@ local make_teleporter_gui = function(player, source)
       local area = {{position.x - preview_size / 2, position.y - preview_size / 2}, {position.x + preview_size / 2, position.y + preview_size / 2}}
       chart(pad_surface, area)
       local button = holding_table.add{type = "button", name = "_"..name}
-      button.style.height = preview_size + 32 + 8
+      -- minimal (not fixed) height: the name + distance/surface + energy
+      -- labels stack below the minimap and were clipped by a fixed height
+      button.style.minimal_height = preview_size + 32 + 8
       button.style.width = preview_size + 8
       button.style.left_padding = 0
       button.style.right_padding = 0
