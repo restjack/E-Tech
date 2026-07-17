@@ -1,4 +1,16 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.11.0
+Date: 2026-07-16
+  Features:
+    - Factory provider hub (startup toggle, needs Factorissimo 3, off by default): a logistic
+      chest that automatically pulls items out of the provider chests INSIDE the Factorissimo
+      factory buildings on its surface and offers them to the local logistic network as a
+      passive provider. Robots can't fly between surfaces, so the hub teleports the items out.
+      Reaches into nested factories (toggleable, 5 levels). Keeps a configurable number of
+      stacks per item buffered; can be limited to active provider chests only. Never drains
+      another hub. Spoilage, quality, ammo and durability survive the transfer. Unlocked by a
+      technology alongside logistic robotics and Factorissimo's chest connections.
+---------------------------------------------------------------------------------------------------
 Version: 0.10.4
 Date: 2026-07-15
   Bugfixes:

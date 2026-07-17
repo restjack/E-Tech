@@ -37,6 +37,11 @@ if settings.startup["etech-colorful-biochamber"].value
   require("biochamber/data")
 end
 
+if settings.startup["etech-factory-hub"].value
+  and mods["factorissimo-2-notnotmelon"] then
+  require("factory-hub/data")
+end
+
 if settings.startup["etech-teleport-shortcut"].value then
   data:extend({
     {

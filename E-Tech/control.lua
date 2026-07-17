@@ -33,6 +33,11 @@ if settings.startup["etech-copy-paste-modules"].value
   handler.add_lib(require("copy-paste-modules"))
 end
 
+if settings.startup["etech-factory-hub"].value
+  and script.active_mods["factorissimo-2-notnotmelon"] then
+  handler.add_lib(require("factory-hub/control"))
+end
+
 if settings.startup["etech-resource-markers"].value then
   handler.add_lib(require("resource-markers"))
 end
