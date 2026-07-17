@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.14.1
+Date: 2026-07-17
+  Features:
+    - Outlet panel: shift-click an item to take a stack of it straight from the factories into
+      your inventory (spoilage/quality preserved).
+  Changes:
+    - On-demand mode is now the default for newly placed outlets (buffer mode is the opt-in).
+      Existing outlets keep whatever they were set to.
+---------------------------------------------------------------------------------------------------
 Version: 0.14.0
 Date: 2026-07-16
   Features:

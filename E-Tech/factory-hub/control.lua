@@ -87,6 +87,7 @@ local function register_device(entity)
         kind = KINDS[entity.name],
         filters = { mode = 1, items = {} },
         pins = {},
+        on_demand = KINDS[entity.name] == "outlet", -- lean default; buffer mode is the opt-in
     }
     script.register_on_object_destroyed(entity)
 end
@@ -776,6 +777,44 @@ local function locate_item(player, record, name, quality)
     end
 end
 
+-- Shift-click: teleport up to one stack of the item straight from the
+-- factories into the player's inventory (slot-level transfer, spoil/quality
+-- preserved).
+local function take_item(player, record, name, quality)
+    local player_inv = player.get_main_inventory()
+    if not player_inv then return end
+    local wanted = prototypes.item[name].stack_size
+    local taken = 0
+    for _, entry in pairs(reachable_chests(record, outlet_source_mode(record))) do
+        if taken >= wanted then break end
+        local inv = entry.chest.valid and entry.chest.get_inventory(defines.inventory.chest)
+        if inv then
+            for i = 1, #inv do
+                if taken >= wanted then break end
+                local stack = inv[i]
+                if stack.valid_for_read and stack.name == name
+                    and stack.quality.name == quality then
+                    local original = stack.count
+                    local move = math.min(original, wanted - taken)
+                    if move < original then stack.count = move end
+                    local inserted = player_inv.insert(stack)
+                    stack.count = original - inserted
+                    taken = taken + inserted
+                    if inserted < move then -- player inventory full
+                        wanted = taken
+                        break
+                    end
+                end
+            end
+        end
+    end
+    if taken > 0 then
+        player.print("Took " .. taken .. " " .. name .. " from the factories")
+    else
+        player.print("Couldn't take " .. name .. " (nothing found or inventory full)")
+    end
+end
+
 -- GUI: outlet panel --------------------------------------------------------------
 
 local MODE_ITEMS = {
@@ -1103,6 +1142,9 @@ local function on_gui_click(event)
             record.pins = record.pins or {}
             local key = tags.name .. "|" .. tags.quality
             record.pins[key] = not record.pins[key] or nil
+            refresh_grid(player, record)
+        elseif event.shift then
+            take_item(player, record, tags.name, tags.quality)
             refresh_grid(player, record)
         else
             locate_item(player, record, tags.name, tags.quality)
