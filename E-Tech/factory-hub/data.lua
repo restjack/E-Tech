@@ -4,27 +4,36 @@
 -- Factorissimo factory buildings on the same surface. Written for E-Tech
 -- (public domain). Only loaded when Factorissimo 3 is active (root data.lua
 -- checks), so the factory-connection-type-chest tech prerequisite exists.
+--
+-- Sprite/icon build from the YELLOW storage chest, fully tinted orange —
+-- multiplicative tint over the red passive provider gave a muddy brown
+-- (0.11.0), and a half-tinted icon that still looked red in hand.
 
-local hubTint = { r = 1, g = 0.65, b = 0.1, a = 1 }
+local hubTint = { r = 1, g = 0.6, b = 0.15, a = 1 }
 
-local hub = table.deepcopy(data.raw["logistic-container"]["passive-provider-chest"])
+local hubIcons = {
+    { icon = "__base__/graphics/icons/storage-chest.png", icon_size = 64, tint = hubTint },
+}
+
+local hub = table.deepcopy(data.raw["logistic-container"]["storage-chest"])
 hub.name = "etech-factory-provider-hub"
 hub.minable.result = "etech-factory-provider-hub"
+hub.logistic_mode = "passive-provider"
 hub.inventory_size = settings.startup["etech-hub-slots"].value
+hub.enable_inventory_bar = false -- per-item caps make the red-X limiter pointless
 hub.order = "b[storage]-c[etech-factory-provider-hub]"
+hub.icon = nil
+hub.icons = hubIcons
 if hub.animation and hub.animation.layers then
     hub.animation.layers[1].tint = hubTint
 end
 
-local hub_item = table.deepcopy(data.raw.item["passive-provider-chest"])
+local hub_item = table.deepcopy(data.raw.item["storage-chest"])
 hub_item.name = "etech-factory-provider-hub"
 hub_item.place_result = "etech-factory-provider-hub"
 hub_item.order = "b[storage]-c[etech-factory-provider-hub]"
 hub_item.icon = nil
-hub_item.icons = {
-    { icon = "__base__/graphics/icons/passive-provider-chest.png", icon_size = 64 },
-    { icon = "__base__/graphics/icons/passive-provider-chest.png", icon_size = 64, tint = hubTint },
-}
+hub_item.icons = hubIcons
 
 -- Research cost mirrors logistic-robotics so the unlock lands at the same
 -- science tier no matter which overhaul (K2 etc.) rewrote that tech.
@@ -63,8 +72,7 @@ data:extend({
         type = "technology",
         name = "etech-factory-provider-hub",
         icons = {
-            { icon = "__base__/graphics/icons/passive-provider-chest.png", icon_size = 64 },
-            { icon = "__base__/graphics/icons/passive-provider-chest.png", icon_size = 64, tint = hubTint },
+            { icon = "__base__/graphics/icons/storage-chest.png", icon_size = 64, tint = hubTint },
         },
         prerequisites = prerequisites,
         effects = {

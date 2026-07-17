@@ -1,4 +1,23 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.12.0
+Date: 2026-07-16
+  Features:
+    - Factory hub: opening a hub now shows an "Inside the factories" panel next to the chest
+      window - every item sitting in the provider chests the hub reaches, with counts,
+      refreshed live.
+    - Factory hub: mining a hub sends its buffered items back into the factories' provider
+      chests - you pick up an empty chest instead of an inventory full of parts.
+    - Factory hub: anything above the per-item cap (e.g. items put in by hand) is returned to
+      the factories on the next pull pass, requester-trash style. The hub only ever holds what
+      it's willing to provide.
+  Changes:
+    - Factory hub: inventory slots setting now defaults to 200 (was 80) and allows up to 1000,
+      so hundreds of different parts fit at once. Existing installs keep their saved value -
+      raise the slider in mod settings.
+    - Factory hub: the inventory limiter (red X) is gone - the per-item cap makes it pointless.
+    - Factory hub: chest is now properly orange in hand and on the ground (was: red icon, muddy
+      brown placed sprite).
+---------------------------------------------------------------------------------------------------
 Version: 0.11.0
 Date: 2026-07-16
   Features:

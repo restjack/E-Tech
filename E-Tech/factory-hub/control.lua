@@ -3,10 +3,15 @@
 -- ticks each hub teleports items out of the provider chests inside the
 -- Factorissimo factories on its own surface (recursing into nested
 -- factories) and offers them to the local logistic network as a passive
--- provider. One-way: items only ever leave factories. Bots can't cross
--- surfaces, so physically moving the items into an outside chest is the only
--- way to make them visible to the outside network — same trick Factorissimo
--- itself uses (in reverse) for its construction-bot support.
+-- provider. One-way by design, with two "return to factory" flows added in
+-- 0.12.0: mining a hub sends its buffered items back into the factories
+-- (you pick up an empty chest), and anything above the per-item cap
+-- (e.g. player-inserted items) gets pushed back too.
+--
+-- Bots can't cross surfaces, so physically moving the items into an outside
+-- chest is the only way to make them visible to the outside network — same
+-- trick Factorissimo itself uses (in reverse) for its construction-bot
+-- support.
 --
 -- Factorissimo internals used (verified against 3.12.2):
 --   remote "factorissimo": get_factory_by_entity, has_layout,
@@ -19,12 +24,14 @@
 local M = {}
 
 local HUB_NAME = "etech-factory-provider-hub"
-local PULL_TICKS = 120     -- pull pass per hub, every 2 s
+local PANEL_NAME = "etech-hub-panel"
+local PULL_TICKS = 120     -- pull pass per hub, every 2 s (also GUI refresh)
 local RESCAN_TICKS = 600   -- factory-list cache lifetime, 10 s
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 
 local function hub_data()
-    storage.etech_factory_hub = storage.etech_factory_hub or { hubs = {} }
+    storage.etech_factory_hub = storage.etech_factory_hub or { hubs = {}, open = {} }
+    storage.etech_factory_hub.open = storage.etech_factory_hub.open or {}
     return storage.etech_factory_hub
 end
 
@@ -143,6 +150,22 @@ local function provider_chests(factory, force, active_only)
     return chests
 end
 
+-- Every provider chest a hub can currently reach (fresh scan, no cache) —
+-- used by the pull pass, the mining return, and the GUI panel.
+local function all_provider_chests(hub, factories)
+    factories = factories or factories_for_hub(hub)
+    local active_only = settings.global["etech-hub-active-only"].value
+    local chests = {}
+    for _, factory in pairs(factories) do
+        if factory_usable(factory) then
+            for _, chest in pairs(provider_chests(factory, hub.force, active_only)) do
+                chests[#chests + 1] = chest
+            end
+        end
+    end
+    return chests
+end
+
 -- Move items from one provider chest into the hub, at most `cap_stacks`
 -- stacks of each item+quality in the hub at a time. Slot-by-slot via
 -- LuaItemStack so spoilage, ammo, durability and quality all survive the
@@ -171,6 +194,67 @@ local function drain_chest(chest, hub_inv, counts, cap_stacks)
     return true
 end
 
+-- Insert a whole LuaItemStack into the first chests with room, preserving
+-- spoilage/quality/ammo (mining return). Mutates the source stack down to
+-- whatever couldn't be placed. Returns the number moved.
+local function insert_stack_into_chests(chests, stack)
+    local moved = 0
+    for _, chest in pairs(chests) do
+        if not stack.valid_for_read then break end
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                local inserted = inv.insert(stack)
+                if inserted > 0 then
+                    moved = moved + inserted
+                    stack.count = stack.count - inserted -- reaching 0 clears the stack
+                end
+            end
+        end
+    end
+    return moved
+end
+
+-- Insert `count` of a plain item spec into the first chests with room
+-- (overflow return; spec-based, so spoil timers restart — overflow is
+-- player-inserted stock, almost never spoilable). Returns number inserted.
+local function insert_spec_into_chests(chests, name, quality, count)
+    local total = 0
+    for _, chest in pairs(chests) do
+        local remaining = count - total
+        if remaining <= 0 then break end
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                total = total + inv.insert({name = name, count = remaining, quality = quality})
+            end
+        end
+    end
+    return total
+end
+
+-- Anything in the hub above the per-item cap (player-inserted items, or the
+-- cap setting was lowered) goes back into the factories — the hub only ever
+-- holds what it's willing to provide. Requester-chest-trash equivalent.
+local function return_overflow(hub_inv, chests, counts, cap_stacks)
+    local over = {}
+    for _, item in pairs(hub_inv.get_contents()) do
+        local quality = item.quality or "normal"
+        local cap = cap_stacks * prototypes.item[item.name].stack_size
+        if item.count > cap then
+            over[#over + 1] = {name = item.name, quality = quality, excess = item.count - cap}
+        end
+    end
+    for _, o in pairs(over) do
+        local inserted = insert_spec_into_chests(chests, o.name, o.quality, o.excess)
+        if inserted > 0 then
+            hub_inv.remove({name = o.name, count = inserted, quality = o.quality})
+            local key = o.name .. "|" .. o.quality
+            counts[key] = (counts[key] or 0) - inserted
+        end
+    end
+end
+
 local function pull_for_hub(record)
     local hub = record.entity
     local hub_inv = hub.get_inventory(defines.inventory.chest)
@@ -183,32 +267,144 @@ local function pull_for_hub(record)
     end
     if #record.factories == 0 then return end
 
+    local chests = all_provider_chests(hub, record.factories)
+    if #chests == 0 then return end
+
     local counts = {}
     for _, item in pairs(hub_inv.get_contents()) do
         counts[item.name .. "|" .. (item.quality or "normal")] = item.count
     end
 
     local cap_stacks = settings.global["etech-hub-stacks-per-item"].value
-    local active_only = settings.global["etech-hub-active-only"].value
-    for _, factory in pairs(record.factories) do
-        if factory_usable(factory) then
-            for _, chest in pairs(provider_chests(factory, hub.force, active_only)) do
-                if not drain_chest(chest, hub_inv, counts, cap_stacks) then
-                    return -- hub full, done until bots make room
-                end
+    return_overflow(hub_inv, chests, counts, cap_stacks)
+    for _, chest in pairs(chests) do
+        if chest.valid then
+            if not drain_chest(chest, hub_inv, counts, cap_stacks) then
+                return -- hub full, done until bots make room
             end
         end
     end
 end
 
+-- Mining a hub: send its buffered items back into the factories' provider
+-- chests so the player picks up just the chest. Whatever doesn't fit stays
+-- in the mining buffer (player gets it, vanilla behavior).
+local function on_mined(event)
+    local entity = event.entity
+    if not (entity and entity.valid and entity.name == HUB_NAME) then return end
+    local buffer = event.buffer
+    if not (buffer and factorissimo_available()) then return end
+    local chests = all_provider_chests(entity)
+    if #chests == 0 then return end
+    for i = 1, #buffer do
+        local stack = buffer[i]
+        -- skip the hub item itself (and any hub items it was buffering)
+        if stack.valid_for_read and stack.name ~= HUB_NAME then
+            insert_stack_into_chests(chests, stack)
+        end
+    end
+end
+
+-- GUI: panel next to the hub's chest window listing what's sitting in the
+-- provider chests inside the factories this hub reaches.
+local function ensure_panel(player)
+    local panel = player.gui.relative[PANEL_NAME]
+    if panel then return panel end
+    panel = player.gui.relative.add {
+        type = "frame",
+        name = PANEL_NAME,
+        direction = "vertical",
+        caption = {"gui-etech-hub.panel-title"},
+        anchor = {
+            gui = defines.relative_gui_type.container_gui,
+            position = defines.relative_gui_position.right,
+            names = {HUB_NAME},
+        },
+    }
+    local inner = panel.add {
+        type = "frame",
+        name = "inner",
+        style = "inside_shallow_frame_with_padding",
+        direction = "vertical",
+    }
+    local scroll = inner.add {type = "scroll-pane", name = "scroll"}
+    scroll.style.maximal_height = 520
+    return panel
+end
+
+local function refresh_panel(player, hub)
+    local scroll = ensure_panel(player).inner.scroll
+    scroll.clear()
+
+    local totals = {} -- item name -> count, qualities merged for display
+    for _, chest in pairs(all_provider_chests(hub)) do
+        local inv = chest.get_inventory(defines.inventory.chest)
+        if inv then
+            for _, item in pairs(inv.get_contents()) do
+                totals[item.name] = (totals[item.name] or 0) + item.count
+            end
+        end
+    end
+
+    local list = {}
+    for name, count in pairs(totals) do
+        list[#list + 1] = {name = name, count = count}
+    end
+    if #list == 0 then
+        scroll.add {type = "label", caption = {"gui-etech-hub.panel-empty"}}
+        return
+    end
+    table.sort(list, function(a, b)
+        if a.count ~= b.count then return a.count > b.count end
+        return a.name < b.name
+    end)
+
+    local grid = scroll.add {type = "table", name = "grid", column_count = 8}
+    for _, e in ipairs(list) do
+        grid.add {
+            type = "sprite-button",
+            sprite = "item/" .. e.name,
+            number = e.count,
+            style = "slot_button",
+            elem_tooltip = {type = "item", name = e.name},
+        }
+    end
+end
+
+local function on_gui_opened(event)
+    local entity = event.entity
+    if not (entity and entity.valid and entity.name == HUB_NAME) then return end
+    if not factorissimo_available() then return end
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    hub_data().open[event.player_index] = entity
+    refresh_panel(player, entity)
+end
+
+local function on_gui_closed(event)
+    local entity = event.entity
+    if entity and entity.valid and entity.name == HUB_NAME then
+        hub_data().open[event.player_index] = nil
+    end
+end
+
 local function on_pull_tick()
     if not factorissimo_available() then return end
-    local hubs = hub_data().hubs
-    for unit_number, record in pairs(hubs) do
+    local data = hub_data()
+    for unit_number, record in pairs(data.hubs) do
         if record.entity.valid then
             pull_for_hub(record)
         else
-            hubs[unit_number] = nil
+            data.hubs[unit_number] = nil
+        end
+    end
+    -- live refresh for anyone looking at a hub
+    for player_index, hub in pairs(data.open) do
+        local player = game.get_player(player_index)
+        if player and player.valid and hub.valid and player.opened == hub then
+            refresh_panel(player, hub)
+        else
+            data.open[player_index] = nil
         end
     end
 end
@@ -237,6 +433,11 @@ M.events = {
     [defines.events.script_raised_built] = on_built,
     [defines.events.script_raised_revive] = on_built,
     [defines.events.on_entity_cloned] = on_built,
+    [defines.events.on_player_mined_entity] = on_mined,
+    [defines.events.on_robot_mined_entity] = on_mined,
+    [defines.events.on_space_platform_mined_entity] = on_mined,
+    [defines.events.on_gui_opened] = on_gui_opened,
+    [defines.events.on_gui_closed] = on_gui_closed,
     [defines.events.on_object_destroyed] = function(event)
         if event.useful_id then
             hub_data().hubs[event.useful_id] = nil
