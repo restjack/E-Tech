@@ -19,6 +19,10 @@ local hub = table.deepcopy(data.raw["logistic-container"]["storage-chest"])
 hub.name = "etech-factory-provider-hub"
 hub.minable.result = "etech-factory-provider-hub"
 hub.logistic_mode = "passive-provider"
+-- storage-chest carries max_logistic_slots = 1 (its storage filter slot);
+-- inherited, it gives the hub filter_slot_count == 1 while not being storage
+-- mode, and Filter Helper crashes calling get_filter on it. Drop it.
+hub.max_logistic_slots = nil
 hub.inventory_size = settings.startup["etech-hub-slots"].value
 hub.enable_inventory_bar = false -- per-item caps make the red-X limiter pointless
 hub.order = "b[storage]-c[etech-factory-provider-hub]"

@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.12.1
+Date: 2026-07-16
+  Bugfixes:
+    - Factory hub: opening the hub crashed Filter Helper ("Given logistic container isn't a
+      storage type"). The hub's sprite rebuild from the storage chest also inherited its
+      storage-filter slot (max_logistic_slots = 1); Filter Helper saw the slot and asked for
+      the filter of a chest that isn't storage mode. Slot removed.
+---------------------------------------------------------------------------------------------------
 Version: 0.12.0
 Date: 2026-07-16
   Features:
