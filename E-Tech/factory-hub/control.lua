@@ -609,7 +609,7 @@ local function load_panel_settings(player, record)
     for i = 1, FILTER_SLOTS do
         inner.filter_slots["etech-hub-filter-" .. i].elem_value = record.filters.items[i]
     end
-    inner["etech-hub-cap"].text = record.cap_override and tostring(record.cap_override) or ""
+    inner.cap_flow["etech-hub-cap"].text = record.cap_override and tostring(record.cap_override) or ""
 end
 
 local function refresh_grid(player, record)

@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.13.1
+Date: 2026-07-16
+  Bugfixes:
+    - Opening a factory outlet crashed ("attempt to index field 'etech-hub-cap'") - the
+      stacks-per-item textfield was looked up in the wrong GUI container when loading the
+      panel's saved settings.
+---------------------------------------------------------------------------------------------------
 Version: 0.13.0
 Date: 2026-07-16
   Features:
