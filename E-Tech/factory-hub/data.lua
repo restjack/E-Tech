@@ -1,43 +1,113 @@
 -- factory-hub/data.lua
--- Factory provider hub: a passive-provider chest that E-Tech's control stage
--- keeps stocked with items pulled out of the provider chests INSIDE
--- Factorissimo factory buildings on the same surface. Written for E-Tech
--- (public domain). Only loaded when Factorissimo 3 is active (root data.lua
--- checks), so the factory-connection-type-chest tech prerequisite exists.
+-- Factory outlet (+ inlet + sensor): logistics across the Factorissimo
+-- surface boundary. Written for E-Tech (public domain). Only loaded when
+-- Factorissimo 3 is active (root data.lua checks), so factory-1 and the
+-- factory-connection-type-chest tech exist.
 --
--- Sprite/icon build from the YELLOW storage chest, fully tinted orange —
--- multiplicative tint over the red passive provider gave a muddy brown
--- (0.11.0), and a half-tinted icon that still looked red in hand.
+--   Factory outlet  - passive provider kept stocked with items pulled out of
+--                     the provider chests inside factories on its surface.
+--   Factory inlet   - requester chest whose contents get distributed INTO
+--                     the requester/buffer chests inside those factories.
+--   Factory sensor  - constant combinator broadcasting the totals sitting in
+--                     the factories' provider chests as circuit signals.
+--
+-- 2.1 GOTCHA (cost us a yellow chest in 0.12.x): logistic containers keep
+-- their sprite in robot_door.animation.layers, NOT in a top-level animation
+-- field. Tints are applied without existence guards on purpose - if a future
+-- game version moves the sprites again this file should ERROR at load, not
+-- silently ship untinted chests.
 
 local hubTint = { r = 1, g = 0.6, b = 0.15, a = 1 }
 
-local hubIcons = {
-    { icon = "__base__/graphics/icons/storage-chest.png", icon_size = 64, tint = hubTint },
-}
-
-local hub = table.deepcopy(data.raw["logistic-container"]["storage-chest"])
-hub.name = "etech-factory-provider-hub"
-hub.minable.result = "etech-factory-provider-hub"
-hub.logistic_mode = "passive-provider"
--- storage-chest carries max_logistic_slots = 1 (its storage filter slot);
--- inherited, it gives the hub filter_slot_count == 1 while not being storage
--- mode, and Filter Helper crashes calling get_filter on it. Drop it.
-hub.max_logistic_slots = nil
-hub.inventory_size = settings.startup["etech-hub-slots"].value
-hub.enable_inventory_bar = false -- per-item caps make the red-X limiter pointless
-hub.order = "b[storage]-c[etech-factory-provider-hub]"
-hub.icon = nil
-hub.icons = hubIcons
-if hub.animation and hub.animation.layers then
-    hub.animation.layers[1].tint = hubTint
+local function tinted_icons(icon)
+    return {{ icon = icon, icon_size = 64, tint = hubTint }}
 end
 
-local hub_item = table.deepcopy(data.raw.item["storage-chest"])
-hub_item.name = "etech-factory-provider-hub"
-hub_item.place_result = "etech-factory-provider-hub"
-hub_item.order = "b[storage]-c[etech-factory-provider-hub]"
-hub_item.icon = nil
-hub_item.icons = hubIcons
+local function build_chest(base_name, name, icon)
+    local chest = table.deepcopy(data.raw["logistic-container"][base_name])
+    chest.name = name
+    chest.minable.result = name
+    chest.order = "b[storage]-c[" .. name .. "]"
+    chest.icon = nil
+    chest.icons = tinted_icons(icon)
+    chest.robot_door.animation.layers[1].tint = hubTint
+
+    local item = table.deepcopy(data.raw.item[base_name])
+    item.name = name
+    item.place_result = name
+    item.order = "b[storage]-c[" .. name .. "]"
+    item.icon = nil
+    item.icons = tinted_icons(icon)
+    return chest, item
+end
+
+-- Factory outlet -------------------------------------------------------------
+
+local outlet, outlet_item = build_chest("storage-chest",
+    "etech-factory-provider-hub", "__base__/graphics/icons/storage-chest.png")
+outlet.logistic_mode = "passive-provider"
+-- storage-chest's storage-filter slot; inherited it gives filter_slot_count
+-- == 1 without storage mode and Filter Helper crashes calling get_filter.
+outlet.max_logistic_slots = nil
+outlet.inventory_size = settings.startup["etech-hub-slots"].value
+outlet.enable_inventory_bar = false -- per-item caps make the red-X limiter pointless
+outlet.trash_inventory_size = nil
+
+-- Factory inlet ---------------------------------------------------------------
+
+local inlet, inlet_item = build_chest("requester-chest",
+    "etech-factory-inlet", "__base__/graphics/icons/requester-chest.png")
+inlet.inventory_size = settings.startup["etech-hub-slots"].value
+inlet.enable_inventory_bar = false
+
+-- Factory sensor --------------------------------------------------------------
+
+local sensor = table.deepcopy(data.raw["constant-combinator"]["constant-combinator"])
+sensor.name = "etech-factory-sensor"
+sensor.minable.result = "etech-factory-sensor"
+sensor.icon = nil
+sensor.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png")
+for _, direction in pairs({"north", "east", "south", "west"}) do
+    sensor.sprites[direction].layers[1].tint = hubTint
+end
+
+local sensor_item = table.deepcopy(data.raw.item["constant-combinator"])
+sensor_item.name = "etech-factory-sensor"
+sensor_item.place_result = "etech-factory-sensor"
+sensor_item.order = sensor_item.order .. "-etech"
+sensor_item.icon = nil
+sensor_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png")
+
+-- Hidden energy buffer (only used when the energy-per-item setting is > 0) ---
+
+local energy_interface = {
+    type = "electric-energy-interface",
+    name = "etech-hub-energy",
+    localised_name = {"entity-name.etech-factory-provider-hub"},
+    icons = tinted_icons("__base__/graphics/icons/storage-chest.png"),
+    flags = {
+        "not-on-map",
+        "not-blueprintable",
+        "not-deconstructable",
+        "placeable-off-grid",
+        "not-upgradable",
+    },
+    hidden = true,
+    max_health = 1,
+    collision_box = {{0, 0}, {0, 0}},
+    collision_mask = {layers = {}},
+    energy_source = {
+        type = "electric",
+        buffer_capacity = "50MJ",
+        usage_priority = "secondary-input",
+        input_flow_limit = "10MW",
+        output_flow_limit = "0W",
+    },
+    energy_production = "0W",
+    energy_usage = "0W",
+}
+
+-- Recipes + technology --------------------------------------------------------
 
 -- Research cost mirrors logistic-robotics so the unlock lands at the same
 -- science tier no matter which overhaul (K2 etc.) rewrote that tech.
@@ -58,29 +128,59 @@ if data.raw.technology["factory-connection-type-chest"] then
 end
 
 data:extend({
-    hub,
-    hub_item,
+    outlet, outlet_item,
+    inlet, inlet_item,
+    sensor, sensor_item,
+    energy_interface,
     {
         type = "recipe",
         name = "etech-factory-provider-hub",
         enabled = false,
-        energy_required = 5,
+        energy_required = 10,
         ingredients = {
+            {type = "item", name = "factory-1", amount = 1},
             {type = "item", name = "passive-provider-chest", amount = 1},
-            {type = "item", name = "advanced-circuit", amount = 5},
-            {type = "item", name = "steel-plate", amount = 10},
+            {type = "item", name = "advanced-circuit", amount = 20},
+            {type = "item", name = "processing-unit", amount = 10},
+            {type = "item", name = "steel-plate", amount = 25},
         },
         results = {{type = "item", name = "etech-factory-provider-hub", amount = 1}},
     },
     {
+        type = "recipe",
+        name = "etech-factory-inlet",
+        enabled = false,
+        energy_required = 10,
+        ingredients = {
+            {type = "item", name = "factory-1", amount = 1},
+            {type = "item", name = "requester-chest", amount = 1},
+            {type = "item", name = "advanced-circuit", amount = 20},
+            {type = "item", name = "processing-unit", amount = 10},
+            {type = "item", name = "steel-plate", amount = 25},
+        },
+        results = {{type = "item", name = "etech-factory-inlet", amount = 1}},
+    },
+    {
+        type = "recipe",
+        name = "etech-factory-sensor",
+        enabled = false,
+        energy_required = 5,
+        ingredients = {
+            {type = "item", name = "constant-combinator", amount = 1},
+            {type = "item", name = "advanced-circuit", amount = 5},
+            {type = "item", name = "steel-plate", amount = 5},
+        },
+        results = {{type = "item", name = "etech-factory-sensor", amount = 1}},
+    },
+    {
         type = "technology",
         name = "etech-factory-provider-hub",
-        icons = {
-            { icon = "__base__/graphics/icons/storage-chest.png", icon_size = 64, tint = hubTint },
-        },
+        icons = tinted_icons("__base__/graphics/icons/storage-chest.png"),
         prerequisites = prerequisites,
         effects = {
             { type = "unlock-recipe", recipe = "etech-factory-provider-hub" },
+            { type = "unlock-recipe", recipe = "etech-factory-inlet" },
+            { type = "unlock-recipe", recipe = "etech-factory-sensor" },
         },
         unit = unit,
         order = "c-k-d-e",

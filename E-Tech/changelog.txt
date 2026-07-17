@@ -1,4 +1,30 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.13.0
+Date: 2026-07-16
+  Features:
+    - Factory outlet (renamed from "Factory provider hub"): new expensive recipe worthy of the
+      power - 1 factory building + provider chest + 20 advanced circuits + 10 processing units
+      + 25 steel.
+    - Factory inlet: the outlet's counterpart. Fill it (by hand or bot requests) and it
+      distributes its contents into the requester/buffer chests inside the factories on its
+      surface, up to their requested amounts. Same recipe idea, mining returns items too.
+    - Factory sensor: a constant combinator that broadcasts the factories' provider chest
+      totals as circuit signals.
+    - Outlet GUI: per-outlet pull filter (all / only selected / all except selected, 10 item
+      slots), per-outlet stacks-per-item override, search box over the contents list,
+      per-factory breakdown in each item's tooltip, quality shown separately, and a "pulled
+      last minute" counter.
+    - Optional energy cost (map setting, default off): outlets and inlets drain a hidden
+      electric buffer per item moved.
+    - Optional range limit (map setting, default off): devices only reach factories within N
+      tiles.
+    - /etech-hub-debug command: prints per-device diagnostics including why each item type is
+      or isn't being pulled.
+  Bugfixes:
+    - The placed chest was yellow: Factorio 2.1 keeps logistic chest sprites in
+      robot_door.animation, not the old animation field, so the 0.12.0 orange tint silently
+      missed the entity. Both the outlet and everything else are now tinted for real.
+---------------------------------------------------------------------------------------------------
 Version: 0.12.1
 Date: 2026-07-16
   Bugfixes:
