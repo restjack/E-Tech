@@ -1,4 +1,25 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.14.0
+Date: 2026-07-16
+  Features:
+    - Outlet: click an item in the panel to print clickable map pins for every factory holding
+      it; right-click to pin it to the top of the list. Tooltips now use factory names.
+    - Outlet: factory naming - the panel lists every reachable factory with a Map button and a
+      name field. Names show up in tooltips and map-pin prints.
+    - Outlet: on-demand mode (per-outlet checkbox) - instead of buffering stacks, the outlet
+      sits empty and only fetches items from the factories when the logistic network has unmet
+      requester demand (chests, players, spidertrons). Unneeded leftovers return to the
+      factories. Construction ghosts aren't covered (yet).
+    - Outlet: circuit enable (per-outlet checkbox) - only works while any nonzero circuit
+      signal reaches the chest.
+    - Outlet: optional pulling from yellow storage chests inside factories (per-outlet
+      checkbox, off by default).
+    - Outlet: priority field - lower numbers pull first when several outlets compete.
+    - Inlet: auto-request (checkbox in its new side panel) - reads the unmet requests of the
+      requester/buffer chests inside the factories and sets them as the inlet's own bot
+      requests in a managed "etech-inlet-auto" logistics group. Bots deliver exactly what the
+      factories need, the inlet forwards it inside.
+---------------------------------------------------------------------------------------------------
 Version: 0.13.1
 Date: 2026-07-16
   Bugfixes:

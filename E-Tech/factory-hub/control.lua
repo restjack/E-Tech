@@ -1,12 +1,18 @@
 -- factory-hub/control.lua
 -- Runtime for the factory outlet / inlet / sensor (event_handler lib).
 -- Every PULL_TICKS ticks:
---   outlet - teleports items out of the provider chests inside the
---            Factorissimo factories on its surface into itself (passive
---            provider), honoring per-item caps, per-hub filters and the
---            optional energy cost. Anything above the cap goes back.
+--   outlet - teleports items out of the provider chests (optionally storage
+--            chests) inside the Factorissimo factories on its surface into
+--            itself (passive provider). Two modes per outlet:
+--              buffer (default): keep N stacks of each item on hand
+--              on-demand: sit empty; materialize items only when the local
+--                logistic network has unmet requester demand
+--            plus per-outlet filters, priority ordering, circuit enable and
+--            the optional energy cost.
 --   inlet  - distributes its own contents into the requester/buffer chests
---            inside those factories, up to their request targets.
+--            inside those factories, up to their request targets; optionally
+--            auto-requests the factories' remaining deficits from the
+--            outside network (managed logistic section "etech-inlet-auto").
 --   sensor - writes the totals sitting in the factories' provider chests to
 --            its constant-combinator section as circuit signals.
 -- Mining an outlet/inlet returns its buffered items to the factories first.
@@ -29,12 +35,15 @@ local INLET_NAME = "etech-factory-inlet"
 local SENSOR_NAME = "etech-factory-sensor"
 local ENERGY_NAME = "etech-hub-energy"
 local PANEL_NAME = "etech-hub-panel"
+local INLET_PANEL_NAME = "etech-inlet-panel"
+local AUTO_GROUP = "etech-inlet-auto"
 local PULL_TICKS = 120     -- work pass per device, every 2 s (also GUI refresh)
 local RESCAN_TICKS = 600   -- factory-list cache lifetime, 10 s
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 10
 local RATE_WINDOW = 3600   -- ticks of pull history for the items/min stat
-local MAX_SIGNALS = 1000   -- constant combinator section limit
+local MAX_SIGNALS = 1000   -- constant combinator / logistic section limit
+local MAX_FACTORY_ROWS = 20
 
 local KINDS = {
     [OUTLET_NAME] = "outlet",
@@ -44,8 +53,10 @@ local KINDS = {
 
 local function hub_data()
     storage.etech_factory_hub = storage.etech_factory_hub or { hubs = {}, open = {} }
-    storage.etech_factory_hub.open = storage.etech_factory_hub.open or {}
-    return storage.etech_factory_hub
+    local data = storage.etech_factory_hub
+    data.open = data.open or {}
+    data.factory_names = data.factory_names or {}
+    return data
 end
 
 local function factorissimo_available()
@@ -64,11 +75,18 @@ local function is_factory_building(name)
     return cached
 end
 
+local function factory_label(id)
+    local name = hub_data().factory_names[id]
+    if name and name ~= "" then return name end
+    return "Factory " .. id
+end
+
 local function register_device(entity)
     hub_data().hubs[entity.unit_number] = {
         entity = entity,
         kind = KINDS[entity.name],
         filters = { mode = 1, items = {} },
+        pins = {},
     }
     script.register_on_object_destroyed(entity)
 end
@@ -192,6 +210,15 @@ local function provider_mode(mode)
     return mode == "passive-provider" and not settings.global["etech-hub-active-only"].value
 end
 
+-- Outlets can optionally also drain yellow storage chests (deconstruction
+-- leftovers etc.); the toggle is per outlet.
+local function outlet_source_mode(record)
+    return function(mode)
+        if mode == "storage" then return record.pull_storage == true end
+        return provider_mode(mode)
+    end
+end
+
 local function requester_mode(mode)
     return mode == "requester" or mode == "buffer"
 end
@@ -226,6 +253,25 @@ local function item_allowed(record, name, set)
     if mode == 2 then return set ~= nil and set[name] == true end
     if mode == 3 then return not (set and set[name]) end
     return true
+end
+
+-- Circuit enable ---------------------------------------------------------------
+
+-- When the checkbox is on, the outlet only works while any nonzero circuit
+-- signal reaches it (red or green wire). No wire = paused.
+local function circuit_enabled(record)
+    if not record.circuit_enable then return true end
+    local entity = record.entity
+    for _, wire in pairs({defines.wire_connector_id.circuit_red,
+                          defines.wire_connector_id.circuit_green}) do
+        local net = entity.get_circuit_network(wire)
+        if net then
+            for _, s in pairs(net.signals or {}) do
+                if s.count ~= 0 then return true end
+            end
+        end
+    end
+    return false
 end
 
 -- Energy cost ----------------------------------------------------------------
@@ -288,12 +334,63 @@ local function rate_per_minute(record)
     return total
 end
 
--- Outlet: pull + overflow ------------------------------------------------------
+-- Item transfer helpers ---------------------------------------------------------
+
+local function split_key(key)
+    return key:match("^(.-)|(.*)$")
+end
+
+-- Insert a whole LuaItemStack into the first chests with room, preserving
+-- spoilage/quality/ammo (mining return). Mutates the source stack down to
+-- whatever couldn't be placed.
+local function insert_stack_into_chests(chests, stack)
+    for _, entry in pairs(chests) do
+        if not stack.valid_for_read then break end
+        local chest = entry.chest
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                local inserted = inv.insert(stack)
+                if inserted > 0 then
+                    stack.count = stack.count - inserted -- reaching 0 clears the stack
+                end
+            end
+        end
+    end
+end
+
+-- Insert `count` of a plain item spec into the first chests with room
+-- (overflow/on-demand return; spec-based, so spoil timers restart). Returns
+-- number inserted.
+local function insert_spec_into_chests(chests, name, quality, count)
+    local total = 0
+    for _, entry in pairs(chests) do
+        local remaining = count - total
+        if remaining <= 0 then break end
+        local chest = entry.chest
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                total = total + inv.insert({name = name, count = remaining, quality = quality})
+            end
+        end
+    end
+    return total
+end
+
+local function inventory_counts(inv)
+    local counts = {}
+    for _, item in pairs(inv.get_contents()) do
+        counts[item.name .. "|" .. (item.quality or "normal")] = item.count
+    end
+    return counts
+end
+
+-- Outlet: buffer mode ------------------------------------------------------------
 
 -- Move items from one provider chest into the outlet, at most cap_stacks
 -- stacks of each item+quality in the outlet at a time. Slot-by-slot via
 -- LuaItemStack so spoilage, ammo, durability and quality all survive.
--- Returns moved count; sets state.full when the outlet is completely full.
 local function drain_chest(chest, hub_inv, counts, cap_stacks, record, set, state)
     local inv = chest.get_inventory(defines.inventory.chest)
     if not inv then return 0 end
@@ -324,44 +421,6 @@ local function drain_chest(chest, hub_inv, counts, cap_stacks, record, set, stat
     return moved
 end
 
--- Insert a whole LuaItemStack into the first chests with room, preserving
--- spoilage/quality/ammo (mining return). Mutates the source stack down to
--- whatever couldn't be placed.
-local function insert_stack_into_chests(chests, stack)
-    for _, entry in pairs(chests) do
-        if not stack.valid_for_read then break end
-        local chest = entry.chest
-        if chest.valid then
-            local inv = chest.get_inventory(defines.inventory.chest)
-            if inv then
-                local inserted = inv.insert(stack)
-                if inserted > 0 then
-                    stack.count = stack.count - inserted -- reaching 0 clears the stack
-                end
-            end
-        end
-    end
-end
-
--- Insert `count` of a plain item spec into the first chests with room
--- (overflow return; spec-based, so spoil timers restart — overflow is
--- player-inserted stock, almost never spoilable). Returns number inserted.
-local function insert_spec_into_chests(chests, name, quality, count)
-    local total = 0
-    for _, entry in pairs(chests) do
-        local remaining = count - total
-        if remaining <= 0 then break end
-        local chest = entry.chest
-        if chest.valid then
-            local inv = chest.get_inventory(defines.inventory.chest)
-            if inv then
-                total = total + inv.insert({name = name, count = remaining, quality = quality})
-            end
-        end
-    end
-    return total
-end
-
 -- Anything in the outlet above the per-item cap (player-inserted items, or
 -- the cap setting was lowered) goes back into the factories — the outlet
 -- only ever holds what it's willing to provide. Requester-trash equivalent.
@@ -390,32 +449,133 @@ local function cap_stacks_for(record)
     return settings.global["etech-hub-stacks-per-item"].value
 end
 
+-- Outlet: on-demand mode ---------------------------------------------------------
+
+-- Unmet requester demand on the outlet's own logistic network, per
+-- item|quality: how much requesters (chests, players, spidertrons) still
+-- want beyond what they hold. Returns nil when the outlet isn't in a
+-- network.
+local function network_wants(outlet)
+    local network = outlet.logistic_network
+    if not network then return nil end
+    local wants = {}
+    for _, point in pairs(network.requester_points) do
+        local owner = point.owner
+        if owner.valid and owner ~= outlet then
+            for _, section in pairs(point.sections) do
+                if section.active then
+                    for _, filter in pairs(section.filters) do
+                        local v = filter.value
+                        if v and v.name and (v.type == nil or v.type == "item") then
+                            local quality = v.quality or "normal"
+                            local have = owner.get_item_count({name = v.name, quality = quality})
+                            local deficit = (filter.min or 0) - have
+                            if deficit > 0 then
+                                local key = v.name .. "|" .. quality
+                                wants[key] = (wants[key] or 0) + deficit
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return wants, network
+end
+
+-- On-demand: keep only wanted items in the outlet (return the rest to the
+-- factories), then materialize what the network can't already supply.
+local function pull_on_demand(record, hub_inv, chests, set, state)
+    local wants, network = network_wants(record.entity)
+    local moved = 0
+
+    -- send back anything no longer wanted (bots occasionally re-route if we
+    -- yank an item they were flying toward; the engine handles it)
+    for key, count in pairs(inventory_counts(hub_inv)) do
+        local wanted = wants and wants[key] or 0
+        local excess = count - wanted
+        if excess > 0 then
+            local name, quality = split_key(key)
+            local inserted = insert_spec_into_chests(chests, name, quality, excess)
+            if inserted > 0 then
+                hub_inv.remove({name = name, count = inserted, quality = quality})
+            end
+        end
+    end
+
+    if not wants then return 0 end
+
+    -- what the network can't already cover (its count includes our stock)
+    local need = {}
+    for key, want in pairs(wants) do
+        local name, quality = split_key(key)
+        local missing = want - network.get_item_count({name = name, quality = quality})
+        if missing > 0 then need[key] = missing end
+    end
+    if next(need) == nil then return 0 end
+
+    for _, entry in pairs(chests) do
+        if state.budget <= 0 or next(need) == nil then break end
+        local chest = entry.chest
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                for i = 1, #inv do
+                    if state.budget <= 0 then break end
+                    local stack = inv[i]
+                    if stack.valid_for_read and item_allowed(record, stack.name, set) then
+                        local key = stack.name .. "|" .. stack.quality.name
+                        local missing = need[key]
+                        if missing and missing >= 1 then
+                            local original = stack.count
+                            local move = math.min(missing, original, state.budget)
+                            if move < original then stack.count = move end
+                            local inserted = hub_inv.insert(stack)
+                            stack.count = original - inserted
+                            moved = moved + inserted
+                            state.budget = state.budget - inserted
+                            need[key] = missing - inserted
+                            if need[key] < 1 then need[key] = nil end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return moved
+end
+
 local function pull_for_outlet(record)
     local hub = record.entity
     local hub_inv = hub.get_inventory(defines.inventory.chest)
     if not hub_inv then return end
+    if not circuit_enabled(record) then
+        note_moved(record, 0)
+        return
+    end
 
-    local chests = reachable_chests(record, provider_mode)
+    local chests = reachable_chests(record, outlet_source_mode(record))
     if #chests == 0 then
         note_moved(record, 0)
         return
     end
 
-    local counts = {}
-    for _, item in pairs(hub_inv.get_contents()) do
-        counts[item.name .. "|" .. (item.quality or "normal")] = item.count
-    end
-
-    local cap_stacks = cap_stacks_for(record)
-    return_overflow(hub_inv, chests, counts, cap_stacks)
-
     local set = filter_set(record)
     local state = { budget = energy_budget(record), full = false }
-    local moved = 0
-    for _, entry in pairs(chests) do
-        if entry.chest.valid then
-            moved = moved + drain_chest(entry.chest, hub_inv, counts, cap_stacks, record, set, state)
-            if state.full or state.budget <= 0 then break end
+    local moved
+
+    if record.on_demand then
+        moved = pull_on_demand(record, hub_inv, chests, set, state)
+    else
+        local counts = inventory_counts(hub_inv)
+        local cap_stacks = cap_stacks_for(record)
+        return_overflow(hub_inv, chests, counts, cap_stacks)
+        moved = 0
+        for _, entry in pairs(chests) do
+            if entry.chest.valid then
+                moved = moved + drain_chest(entry.chest, hub_inv, counts, cap_stacks, record, set, state)
+                if state.full or state.budget <= 0 then break end
+            end
         end
     end
     spend_energy(record, moved)
@@ -443,53 +603,87 @@ local function chest_requests(chest)
     return wants
 end
 
+-- Write the factories' remaining deficits as this inlet's own bot requests
+-- (managed section, group "etech-inlet-auto"; the player's own sections are
+-- never touched).
+local function update_inlet_auto_requests(record, remaining)
+    local point = record.entity.get_requester_point()
+    if not point then return end
+    local target
+    for _, section in pairs(point.sections) do
+        if section.group == AUTO_GROUP then
+            target = section
+            break
+        end
+    end
+    if not record.auto_request then
+        if target then target.filters = {} end
+        return
+    end
+    if not target then target = point.add_section(AUTO_GROUP) end
+    if not target then return end
+
+    local list = {}
+    for key, count in pairs(remaining or {}) do
+        local name, quality = split_key(key)
+        list[#list + 1] = {
+            value = { type = "item", name = name, quality = quality, comparator = "=" },
+            min = count,
+        }
+        if #list >= MAX_SIGNALS then break end
+    end
+    target.filters = list
+end
+
 local function distribute_for_inlet(record)
     local inlet = record.entity
     local inlet_inv = inlet.get_inventory(defines.inventory.chest)
     if not inlet_inv then return end
 
-    local have = {}
-    for _, item in pairs(inlet_inv.get_contents()) do
-        have[item.name .. "|" .. (item.quality or "normal")] = item.count
-    end
-    if next(have) == nil then
-        note_moved(record, 0)
-        return
-    end
-
+    local have = inventory_counts(inlet_inv)
     local targets = reachable_chests(record, requester_mode)
     local budget = energy_budget(record)
     local moved = 0
+    local remaining = {} -- interior deficits left after this pass, for auto-request
+
     for _, entry in pairs(targets) do
-        if budget <= 0 then break end
         local chest = entry.chest
         if chest.valid then
             local wants = chest_requests(chest)
             if wants and next(wants) then
                 local inv = chest.get_inventory(defines.inventory.chest)
-                local current = {}
-                for _, item in pairs(inv.get_contents()) do
-                    current[item.name .. "|" .. (item.quality or "normal")] = item.count
-                end
+                local current = inventory_counts(inv)
                 for key, want in pairs(wants) do
-                    local available = have[key] or 0
                     local deficit = want - (current[key] or 0)
-                    local move = math.min(available, deficit, budget)
-                    if move >= 1 then
-                        local name, quality = key:match("^(.-)|(.*)$")
-                        -- spec-based transfer: spoil timers restart (note in README)
-                        local inserted = inv.insert({name = name, count = move, quality = quality})
-                        if inserted > 0 then
-                            inlet_inv.remove({name = name, count = inserted, quality = quality})
-                            have[key] = available - inserted
-                            moved = moved + inserted
-                            budget = budget - inserted
+                    if deficit > 0 then
+                        local available = have[key] or 0
+                        local move = math.min(available, deficit, budget)
+                        if move >= 1 then
+                            local name, quality = split_key(key)
+                            -- spec-based transfer: spoil timers restart
+                            local inserted = inv.insert({name = name, count = move, quality = quality})
+                            if inserted > 0 then
+                                inlet_inv.remove({name = name, count = inserted, quality = quality})
+                                have[key] = available - inserted
+                                moved = moved + inserted
+                                budget = budget - inserted
+                                deficit = deficit - inserted
+                            end
+                        end
+                        if deficit > 0 then
+                            remaining[key] = (remaining[key] or 0) + deficit
                         end
                     end
                 end
             end
         end
+        if budget <= 0 then
+            -- still collect the rest of the deficits for auto-request
+            budget = 0
+        end
     end
+
+    update_inlet_auto_requests(record, remaining)
     spend_energy(record, moved)
     note_moved(record, moved)
 end
@@ -510,7 +704,7 @@ local function update_sensor(record)
 
     local list = {}
     for key, count in pairs(totals) do
-        local name, quality = key:match("^(.-)|(.*)$")
+        local name, quality = split_key(key)
         list[#list + 1] = {
             value = { type = "item", name = name, quality = quality, comparator = "=" },
             min = count,
@@ -538,7 +732,7 @@ local function on_mined(event)
     if not (buffer and factorissimo_available()) then return end
 
     local record = hub_data().hubs[entity.unit_number]
-        or { entity = entity, kind = kind, filters = { mode = 1, items = {} } }
+        or { entity = entity, kind = kind, filters = { mode = 1, items = {} }, pins = {} }
     local chests = reachable_chests(record, provider_mode)
     if #chests == 0 then return end
     for i = 1, #buffer do
@@ -550,7 +744,39 @@ local function on_mined(event)
     end
 end
 
--- GUI: panel next to the outlet's chest window --------------------------------
+-- GPS helpers -------------------------------------------------------------------
+
+local function gps_tag(factory)
+    local building = factory.building
+    return string.format("[gps=%d,%d,%s]",
+        building.position.x, building.position.y, building.surface.name)
+end
+
+local function locate_item(player, record, name, quality)
+    local per = {}
+    for _, entry in pairs(reachable_chests(record, outlet_source_mode(record))) do
+        local inv = entry.chest.get_inventory(defines.inventory.chest)
+        if inv then
+            local count = inv.get_item_count({name = name, quality = quality})
+            if count > 0 then
+                local id = entry.factory.id
+                if not per[id] then per[id] = { factory = entry.factory, count = 0 } end
+                per[id].count = per[id].count + count
+            end
+        end
+    end
+    local found = false
+    for id, info in pairs(per) do
+        found = true
+        player.print(name .. " — " .. factory_label(id) .. ": " .. info.count ..
+            " " .. gps_tag(info.factory))
+    end
+    if not found then
+        player.print(name .. " — nothing in reachable factories right now")
+    end
+end
+
+-- GUI: outlet panel --------------------------------------------------------------
 
 local MODE_ITEMS = {
     {"gui-etech-hub.mode-all"},
@@ -582,34 +808,81 @@ local function build_panel(player)
     local search = inner.add {type = "textfield", name = "etech-hub-search"}
     search.style.horizontally_stretchable = true
     local scroll = inner.add {type = "scroll-pane", name = "scroll"}
-    scroll.style.maximal_height = 400
+    scroll.style.maximal_height = 320
 
     inner.add {type = "line", name = "sep"}
     inner.add {type = "label", name = "settings_label",
         caption = {"gui-etech-hub.pull-settings"}}
+    local checks = inner.add {type = "flow", name = "checks", direction = "vertical"}
+    checks.add {type = "checkbox", name = "etech-hub-ondemand", state = false,
+        caption = {"gui-etech-hub.on-demand"}, tooltip = {"gui-etech-hub.on-demand-tooltip"}}
+    checks.add {type = "checkbox", name = "etech-hub-circuit", state = false,
+        caption = {"gui-etech-hub.circuit"}, tooltip = {"gui-etech-hub.circuit-tooltip"}}
+    checks.add {type = "checkbox", name = "etech-hub-storage", state = false,
+        caption = {"gui-etech-hub.storage"}, tooltip = {"gui-etech-hub.storage-tooltip"}}
     inner.add {type = "drop-down", name = "etech-hub-mode", items = MODE_ITEMS}
     local slots = inner.add {type = "table", name = "filter_slots", column_count = 5}
     for i = 1, FILTER_SLOTS do
         slots.add {type = "choose-elem-button", name = "etech-hub-filter-" .. i,
             elem_type = "item"}
     end
-    local cap_flow = inner.add {type = "flow", name = "cap_flow", direction = "horizontal"}
-    cap_flow.add {type = "label", name = "cap_label", caption = {"gui-etech-hub.cap-label"},
+    local numbers = inner.add {type = "flow", name = "numbers", direction = "horizontal"}
+    numbers.add {type = "label", name = "cap_label", caption = {"gui-etech-hub.cap-label"},
         tooltip = {"gui-etech-hub.cap-tooltip"}}
-    local cap = cap_flow.add {type = "textfield", name = "etech-hub-cap",
+    local cap = numbers.add {type = "textfield", name = "etech-hub-cap",
         numeric = true, allow_decimal = false, allow_negative = false}
     cap.style.width = 50
+    numbers.add {type = "label", name = "prio_label", caption = {"gui-etech-hub.prio-label"},
+        tooltip = {"gui-etech-hub.prio-tooltip"}}
+    local prio = numbers.add {type = "textfield", name = "etech-hub-priority",
+        numeric = true, allow_decimal = false, allow_negative = false}
+    prio.style.width = 50
+
+    inner.add {type = "label", name = "factories_label",
+        caption = {"gui-etech-hub.factories"}}
+    local fscroll = inner.add {type = "scroll-pane", name = "fscroll"}
+    fscroll.style.maximal_height = 150
+    fscroll.add {type = "table", name = "frows", column_count = 2}
     return panel
 end
 
 local function load_panel_settings(player, record)
     local panel = build_panel(player)
     local inner = panel.inner
+    inner.checks["etech-hub-ondemand"].state = record.on_demand == true
+    inner.checks["etech-hub-circuit"].state = record.circuit_enable == true
+    inner.checks["etech-hub-storage"].state = record.pull_storage == true
     inner["etech-hub-mode"].selected_index = record.filters.mode or 1
     for i = 1, FILTER_SLOTS do
         inner.filter_slots["etech-hub-filter-" .. i].elem_value = record.filters.items[i]
     end
-    inner.cap_flow["etech-hub-cap"].text = record.cap_override and tostring(record.cap_override) or ""
+    inner.numbers["etech-hub-cap"].text =
+        record.cap_override and tostring(record.cap_override) or ""
+    inner.numbers["etech-hub-priority"].text =
+        record.priority and tostring(record.priority) or ""
+
+    -- factory rows: locate button + rename field (rebuilt on open only, so
+    -- typing a name never gets clobbered by the 2 s refresh)
+    local rows = inner.fscroll.frows
+    rows.clear()
+    local shown = 0
+    for _, factory in pairs(cached_factories(record)) do
+        if factory_usable(factory) then
+            shown = shown + 1
+            if shown > MAX_FACTORY_ROWS then break end
+            local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
+            btn.style.minimal_width = 50
+            btn.tags = { etech = "factory-locate", id = factory.id }
+            local field = rows.add {type = "textfield",
+                text = hub_data().factory_names[factory.id] or ""}
+            field.tags = { etech = "factory-name", id = factory.id }
+            field.style.horizontally_stretchable = true
+        end
+    end
+    if shown > MAX_FACTORY_ROWS then
+        rows.add {type = "label", caption = "..."}
+        rows.add {type = "label", caption = ""}
+    end
 end
 
 local function refresh_grid(player, record)
@@ -624,7 +897,7 @@ local function refresh_grid(player, record)
 
     -- totals per item+quality with per-factory breakdown
     local totals, order = {}, {}
-    for _, entry in pairs(reachable_chests(record, provider_mode)) do
+    for _, entry in pairs(reachable_chests(record, outlet_source_mode(record))) do
         local inv = entry.chest.get_inventory(defines.inventory.chest)
         if inv then
             for _, item in pairs(inv.get_contents()) do
@@ -642,9 +915,11 @@ local function refresh_grid(player, record)
         end
     end
 
+    local pins = record.pins or {}
     local list = {}
     for _, t in pairs(order) do
         if search == "" or t.name:lower():find(search, 1, true) then
+            t.pinned = pins[t.name .. "|" .. t.quality] == true
             list[#list + 1] = t
         end
     end
@@ -653,6 +928,7 @@ local function refresh_grid(player, record)
         return
     end
     table.sort(list, function(a, b)
+        if a.pinned ~= b.pinned then return a.pinned end
         if a.count ~= b.count then return a.count > b.count end
         return a.name < b.name
     end)
@@ -670,17 +946,57 @@ local function refresh_grid(player, record)
                 lines[#lines + 1] = "\n..."
                 break
             end
-            lines[#lines + 1] = "\nFactory " .. factory_id .. ": " .. n
+            lines[#lines + 1] = "\n" .. factory_label(factory_id) .. ": " .. n
         end
-        grid.add {
+        lines[#lines + 1] = {"gui-etech-hub.item-hint"}
+        local btn = grid.add {
             type = "sprite-button",
             sprite = "item/" .. t.name,
             number = t.count,
             style = "slot_button",
             tooltip = lines,
         }
+        btn.toggled = t.pinned
+        btn.tags = { etech = "item", name = t.name, quality = t.quality }
     end
 end
+
+-- GUI: inlet panel ---------------------------------------------------------------
+
+local function build_inlet_panel(player, record)
+    local old = player.gui.relative[INLET_PANEL_NAME]
+    if old then old.destroy() end
+    local panel = player.gui.relative.add {
+        type = "frame",
+        name = INLET_PANEL_NAME,
+        direction = "vertical",
+        caption = {"gui-etech-hub.inlet-title"},
+        anchor = {
+            gui = defines.relative_gui_type.container_gui,
+            position = defines.relative_gui_position.right,
+            names = {INLET_NAME},
+        },
+    }
+    local inner = panel.add {
+        type = "frame",
+        name = "inner",
+        style = "inside_shallow_frame_with_padding",
+        direction = "vertical",
+    }
+    inner.add {type = "label", name = "rate"}
+    inner.add {type = "checkbox", name = "etech-inlet-auto",
+        state = record.auto_request == true,
+        caption = {"gui-etech-hub.auto-request"},
+        tooltip = {"gui-etech-hub.auto-request-tooltip"}}
+end
+
+local function refresh_inlet_panel(player, record)
+    local panel = player.gui.relative[INLET_PANEL_NAME]
+    if not panel then return end
+    panel.inner.rate.caption = {"gui-etech-hub.inlet-rate", rate_per_minute(record)}
+end
+
+-- GUI events ---------------------------------------------------------------------
 
 local function open_record(player_index)
     local data = hub_data()
@@ -691,7 +1007,9 @@ end
 
 local function on_gui_opened(event)
     local entity = event.entity
-    if not (entity and entity.valid and entity.name == OUTLET_NAME) then return end
+    if not (entity and entity.valid) then return end
+    local kind = KINDS[entity.name]
+    if not (kind == "outlet" or kind == "inlet") then return end
     if not factorissimo_available() then return end
     local player = game.get_player(event.player_index)
     if not player then return end
@@ -701,13 +1019,18 @@ local function on_gui_opened(event)
         register_device(entity)
         record = hub_data().hubs[entity.unit_number]
     end
-    load_panel_settings(player, record)
-    refresh_grid(player, record)
+    if kind == "outlet" then
+        load_panel_settings(player, record)
+        refresh_grid(player, record)
+    else
+        build_inlet_panel(player, record)
+        refresh_inlet_panel(player, record)
+    end
 end
 
 local function on_gui_closed(event)
     local entity = event.entity
-    if entity and entity.valid and entity.name == OUTLET_NAME then
+    if entity and entity.valid and KINDS[entity.name] then
         hub_data().open[event.player_index] = nil
     end
 end
@@ -725,16 +1048,72 @@ local function on_gui_elem_changed(event)
     if record then record.filters.items[tonumber(slot)] = event.element.elem_value end
 end
 
-local function on_gui_text_changed(event)
+local function on_gui_checked_state_changed(event)
     local name = event.element.name
     local record = open_record(event.player_index)
     if not record then return end
+    if name == "etech-hub-ondemand" then
+        record.on_demand = event.element.state
+    elseif name == "etech-hub-circuit" then
+        record.circuit_enable = event.element.state
+    elseif name == "etech-hub-storage" then
+        record.pull_storage = event.element.state
+    elseif name == "etech-inlet-auto" then
+        record.auto_request = event.element.state
+        if not record.auto_request then
+            update_inlet_auto_requests(record, nil) -- clear the managed section
+        end
+    end
+end
+
+local function on_gui_text_changed(event)
+    local element = event.element
+    local tags = element.tags
+    if tags and tags.etech == "factory-name" then
+        local text = element.text
+        hub_data().factory_names[tags.id] = text ~= "" and text or nil
+        return
+    end
+    local record = open_record(event.player_index)
+    if not record then return end
+    local name = element.name
     if name == "etech-hub-cap" then
-        local n = tonumber(event.element.text)
+        local n = tonumber(element.text)
         record.cap_override = (n and n >= 1) and math.floor(n) or nil
+    elseif name == "etech-hub-priority" then
+        local n = tonumber(element.text)
+        record.priority = (n and n >= 1) and math.floor(n) or nil
     elseif name == "etech-hub-search" then
         local player = game.get_player(event.player_index)
         if player then refresh_grid(player, record) end
+    end
+end
+
+local function on_gui_click(event)
+    local element = event.element
+    if not (element and element.valid) then return end
+    local tags = element.tags
+    if not (tags and tags.etech) then return end
+    local player = game.get_player(event.player_index)
+    local record = open_record(event.player_index)
+    if not (player and record) then return end
+
+    if tags.etech == "item" then
+        if event.button == defines.mouse_button_type.right then
+            record.pins = record.pins or {}
+            local key = tags.name .. "|" .. tags.quality
+            record.pins[key] = not record.pins[key] or nil
+            refresh_grid(player, record)
+        else
+            locate_item(player, record, tags.name, tags.quality)
+        end
+    elseif tags.etech == "factory-locate" then
+        for _, factory in pairs(cached_factories(record)) do
+            if factory.id == tags.id and factory_usable(factory) then
+                player.print(factory_label(factory.id) .. " " .. gps_tag(factory))
+                return
+            end
+        end
     end
 end
 
@@ -743,15 +1122,14 @@ end
 local function on_pull_tick()
     if not factorissimo_available() then return end
     local data = hub_data()
+
+    -- outlets in priority order (1 = first), then inlets, then sensors
+    local outlets, inlets, sensors = {}, {}, {}
     for unit_number, record in pairs(data.hubs) do
         if record.entity.valid then
-            if record.kind == "outlet" then
-                pull_for_outlet(record)
-            elseif record.kind == "inlet" then
-                distribute_for_inlet(record)
-            elseif record.kind == "sensor" then
-                update_sensor(record)
-            end
+            if record.kind == "outlet" then outlets[#outlets + 1] = record
+            elseif record.kind == "inlet" then inlets[#inlets + 1] = record
+            else sensors[#sensors + 1] = record end
         else
             if record.companion and record.companion.valid then
                 record.companion.destroy()
@@ -759,12 +1137,26 @@ local function on_pull_tick()
             data.hubs[unit_number] = nil
         end
     end
-    -- live refresh for anyone looking at an outlet
+    table.sort(outlets, function(a, b)
+        return (a.priority or 100) < (b.priority or 100)
+    end)
+
+    for _, record in pairs(outlets) do pull_for_outlet(record) end
+    for _, record in pairs(inlets) do distribute_for_inlet(record) end
+    for _, record in pairs(sensors) do update_sensor(record) end
+
+    -- live refresh for anyone looking at an outlet/inlet
     for player_index, hub in pairs(data.open) do
         local player = game.get_player(player_index)
         if player and player.valid and hub.valid and player.opened == hub then
             local record = data.hubs[hub.unit_number]
-            if record then refresh_grid(player, record) end
+            if record then
+                if record.kind == "outlet" then
+                    refresh_grid(player, record)
+                else
+                    refresh_inlet_panel(player, record)
+                end
+            end
         else
             data.open[player_index] = nil
         end
@@ -785,26 +1177,29 @@ local function debug_command(cmd)
         local entity = record.entity
         if entity.valid then
             count = count + 1
-            local factories = factories_for_hub(entity)
-            record.factories, record.scanned_tick = factories, game.tick
-            local accept = record.kind == "inlet" and requester_mode or provider_mode
+            record.factories, record.scanned_tick = factories_for_hub(entity), game.tick
+            local accept = record.kind == "inlet" and requester_mode
+                or (record.kind == "outlet" and outlet_source_mode(record) or provider_mode)
             local chests = reachable_chests(record, accept)
+            local mode = record.kind
+            if record.kind == "outlet" then
+                mode = record.on_demand and "outlet (on-demand)" or "outlet (buffer)"
+                if record.circuit_enable and not circuit_enabled(record) then
+                    mode = mode .. " PAUSED by circuit"
+                end
+            end
             player.print(string.format(
                 "[factory-outlet] %s #%d at %s (%.0f, %.0f): %d factories, %d chests, %d items/min, energy budget %s",
-                record.kind, entity.unit_number, entity.surface.name,
+                mode, entity.unit_number, entity.surface.name,
                 entity.position.x, entity.position.y,
-                #factories, #chests, rate_per_minute(record),
+                #record.factories, #chests, rate_per_minute(record),
                 energy_per_item() > 0 and tostring(energy_budget(record)) or "off"))
-            if record.kind == "outlet" then
+            if record.kind == "outlet" and not record.on_demand then
                 local hub_inv = entity.get_inventory(defines.inventory.chest)
-                local counts = {}
-                for _, item in pairs(hub_inv.get_contents()) do
-                    counts[item.name .. "|" .. (item.quality or "normal")] = item.count
-                end
+                local counts = inventory_counts(hub_inv)
                 local cap_stacks = cap_stacks_for(record)
                 local set = filter_set(record)
-                local reported = {}
-                local lines = 0
+                local reported, lines = {}, 0
                 for _, entry in pairs(chests) do
                     local inv = entry.chest.valid and entry.chest.get_inventory(defines.inventory.chest)
                     if inv then
@@ -856,13 +1251,16 @@ local function adopt_existing()
                 else
                     record.kind = KINDS[name]
                     record.filters = record.filters or { mode = 1, items = {} }
+                    record.pins = record.pins or {}
                 end
             end
         end
     end
     for _, player in pairs(game.players) do
-        local panel = player.gui.relative[PANEL_NAME]
-        if panel then panel.destroy() end
+        for _, panel_name in pairs({PANEL_NAME, INLET_PANEL_NAME}) do
+            local panel = player.gui.relative[panel_name]
+            if panel then panel.destroy() end
+        end
     end
 end
 
@@ -888,7 +1286,9 @@ M.events = {
     [defines.events.on_gui_closed] = on_gui_closed,
     [defines.events.on_gui_selection_state_changed] = on_gui_selection_state_changed,
     [defines.events.on_gui_elem_changed] = on_gui_elem_changed,
+    [defines.events.on_gui_checked_state_changed] = on_gui_checked_state_changed,
     [defines.events.on_gui_text_changed] = on_gui_text_changed,
+    [defines.events.on_gui_click] = on_gui_click,
     [defines.events.on_object_destroyed] = function(event)
         if event.useful_id then
             local hubs = hub_data().hubs
