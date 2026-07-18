@@ -591,6 +591,14 @@ local function scan_surface_ghosts(surface, force)
     local chunks, count = {}, 0
     local bbox = construction_bbox(surface, force)
     if not bbox then return chunks, count end
+    local profiling = hub_data().profiling
+    local function mark(prof, label)
+        if prof then
+            prof.stop()
+            helpers.write_file(PROFILE_FILE,
+                {"", game.tick, ",", label, ",", prof, "\n"}, true)
+        end
+    end
     local floor = math.floor
     local function items_at(x, y)
         local cx, cy = floor(x / 32), floor(y / 32)
@@ -602,9 +610,14 @@ local function scan_surface_ghosts(surface, force)
         end
         return b.items
     end
-    for _, ghost in pairs(surface.find_entities_filtered {
+
+    local prof = profiling and helpers.create_profiler()
+    local eghosts = surface.find_entities_filtered {
         area = bbox, type = "entity-ghost", force = force,
-    }) do
+    }
+    mark(prof, "scan-find-entity")
+    prof = profiling and helpers.create_profiler()
+    for _, ghost in pairs(eghosts) do
         count = count + 1
         local info = ghost_info("e|" .. ghost.ghost_name, ghost)
         if info.place or info.requests then
@@ -619,9 +632,15 @@ local function scan_surface_ghosts(surface, force)
             end
         end
     end
-    for _, ghost in pairs(surface.find_entities_filtered {
+    mark(prof, "scan-loop-entity")
+
+    prof = profiling and helpers.create_profiler()
+    local tghosts = surface.find_entities_filtered {
         area = bbox, type = "tile-ghost", force = force,
-    }) do
+    }
+    mark(prof, "scan-find-tile")
+    prof = profiling and helpers.create_profiler()
+    for _, ghost in pairs(tghosts) do
         count = count + 1
         local info = ghost_info("t|" .. ghost.ghost_name, ghost)
         if info.place then -- tiles have no quality or insert plans
@@ -631,12 +650,16 @@ local function scan_surface_ghosts(surface, force)
             items[key] = (items[key] or 0) + info.place.count
         end
     end
+    mark(prof, "scan-loop-tile")
+
+    prof = profiling and helpers.create_profiler()
     for _, proxy in pairs(surface.find_entities_filtered {
         area = bbox, type = "item-request-proxy", force = force,
     }) do
         local pos = proxy.position
         add_insert_plans(items_at(pos.x, pos.y), proxy.insert_plan)
     end
+    mark(prof, "scan-proxies")
     return chunks, count
 end
 

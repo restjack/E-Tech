@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.15.4
+Date: 2026-07-18
+  Debug:
+    - /etech-hub-profile now times each ghost-scan stage separately (entity find/loop, tile
+      find/loop, proxies) to pin down whether the remaining scan cost is the engine finds or
+      the per-ghost processing loop. No behavior change.
+---------------------------------------------------------------------------------------------------
 Version: 0.15.3
 Date: 2026-07-18
   Optimizations:
