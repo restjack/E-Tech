@@ -8,6 +8,10 @@ Date: 2026-07-17
       mid-event), the element is already invalid and the game hard-crashed with
       "LuaGuiElement API call when LuaGuiElement was invalid". All four unguarded factory-hub
       handlers (dropdown, filter slots, checkboxes, textfields) now bail on invalid elements.
+    - Outlet returns no longer scatter items into random factory chests. Overflow and
+      on-demand give-backs went to the first chest with a free slot, filling provider chests
+      with items that never belonged there. Returns now prefer a chest already holding that
+      item (the origin chest wins), then yellow storage chests, then anything with room.
 ---------------------------------------------------------------------------------------------------
 Version: 0.14.1
 Date: 2026-07-17
