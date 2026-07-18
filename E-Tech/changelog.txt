@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.16.1
+Date: 2026-07-18
+  Optimizations:
+    - Stretched the last two scheduled scans (live-profiled at ~40 ms and ~23 ms per hit on a
+      large map): factory-list fallback rescan 60 s -> 5 min (storage-tank build/mine events
+      already invalidate it instantly, and dead factories are filtered out immediately, so the
+      timer only catches exotic script edits), item-request-proxy rescan 30 s -> 60 s. The
+      once-a-minute frame blip is now a couple of sub-frame blips per 5 minutes.
+---------------------------------------------------------------------------------------------------
 Version: 0.16.0
 Date: 2026-07-18
   Optimizations:

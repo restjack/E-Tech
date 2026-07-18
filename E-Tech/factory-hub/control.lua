@@ -39,12 +39,15 @@ local PANEL_NAME = "etech-hub-panel"
 local INLET_PANEL_NAME = "etech-inlet-panel"
 local AUTO_GROUP = "etech-inlet-auto"
 local PULL_TICKS = 120     -- work pass per device, every 2 s (also GUI refresh)
-local RESCAN_TICKS = 3600  -- factory-list cache fallback lifetime, 60 s
+local RESCAN_TICKS = 18000 -- factory-list cache fallback lifetime, 5 min
                            -- (build/mine of any storage-tank invalidates
-                           -- instantly via data.factory_gen; the whole-surface
-                           -- storage-tank find costs ~40 ms on a big map, so
-                           -- it must not run on a short timer)
-local PROXY_TICKS = 1800   -- item-request-proxy rescan, 30 s
+                           -- instantly via data.factory_gen, and dead
+                           -- factories are filtered by factory_usable, so
+                           -- the fallback only catches exotic script edits;
+                           -- the whole-surface storage-tank find costs
+                           -- ~40 ms on a big map — keep it off short timers)
+local PROXY_TICKS = 3600   -- item-request-proxy rescan, 60 s (~23 ms find
+                           -- on a big map; module requests can wait a minute)
 local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-output/)
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 10
