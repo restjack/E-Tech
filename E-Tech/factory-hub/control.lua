@@ -1075,12 +1075,17 @@ local function on_gui_closed(event)
 end
 
 local function on_gui_selection_state_changed(event)
+    -- event.element can already be invalid: another module's handler for the
+    -- same event may have rebuilt its GUI (e.g. the teleporter list rebuilds
+    -- on its sort dropdown) — touching .name then hard-crashes the game.
+    if not (event.element and event.element.valid) then return end
     if event.element.name ~= "etech-hub-mode" then return end
     local record = open_record(event.player_index)
     if record then record.filters.mode = event.element.selected_index end
 end
 
 local function on_gui_elem_changed(event)
+    if not (event.element and event.element.valid) then return end
     local slot = event.element.name:match("^etech%-hub%-filter%-(%d+)$")
     if not slot then return end
     local record = open_record(event.player_index)
@@ -1088,6 +1093,7 @@ local function on_gui_elem_changed(event)
 end
 
 local function on_gui_checked_state_changed(event)
+    if not (event.element and event.element.valid) then return end
     local name = event.element.name
     local record = open_record(event.player_index)
     if not record then return end
@@ -1107,6 +1113,7 @@ end
 
 local function on_gui_text_changed(event)
     local element = event.element
+    if not (element and element.valid) then return end
     local tags = element.tags
     if tags and tags.etech == "factory-name" then
         local text = element.text
