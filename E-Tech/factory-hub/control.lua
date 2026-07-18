@@ -561,7 +561,7 @@ local function surface_ghosts(surface, force)
     local key = surface.index .. "|" .. force.index
     local entry = data.ghosts[key]
     if not entry or game.tick - entry.tick >= GHOST_TICKS then
-        local prof = data.profiling and game.create_profiler()
+        local prof = data.profiling and helpers.create_profiler()
         entry = { tick = game.tick, list = scan_surface_ghosts(surface, force) }
         data.ghosts[key] = entry
         if prof then
@@ -1333,7 +1333,7 @@ end
 local function on_pull_tick()
     if not factorissimo_available() then return end
     local data = hub_data()
-    local prof = data.profiling and game.create_profiler()
+    local prof = data.profiling and helpers.create_profiler()
 
     -- outlets in priority order (1 = first), then inlets, then sensors
     local outlets, inlets, sensors = {}, {}, {}
