@@ -1,4 +1,20 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.16.0
+Date: 2026-07-18
+  Optimizations:
+    - Ghost demand is now an event-driven index instead of a periodic scan. 0.15.4's staged
+      profiling settled it: each find_entities_filtered call costs ~23 ms on a large map no
+      matter what it finds, so ANY rescan cadence hitches. The index does the expensive full
+      scan exactly once per surface+force, then maintains itself: every new ghost is added
+      from its build event, every removed ghost (built, deconstructed, decayed, scripted)
+      subtracts exactly what it added via its destroy event. Steady-state periodic cost is
+      zero - the recurring ~100 ms hitch every 10 s is gone.
+    - Item-request-proxies (module/fuel requests on built machines) have no build event to
+      hook, so they keep a slow periodic scan: every 30 s, area-limited to construction
+      coverage.
+    - Per-outlet ghost membership is recomputed each pass from the chunk buckets (pure math,
+      no API calls) so roboport coverage changes are picked up within 2 s.
+---------------------------------------------------------------------------------------------------
 Version: 0.15.4
 Date: 2026-07-18
   Debug:

@@ -44,7 +44,7 @@ local RESCAN_TICKS = 3600  -- factory-list cache fallback lifetime, 60 s
                            -- instantly via data.factory_gen; the whole-surface
                            -- storage-tank find costs ~40 ms on a big map, so
                            -- it must not run on a short timer)
-local GHOST_TICKS = 300    -- ghost-demand cache lifetime, 5 s
+local PROXY_TICKS = 1800   -- item-request-proxy rescan, 30 s
 local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-output/)
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 10
@@ -99,12 +99,18 @@ local function register_device(entity)
     script.register_on_object_destroyed(entity)
 end
 
+-- forward declaration: defined with the ghost index (on-demand section)
+local gindex_on_ghost_built
+
 local function on_built(event)
     local entity = event.entity or event.destination
     if not (entity and entity.valid) then return end
+    local etype = entity.type
     if KINDS[entity.name] then
         register_device(entity)
-    elseif entity.type == "storage-tank" then
+    elseif etype == "entity-ghost" or etype == "tile-ghost" then
+        gindex_on_ghost_built(entity)
+    elseif etype == "storage-tank" then
         -- possible Factorissimo building: invalidate every factory-list cache
         local data = hub_data()
         data.factory_gen = (data.factory_gen or 0) + 1
@@ -491,15 +497,23 @@ end
 
 -- Construction-ghost demand. Ghosts aren't logistic requests, so the engine
 -- never surfaces them through requester_points — an on-demand outlet would
--- sit empty while construction bots starve. We derive the demand ourselves:
---   1. per surface+force, every GHOST_TICKS: one find_entities_filtered for
---      entity/tile ghosts (+ item-request-proxies for module requests) and
---      flatten each into {x, y, item|quality, count}. Cached in storage —
---      a session-local cache here would desync multiplayer joiners.
---   2. per outlet, once per scan generation: keep only ghosts inside this
---      network's construction range (pure math against the cells'
---      construction squares — no per-ghost API calls) and aggregate into
---      wants. Reused by every 2 s pull pass until the next scan.
+-- sit empty while construction bots starve. We derive the demand ourselves.
+--
+-- EVENT-DRIVEN INDEX (profiling on a megabase killed every periodic-scan
+-- design: each whole-ish-surface find_entities_filtered costs ~23 ms
+-- regardless of matches, so any rescan cadence hitches):
+--   - storage.…gindex[surface|force] = per-32x32-chunk demand totals,
+--     built ONCE via full scan on first use, then maintained incrementally:
+--     ghost built (on_built branch) adds it, ghost gone (on_object_destroyed,
+--     which fires for revive, deconstruct, decay and scripted removal alike)
+--     subtracts exactly what it added (recorded in …gunit[unit_number]).
+--     Steady-state periodic cost: zero.
+--   - item-request-proxies (module/fuel requests on BUILT machines) have no
+--     reliable build event, so they keep a slow periodic scan (PROXY_TICKS,
+--     area-limited to construction coverage). They're rare; it's cheap.
+--   - per pull pass, ghost_wants intersects the chunk buckets with the
+--     outlet network's construction squares — pure Lua math, no API calls.
+-- All state lives in storage: a session-local cache would desync MP joiners.
 
 -- Per-prototype ghost info, memoized (pure prototype data, so a local cache
 -- is deterministic — same trick as layout_name_cache):
@@ -583,153 +597,178 @@ local function construction_bbox(surface, force)
     return {{x1 - 1, y1 - 1}, {x2 + 1, y2 + 1}}
 end
 
--- Scan a surface's ghost demand, aggregated per 32x32 chunk: chunk_key ->
--- {x, y (chunk center), items = {item|quality -> count}}. 10k ghosts
--- collapse into a few hundred chunk buckets, so per-outlet membership math
--- is O(chunks x cells) instead of O(ghosts x cells). Returns chunks, count.
-local function scan_surface_ghosts(surface, force)
-    local chunks, count = {}, 0
-    local bbox = construction_bbox(surface, force)
-    if not bbox then return chunks, count end
-    local profiling = hub_data().profiling
-    local function mark(prof, label)
-        if prof then
-            prof.stop()
-            helpers.write_file(PROFILE_FILE,
-                {"", game.tick, ",", label, ",", prof, "\n"}, true)
-        end
-    end
-    local floor = math.floor
-    local function items_at(x, y)
-        local cx, cy = floor(x / 32), floor(y / 32)
-        local ck = cx .. ":" .. cy
-        local b = chunks[ck]
-        if not b then
-            b = { x = cx * 32 + 16, y = cy * 32 + 16, items = {} }
-            chunks[ck] = b
-        end
-        return b.items
-    end
-
-    local prof = profiling and helpers.create_profiler()
-    local eghosts = surface.find_entities_filtered {
-        area = bbox, type = "entity-ghost", force = force,
-    }
-    mark(prof, "scan-find-entity")
-    prof = profiling and helpers.create_profiler()
-    for _, ghost in pairs(eghosts) do
-        count = count + 1
-        local info = ghost_info("e|" .. ghost.ghost_name, ghost)
-        if info.place or info.requests then
-            local pos = ghost.position
-            local items = items_at(pos.x, pos.y)
-            if info.place then
-                local key = info.place.name .. "|" .. ghost.quality.name
-                items[key] = (items[key] or 0) + info.place.count
-            end
-            if info.requests then
-                add_insert_plans(items, ghost.insert_plan)
-            end
-        end
-    end
-    mark(prof, "scan-loop-entity")
-
-    prof = profiling and helpers.create_profiler()
-    local tghosts = surface.find_entities_filtered {
-        area = bbox, type = "tile-ghost", force = force,
-    }
-    mark(prof, "scan-find-tile")
-    prof = profiling and helpers.create_profiler()
-    for _, ghost in pairs(tghosts) do
-        count = count + 1
-        local info = ghost_info("t|" .. ghost.ghost_name, ghost)
-        if info.place then -- tiles have no quality or insert plans
-            local pos = ghost.position
-            local items = items_at(pos.x, pos.y)
-            local key = info.place.name .. "|normal"
-            items[key] = (items[key] or 0) + info.place.count
-        end
-    end
-    mark(prof, "scan-loop-tile")
-
-    prof = profiling and helpers.create_profiler()
-    for _, proxy in pairs(surface.find_entities_filtered {
-        area = bbox, type = "item-request-proxy", force = force,
-    }) do
-        local pos = proxy.position
-        add_insert_plans(items_at(pos.x, pos.y), proxy.insert_plan)
-    end
-    mark(prof, "scan-proxies")
-    return chunks, count
+local function gindex_key(surface, force)
+    return surface.index .. "|" .. force.index
 end
 
--- Cached ghost list for a surface+force; entries untouched for two
--- lifetimes (surface deleted, outlets gone) are pruned by on_pull_tick.
-local function surface_ghosts(surface, force)
+-- Add one ghost's demand to its chunk bucket and remember exactly what it
+-- contributed (gunit) so the destroy event can subtract it precisely.
+local function gindex_add(idx, key, ghost, is_tile)
+    local info = ghost_info((is_tile and "t|" or "e|") .. ghost.ghost_name, ghost)
+    if not (info.place or info.requests) then return end
+    local items = {}
+    if info.place then
+        local quality = is_tile and "normal" or ghost.quality.name
+        items[info.place.name .. "|" .. quality] = info.place.count
+    end
+    if info.requests then
+        add_insert_plans(items, ghost.insert_plan)
+    end
+    if next(items) == nil then return end
+    local pos = ghost.position
+    local cx, cy = math.floor(pos.x / 32), math.floor(pos.y / 32)
+    local ck = cx .. ":" .. cy
+    local chunk = idx.chunks[ck]
+    if not chunk then
+        chunk = { x = cx * 32 + 16, y = cy * 32 + 16, items = {} }
+        idx.chunks[ck] = chunk
+    end
+    for k, n in pairs(items) do
+        chunk.items[k] = (chunk.items[k] or 0) + n
+    end
+    idx.count = idx.count + 1
+    hub_data().gunit[ghost.unit_number] = { key = key, ck = ck, items = items }
+    script.register_on_object_destroyed(ghost)
+end
+
+-- Ghost index for a surface+force: chunk_key -> {x, y (chunk center),
+-- items = {item|quality -> count}}. Full scan once (the only time the
+-- expensive finds run), incremental forever after.
+local function ghost_index(surface, force)
     local data = hub_data()
-    data.ghosts = data.ghosts or {}
-    local key = surface.index .. "|" .. force.index
-    local entry = data.ghosts[key]
-    -- entry.chunks check migrates away pre-0.15.2 per-ghost list entries
-    if not entry or not entry.chunks
-        or game.tick - entry.tick >= (entry.ttl or GHOST_TICKS) then
+    data.gindex = data.gindex or {}
+    data.gunit = data.gunit or {}
+    local key = gindex_key(surface, force)
+    local idx = data.gindex[key]
+    if not idx then
         local prof = data.profiling and helpers.create_profiler()
-        local chunks, count = scan_surface_ghosts(surface, force)
-        entry = {
-            tick = game.tick,
-            chunks = chunks,
-            count = count,
-            -- huge ghost fields rescan half as often; their demand shifts
-            -- slower than bots can build anyway
-            ttl = count > 4000 and GHOST_TICKS * 2 or GHOST_TICKS,
-        }
-        data.ghosts[key] = entry
+        idx = { chunks = {}, count = 0 }
+        data.gindex[key] = idx
+        for _, ghost in pairs(surface.find_entities_filtered {
+            type = "entity-ghost", force = force,
+        }) do
+            gindex_add(idx, key, ghost, false)
+        end
+        for _, ghost in pairs(surface.find_entities_filtered {
+            type = "tile-ghost", force = force,
+        }) do
+            gindex_add(idx, key, ghost, true)
+        end
         if prof then
             prof.stop()
             helpers.write_file(PROFILE_FILE,
-                {"", game.tick, ",ghost-scan(", surface.name, " ghosts=", count, "),", prof, "\n"}, true)
+                {"", game.tick, ",index-build(", surface.name, " ghosts=", idx.count, "),", prof, "\n"}, true)
+        end
+    end
+    return idx
+end
+
+-- Called from on_built for every new ghost: index it if we're tracking its
+-- surface+force (if we aren't yet, the eventual full scan will catch it).
+-- Assigns the forward declaration above on_built.
+function gindex_on_ghost_built(ghost)
+    local data = hub_data()
+    local idx = data.gindex and data.gindex[gindex_key(ghost.surface, ghost.force)]
+    if idx then
+        gindex_add(idx, gindex_key(ghost.surface, ghost.force), ghost,
+            ghost.type == "tile-ghost")
+    end
+end
+
+-- Called from on_object_destroyed (fires on revive, deconstruction, decay
+-- and scripted removal alike): subtract what this ghost contributed.
+local function gindex_on_ghost_gone(unit_number)
+    local data = hub_data()
+    local g = data.gunit and data.gunit[unit_number]
+    if not g then return end
+    data.gunit[unit_number] = nil
+    local idx = data.gindex and data.gindex[g.key]
+    if not idx then return end
+    local chunk = idx.chunks[g.ck]
+    if chunk then
+        for k, n in pairs(g.items) do
+            local left = (chunk.items[k] or 0) - n
+            if left > 0 then chunk.items[k] = left else chunk.items[k] = nil end
+        end
+        if next(chunk.items) == nil then idx.chunks[g.ck] = nil end
+    end
+    if idx.count > 0 then idx.count = idx.count - 1 end
+end
+
+-- Item-request-proxies (module/fuel requests on built machines) have no
+-- build event we can hook, so they keep a slow, area-limited periodic scan.
+local function surface_proxies(surface, force)
+    local data = hub_data()
+    data.proxies = data.proxies or {}
+    local key = gindex_key(surface, force)
+    local entry = data.proxies[key]
+    if not entry or game.tick - entry.tick >= PROXY_TICKS then
+        local prof = data.profiling and helpers.create_profiler()
+        local chunks = {}
+        local bbox = construction_bbox(surface, force)
+        if bbox then
+            local floor = math.floor
+            for _, proxy in pairs(surface.find_entities_filtered {
+                area = bbox, type = "item-request-proxy", force = force,
+            }) do
+                local pos = proxy.position
+                local cx, cy = floor(pos.x / 32), floor(pos.y / 32)
+                local ck = cx .. ":" .. cy
+                local b = chunks[ck]
+                if not b then
+                    b = { x = cx * 32 + 16, y = cy * 32 + 16, items = {} }
+                    chunks[ck] = b
+                end
+                add_insert_plans(b.items, proxy.insert_plan)
+            end
+        end
+        entry = { tick = game.tick, chunks = chunks }
+        data.proxies[key] = entry
+        if prof then
+            prof.stop()
+            helpers.write_file(PROFILE_FILE,
+                {"", game.tick, ",proxy-scan,", prof, "\n"}, true)
         end
     end
     return entry
 end
 
 -- Ghost demand visible to this outlet's network, per item|quality.
--- Membership = inside any cell's construction square (construction areas
--- are square). Memoized per scan generation on the record.
+-- Membership = chunk center inside any cell's construction square (+16
+-- half-chunk slack; construction areas are square). Boundary chunks
+-- over-fetch a little, the give-back loop returns the excess. Cheap pure
+-- math — recomputed every pass, no memo needed.
 local function ghost_wants(record, network)
     local hub = record.entity
-    local entry = surface_ghosts(hub.surface, hub.force)
-    if record.ghost_tick == entry.tick and record.ghost_wants then
-        return record.ghost_wants
-    end
+    local idx = ghost_index(hub.surface, hub.force)
+    local proxies = surface_proxies(hub.surface, hub.force)
     local wants = {}
-    if next(entry.chunks) then
-        local cells = {}
-        for _, cell in pairs(network.cells) do
-            local r = cell.construction_radius
-            if r and r > 0 and cell.owner and cell.owner.valid then
-                local p = cell.owner.position
-                cells[#cells + 1] = { x = p.x, y = p.y, r = r + 16 } -- half-chunk slack
-            end
+    if next(idx.chunks) == nil and next(proxies.chunks) == nil then
+        return wants
+    end
+    local cells = {}
+    for _, cell in pairs(network.cells) do
+        local r = cell.construction_radius
+        if r and r > 0 and cell.owner and cell.owner.valid then
+            local p = cell.owner.position
+            cells[#cells + 1] = { x = p.x, y = p.y, r = r + 16 }
         end
-        if #cells > 0 then
-            -- chunk counts as covered when its center is within a cell's
-            -- construction square (+16 slack); boundary chunks over-fetch a
-            -- little, the give-back loop returns the excess
-            for _, chunk in pairs(entry.chunks) do
-                for _, c in pairs(cells) do
-                    if math.abs(chunk.x - c.x) <= c.r and math.abs(chunk.y - c.y) <= c.r then
-                        for k, n in pairs(chunk.items) do
-                            wants[k] = (wants[k] or 0) + n
-                        end
-                        break
+    end
+    if #cells == 0 then return wants end
+    local function merge(chunks)
+        for _, chunk in pairs(chunks) do
+            for _, c in pairs(cells) do
+                if math.abs(chunk.x - c.x) <= c.r and math.abs(chunk.y - c.y) <= c.r then
+                    for k, n in pairs(chunk.items) do
+                        wants[k] = (wants[k] or 0) + n
                     end
+                    break
                 end
             end
         end
     end
-    record.ghost_wants = wants
-    record.ghost_tick = entry.tick
+    merge(idx.chunks)
+    merge(proxies.chunks)
     return wants
 end
 
@@ -1494,13 +1533,13 @@ local function on_pull_tick()
         return (a.priority or 100) < (b.priority or 100)
     end)
 
-    -- drop ghost caches nothing refreshed for two lifetimes (outlet gone,
+    -- drop proxy caches nothing refreshed for two lifetimes (outlet gone,
     -- surface deleted) so storage doesn't accumulate dead surface entries
-    if data.ghosts then
+    if data.proxies then
         local tick = game.tick
-        for key, entry in pairs(data.ghosts) do
-            if tick - entry.tick >= (entry.ttl or GHOST_TICKS) * 2 then
-                data.ghosts[key] = nil
+        for key, entry in pairs(data.proxies) do
+            if tick - entry.tick >= PROXY_TICKS * 2 then
+                data.proxies[key] = nil
             end
         end
     end
@@ -1634,7 +1673,12 @@ end
 -- world but aren't registered, keep old records' settings, and rebuild any
 -- stale GUI panels from previous versions.
 local function adopt_existing()
-    local hubs = hub_data().hubs
+    -- drop ghost/proxy caches: mod versions may change what counts as
+    -- demand, and the index re-registers destroy hooks on rebuild anyway.
+    -- gunit entries whose destroy events fire later no-op harmlessly.
+    local data = hub_data()
+    data.gindex, data.gunit, data.proxies, data.ghosts = nil, nil, nil, nil
+    local hubs = data.hubs
     for _, surface in pairs(game.surfaces) do
         for name in pairs(KINDS) do
             for _, entity in pairs(surface.find_entities_filtered {name = name}) do
@@ -1702,6 +1746,7 @@ M.events = {
     [defines.events.on_gui_click] = on_gui_click,
     [defines.events.on_object_destroyed] = function(event)
         if event.useful_id then
+            gindex_on_ghost_gone(event.useful_id)
             local hubs = hub_data().hubs
             local record = hubs[event.useful_id]
             if record then
