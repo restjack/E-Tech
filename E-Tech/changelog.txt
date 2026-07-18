@@ -11,8 +11,8 @@ Date: 2026-07-17
     - Outlet returns no longer scatter items into random factory chests. Overflow and
       on-demand give-backs went to the first chest with a free slot, filling provider chests
       with items that never belonged there. Returns now only go to a chest already holding
-      that item (the origin chest wins) or a yellow storage chest; if both are full, the item
-      stays in the outlet (or the mining buffer) instead of polluting a random chest.
+      that exact item (the origin chest wins) or a completely empty chest; otherwise the item
+      stays in the outlet (or the mining buffer) instead of mixing into someone else's chest.
 ---------------------------------------------------------------------------------------------------
 Version: 0.14.1
 Date: 2026-07-17

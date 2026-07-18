@@ -342,16 +342,19 @@ local function split_key(key)
 end
 
 -- Returned items (overflow, on-demand give-backs, mined-device dumps) must
--- not scatter into the first chest with a free slot — that fills provider
+-- not scatter into the first chest with a free slot — that fills factory
 -- chests with items that never belonged there. Only two acceptable homes:
--- a chest that already holds the item (its origin chest wins naturally),
--- then yellow storage chests (the vanilla "mixed stuff" home). If both are
--- full the item deliberately stays where it is (outlet buffer / mining
--- buffer) rather than polluting a random chest.
+-- a chest that already holds that exact item (its origin chest wins
+-- naturally), then a completely EMPTY chest (nothing to contaminate). If
+-- neither exists the item deliberately stays where it is (outlet buffer /
+-- mining buffer) rather than mixing into someone else's chest.
 local function return_passes(name, quality)
     return {
         function(chest) return chest.get_item_count({name = name, quality = quality}) > 0 end,
-        function(chest) return chest.prototype.logistic_mode == "storage" end,
+        function(chest)
+            local inv = chest.get_inventory(defines.inventory.chest)
+            return inv and inv.is_empty()
+        end,
     }
 end
 
