@@ -1,4 +1,31 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.15.3
+Date: 2026-07-18
+  Optimizations:
+    - Profiling on a large map proved whole-surface find_entities_filtered calls cost ~40 ms
+      EACH regardless of how much they find (they crawl the surface's entire generated chunk
+      grid) - 0.15.2's per-ghost optimizations were aimed at the wrong target. Two fixes:
+    - Ghost scans are now confined to the bounding box of the force's construction-bot
+      coverage on that surface (union of all logistic cells' construction squares). Ghosts
+      outside bot range can't be built anyway. No coverage = no scan at all.
+    - The factory-list rescan (whole-surface storage-tank sweep, the other 40 ms hit, every
+      10 s per device) is now event-driven: building or mining any storage-tank invalidates
+      the cache instantly, and the timed fallback rescan runs once a minute instead.
+---------------------------------------------------------------------------------------------------
+Version: 0.15.2
+Date: 2026-07-18
+  Optimizations:
+    - Ghost scan rebuilt for big blueprint pastes (profiled at 9.4k ghosts: scan was 89-98 ms
+      every 5 s, the pull pass up to 176 ms - a visible hitch). Three fixes: ghost demand now
+      aggregates per 32x32 chunk at scan time, so outlet membership math is O(chunks) instead
+      of O(ghosts); insert_plan (module/fuel/ammo requests) is only read from prototypes that
+      can actually carry one - belts, walls, rails and other plain buildables skip that API
+      call entirely; and entity/tile ghosts scan in separate passes so tile ghosts skip the
+      per-ghost type and quality reads. Surfaces with >4000 ghosts also rescan at 10 s
+      instead of 5 s.
+    - /etech-hub-profile now also logs reach-chests and net-wants sub-phases to break down
+      where a pull pass spends its time.
+---------------------------------------------------------------------------------------------------
 Version: 0.15.1
 Date: 2026-07-18
   Debug:

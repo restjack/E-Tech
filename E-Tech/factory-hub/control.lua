@@ -39,7 +39,11 @@ local PANEL_NAME = "etech-hub-panel"
 local INLET_PANEL_NAME = "etech-inlet-panel"
 local AUTO_GROUP = "etech-inlet-auto"
 local PULL_TICKS = 120     -- work pass per device, every 2 s (also GUI refresh)
-local RESCAN_TICKS = 600   -- factory-list cache lifetime, 10 s
+local RESCAN_TICKS = 3600  -- factory-list cache fallback lifetime, 60 s
+                           -- (build/mine of any storage-tank invalidates
+                           -- instantly via data.factory_gen; the whole-surface
+                           -- storage-tank find costs ~40 ms on a big map, so
+                           -- it must not run on a short timer)
 local GHOST_TICKS = 300    -- ghost-demand cache lifetime, 5 s
 local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-output/)
 local MAX_DEPTH = 5        -- nested-factory recursion limit
@@ -97,8 +101,13 @@ end
 
 local function on_built(event)
     local entity = event.entity or event.destination
-    if entity and entity.valid and KINDS[entity.name] then
+    if not (entity and entity.valid) then return end
+    if KINDS[entity.name] then
         register_device(entity)
+    elseif entity.type == "storage-tank" then
+        -- possible Factorissimo building: invalidate every factory-list cache
+        local data = hub_data()
+        data.factory_gen = (data.factory_gen or 0) + 1
     end
 end
 
@@ -186,9 +195,12 @@ end
 
 local function cached_factories(record)
     local tick = game.tick
-    if not record.factories or tick - (record.scanned_tick or 0) >= RESCAN_TICKS then
+    local gen = hub_data().factory_gen or 0
+    if not record.factories or record.factory_gen ~= gen
+        or tick - (record.scanned_tick or 0) >= RESCAN_TICKS then
         record.factories = factories_for_hub(record.entity)
         record.scanned_tick = tick
+        record.factory_gen = gen
     end
     return record.factories
 end
@@ -489,68 +501,143 @@ end
 --      construction squares — no per-ghost API calls) and aggregate into
 --      wants. Reused by every 2 s pull pass until the next scan.
 
--- Item that places a ghost prototype; memoized per name (pure prototype
--- data, so a local cache is deterministic — same trick as layout_name_cache).
-local place_item_cache = {}
-local function ghost_place_item(ghost)
-    local key = ghost.type .. "|" .. ghost.ghost_name
-    local cached = place_item_cache[key]
-    if cached == nil then
-        local spec = ghost.ghost_prototype.items_to_place_this
-        spec = spec and spec[1] -- what bots actually deliver
-        cached = spec and { name = spec.name, count = spec.count or 1 } or false
-        place_item_cache[key] = cached
+-- Per-prototype ghost info, memoized (pure prototype data, so a local cache
+-- is deterministic — same trick as layout_name_cache):
+--   place    - first items_to_place_this entry (what bots deliver), or false
+--   requests - whether this prototype can carry an insert_plan worth reading
+--              (modules/fuel/equipment-grid/turret ammo). Reading insert_plan
+--              is an API call per ghost; gating it out for belts, walls,
+--              rails etc. is most of the scan cost on big blueprint pastes.
+local ghost_info_cache = {}
+local function ghost_info(key, ghost)
+    local info = ghost_info_cache[key]
+    if info == nil then
+        local proto = ghost.ghost_prototype
+        local spec = proto.items_to_place_this
+        spec = spec and spec[1]
+        local requests = false
+        if proto.object_name == "LuaEntityPrototype" then
+            requests = (proto.module_inventory_size or 0) > 0
+                or proto.burner_prototype ~= nil
+                or proto.grid_prototype ~= nil
+                or proto.type == "ammo-turret"
+                or proto.type == "artillery-turret"
+        end
+        info = {
+            place = spec and { name = spec.name, count = spec.count or 1 } or false,
+            requests = requests,
+        }
+        ghost_info_cache[key] = info
     end
-    return cached or nil
+    return info
 end
 
--- Total items in a BlueprintInsertPlan list (module requests on ghosts and
--- on already-built machines via item-request-proxy).
-local function add_insert_plans(list, plans, x, y)
+-- Total items of a BlueprintInsertPlan list into an item|quality counts dict
+-- (module/fuel/ammo requests on ghosts and on already-built machines via
+-- item-request-proxy). ItemStackLocation carries no count: one per slot.
+local function add_insert_plans(items, plans)
     for _, plan in pairs(plans or {}) do
-        local items = plan.items
-        local count = items.grid_count or 0
-        for _, pos in pairs(items.in_inventory or {}) do
-            count = count + (pos.count or 1)
+        local p = plan.items
+        local count = p.grid_count or 0
+        for _ in pairs(p.in_inventory or {}) do
+            count = count + 1
         end
         if count > 0 then
             local quality = plan.id.quality
             if type(quality) ~= "string" then
                 quality = quality and quality.name or "normal"
             end
-            list[#list + 1] = {
-                x = x, y = y,
-                key = plan.id.name .. "|" .. quality,
-                count = count,
-            }
+            local key = plan.id.name .. "|" .. quality
+            items[key] = (items[key] or 0) + count
         end
     end
 end
 
-local function scan_surface_ghosts(surface, force)
-    local list = {}
-    for _, ghost in pairs(surface.find_entities_filtered {
-        type = {"entity-ghost", "tile-ghost"}, force = force,
-    }) do
-        local pos = ghost.position
-        local item = ghost_place_item(ghost)
-        if item then
-            list[#list + 1] = {
-                x = pos.x, y = pos.y,
-                key = item.name .. "|" .. ghost.quality.name,
-                count = item.count,
-            }
+-- Bounding box of everywhere this force's construction bots can build on a
+-- surface (union of all logistic cells' construction squares). nil when the
+-- force has no construction coverage there. Whole-surface find calls crawl
+-- the entire generated chunk grid of a megabase surface (profiled at ~40 ms
+-- EACH regardless of match count) — the area limit is what makes the ghost
+-- scan cheap, ghosts outside bot range can't be built anyway.
+local function construction_bbox(surface, force)
+    local networks = force.logistic_networks[surface.name]
+    if not networks then return nil end
+    local x1, y1, x2, y2
+    for _, network in pairs(networks) do
+        for _, cell in pairs(network.cells) do
+            local r = cell.construction_radius
+            if r and r > 0 and cell.owner and cell.owner.valid then
+                local p = cell.owner.position
+                if not x1 then
+                    x1, y1, x2, y2 = p.x - r, p.y - r, p.x + r, p.y + r
+                else
+                    if p.x - r < x1 then x1 = p.x - r end
+                    if p.y - r < y1 then y1 = p.y - r end
+                    if p.x + r > x2 then x2 = p.x + r end
+                    if p.y + r > y2 then y2 = p.y + r end
+                end
+            end
         end
-        if ghost.type == "entity-ghost" then
-            add_insert_plans(list, ghost.insert_plan, pos.x, pos.y)
+    end
+    if not x1 then return nil end
+    return {{x1 - 1, y1 - 1}, {x2 + 1, y2 + 1}}
+end
+
+-- Scan a surface's ghost demand, aggregated per 32x32 chunk: chunk_key ->
+-- {x, y (chunk center), items = {item|quality -> count}}. 10k ghosts
+-- collapse into a few hundred chunk buckets, so per-outlet membership math
+-- is O(chunks x cells) instead of O(ghosts x cells). Returns chunks, count.
+local function scan_surface_ghosts(surface, force)
+    local chunks, count = {}, 0
+    local bbox = construction_bbox(surface, force)
+    if not bbox then return chunks, count end
+    local floor = math.floor
+    local function items_at(x, y)
+        local cx, cy = floor(x / 32), floor(y / 32)
+        local ck = cx .. ":" .. cy
+        local b = chunks[ck]
+        if not b then
+            b = { x = cx * 32 + 16, y = cy * 32 + 16, items = {} }
+            chunks[ck] = b
+        end
+        return b.items
+    end
+    for _, ghost in pairs(surface.find_entities_filtered {
+        area = bbox, type = "entity-ghost", force = force,
+    }) do
+        count = count + 1
+        local info = ghost_info("e|" .. ghost.ghost_name, ghost)
+        if info.place or info.requests then
+            local pos = ghost.position
+            local items = items_at(pos.x, pos.y)
+            if info.place then
+                local key = info.place.name .. "|" .. ghost.quality.name
+                items[key] = (items[key] or 0) + info.place.count
+            end
+            if info.requests then
+                add_insert_plans(items, ghost.insert_plan)
+            end
+        end
+    end
+    for _, ghost in pairs(surface.find_entities_filtered {
+        area = bbox, type = "tile-ghost", force = force,
+    }) do
+        count = count + 1
+        local info = ghost_info("t|" .. ghost.ghost_name, ghost)
+        if info.place then -- tiles have no quality or insert plans
+            local pos = ghost.position
+            local items = items_at(pos.x, pos.y)
+            local key = info.place.name .. "|normal"
+            items[key] = (items[key] or 0) + info.place.count
         end
     end
     for _, proxy in pairs(surface.find_entities_filtered {
-        type = "item-request-proxy", force = force,
+        area = bbox, type = "item-request-proxy", force = force,
     }) do
-        add_insert_plans(list, proxy.insert_plan, proxy.position.x, proxy.position.y)
+        local pos = proxy.position
+        add_insert_plans(items_at(pos.x, pos.y), proxy.insert_plan)
     end
-    return list
+    return chunks, count
 end
 
 -- Cached ghost list for a surface+force; entries untouched for two
@@ -560,14 +647,24 @@ local function surface_ghosts(surface, force)
     data.ghosts = data.ghosts or {}
     local key = surface.index .. "|" .. force.index
     local entry = data.ghosts[key]
-    if not entry or game.tick - entry.tick >= GHOST_TICKS then
+    -- entry.chunks check migrates away pre-0.15.2 per-ghost list entries
+    if not entry or not entry.chunks
+        or game.tick - entry.tick >= (entry.ttl or GHOST_TICKS) then
         local prof = data.profiling and helpers.create_profiler()
-        entry = { tick = game.tick, list = scan_surface_ghosts(surface, force) }
+        local chunks, count = scan_surface_ghosts(surface, force)
+        entry = {
+            tick = game.tick,
+            chunks = chunks,
+            count = count,
+            -- huge ghost fields rescan half as often; their demand shifts
+            -- slower than bots can build anyway
+            ttl = count > 4000 and GHOST_TICKS * 2 or GHOST_TICKS,
+        }
         data.ghosts[key] = entry
         if prof then
             prof.stop()
             helpers.write_file(PROFILE_FILE,
-                {"", game.tick, ",ghost-scan(", surface.name, " ghosts=", #entry.list, "),", prof, "\n"}, true)
+                {"", game.tick, ",ghost-scan(", surface.name, " ghosts=", count, "),", prof, "\n"}, true)
         end
     end
     return entry
@@ -583,20 +680,25 @@ local function ghost_wants(record, network)
         return record.ghost_wants
     end
     local wants = {}
-    if #entry.list > 0 then
+    if next(entry.chunks) then
         local cells = {}
         for _, cell in pairs(network.cells) do
             local r = cell.construction_radius
             if r and r > 0 and cell.owner and cell.owner.valid then
                 local p = cell.owner.position
-                cells[#cells + 1] = { x = p.x, y = p.y, r = r }
+                cells[#cells + 1] = { x = p.x, y = p.y, r = r + 16 } -- half-chunk slack
             end
         end
         if #cells > 0 then
-            for _, g in pairs(entry.list) do
+            -- chunk counts as covered when its center is within a cell's
+            -- construction square (+16 slack); boundary chunks over-fetch a
+            -- little, the give-back loop returns the excess
+            for _, chunk in pairs(entry.chunks) do
                 for _, c in pairs(cells) do
-                    if math.abs(g.x - c.x) <= c.r and math.abs(g.y - c.y) <= c.r then
-                        wants[g.key] = (wants[g.key] or 0) + g.count
+                    if math.abs(chunk.x - c.x) <= c.r and math.abs(chunk.y - c.y) <= c.r then
+                        for k, n in pairs(chunk.items) do
+                            wants[k] = (wants[k] or 0) + n
+                        end
                         break
                     end
                 end
@@ -649,7 +751,13 @@ end
 -- On-demand: keep only wanted items in the outlet (return the rest to the
 -- factories), then materialize what the network can't already supply.
 local function pull_on_demand(record, hub_inv, chests, set, state)
+    local prof = hub_data().profiling and helpers.create_profiler()
     local wants, network = network_wants(record.entity, record)
+    if prof then
+        prof.stop()
+        helpers.write_file(PROFILE_FILE,
+            {"", game.tick, ",net-wants,", prof, "\n"}, true)
+    end
     local moved = 0
 
     -- send back anything no longer wanted (bots occasionally re-route if we
@@ -717,7 +825,13 @@ local function pull_for_outlet(record)
         return
     end
 
+    local prof = hub_data().profiling and helpers.create_profiler()
     local chests = reachable_chests(record, outlet_source_mode(record))
+    if prof then
+        prof.stop()
+        helpers.write_file(PROFILE_FILE,
+            {"", game.tick, ",reach-chests(n=", #chests, "),", prof, "\n"}, true)
+    end
     if #chests == 0 then
         note_moved(record, 0)
         return
@@ -889,6 +1003,10 @@ end
 local function on_mined(event)
     local entity = event.entity
     if not (entity and entity.valid) then return end
+    if entity.type == "storage-tank" then -- possible Factorissimo building
+        local data = hub_data()
+        data.factory_gen = (data.factory_gen or 0) + 1
+    end
     local kind = KINDS[entity.name]
     if not (kind == "outlet" or kind == "inlet") then return end
     local buffer = event.buffer
@@ -1358,7 +1476,7 @@ local function on_pull_tick()
     if data.ghosts then
         local tick = game.tick
         for key, entry in pairs(data.ghosts) do
-            if tick - entry.tick >= GHOST_TICKS * 2 then
+            if tick - entry.tick >= (entry.ttl or GHOST_TICKS) * 2 then
                 data.ghosts[key] = nil
             end
         end
