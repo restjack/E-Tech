@@ -41,6 +41,7 @@ local AUTO_GROUP = "etech-inlet-auto"
 local PULL_TICKS = 120     -- work pass per device, every 2 s (also GUI refresh)
 local RESCAN_TICKS = 600   -- factory-list cache lifetime, 10 s
 local GHOST_TICKS = 300    -- ghost-demand cache lifetime, 5 s
+local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-output/)
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 10
 local RATE_WINDOW = 3600   -- ticks of pull history for the items/min stat
@@ -560,8 +561,14 @@ local function surface_ghosts(surface, force)
     local key = surface.index .. "|" .. force.index
     local entry = data.ghosts[key]
     if not entry or game.tick - entry.tick >= GHOST_TICKS then
+        local prof = data.profiling and game.create_profiler()
         entry = { tick = game.tick, list = scan_surface_ghosts(surface, force) }
         data.ghosts[key] = entry
+        if prof then
+            prof.stop()
+            helpers.write_file(PROFILE_FILE,
+                {"", game.tick, ",ghost-scan(", surface.name, " ghosts=", #entry.list, "),", prof, "\n"}, true)
+        end
     end
     return entry
 end
@@ -1326,6 +1333,7 @@ end
 local function on_pull_tick()
     if not factorissimo_available() then return end
     local data = hub_data()
+    local prof = data.profiling and game.create_profiler()
 
     -- outlets in priority order (1 = first), then inlets, then sensors
     local outlets, inlets, sensors = {}, {}, {}
@@ -1375,6 +1383,13 @@ local function on_pull_tick()
         else
             data.open[player_index] = nil
         end
+    end
+
+    if prof then
+        prof.stop()
+        helpers.write_file(PROFILE_FILE,
+            {"", game.tick, ",pull-pass(outlets=", #outlets, " inlets=", #inlets,
+             " sensors=", #sensors, "),", prof, "\n"}, true)
     end
 end
 
@@ -1504,9 +1519,27 @@ end
 M.on_init = adopt_existing
 M.on_configuration_changed = adopt_existing
 
+-- Toggle per-pass timing capture. Each pull pass (and each ghost scan)
+-- appends a line to script-output/etech-profile.csv: tick, phase, duration.
+-- LuaProfiler is the only wall-clock a mod can touch; it can't be read from
+-- Lua, only printed — hence the file, parsed offline.
+local function profile_command(cmd)
+    local player = game.get_player(cmd.player_index)
+    local data = hub_data()
+    data.profiling = not data.profiling
+    if data.profiling then
+        helpers.write_file(PROFILE_FILE, "tick,phase,duration\n", false)
+    end
+    local msg = "[factory-outlet] profiling " ..
+        (data.profiling and ("ON -> script-output/" .. PROFILE_FILE) or "OFF")
+    if player then player.print(msg) else game.print(msg) end
+end
+
 M.add_commands = function()
     commands.add_command("etech-hub-debug",
         "Print factory outlet/inlet/sensor diagnostics", debug_command)
+    commands.add_command("etech-hub-profile",
+        "Toggle per-pass timing capture to script-output/etech-profile.csv", profile_command)
 end
 
 M.events = {

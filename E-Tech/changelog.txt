@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.15.1
+Date: 2026-07-18
+  Debug:
+    - /etech-hub-profile: toggle per-pass timing capture. Every outlet/inlet/sensor pull pass
+      and every ghost scan appends its exact duration to script-output/etech-profile.csv,
+      for pinning down what a perceived hitch actually costs. Off by default, zero overhead
+      when off.
+---------------------------------------------------------------------------------------------------
 Version: 0.15.0
 Date: 2026-07-18
   Features:
