@@ -10,8 +10,9 @@ Date: 2026-07-17
       handlers (dropdown, filter slots, checkboxes, textfields) now bail on invalid elements.
     - Outlet returns no longer scatter items into random factory chests. Overflow and
       on-demand give-backs went to the first chest with a free slot, filling provider chests
-      with items that never belonged there. Returns now prefer a chest already holding that
-      item (the origin chest wins), then yellow storage chests, then anything with room.
+      with items that never belonged there. Returns now only go to a chest already holding
+      that item (the origin chest wins) or a yellow storage chest; if both are full, the item
+      stays in the outlet (or the mining buffer) instead of polluting a random chest.
 ---------------------------------------------------------------------------------------------------
 Version: 0.14.1
 Date: 2026-07-17

@@ -343,15 +343,15 @@ end
 
 -- Returned items (overflow, on-demand give-backs, mined-device dumps) must
 -- not scatter into the first chest with a free slot — that fills provider
--- chests with items that never belonged there. Preference order: a chest
--- that already holds the item (its origin chest wins naturally), then
--- yellow storage chests (the vanilla "mixed stuff" home), then anything
--- with room as the last resort.
+-- chests with items that never belonged there. Only two acceptable homes:
+-- a chest that already holds the item (its origin chest wins naturally),
+-- then yellow storage chests (the vanilla "mixed stuff" home). If both are
+-- full the item deliberately stays where it is (outlet buffer / mining
+-- buffer) rather than polluting a random chest.
 local function return_passes(name, quality)
     return {
         function(chest) return chest.get_item_count({name = name, quality = quality}) > 0 end,
         function(chest) return chest.prototype.logistic_mode == "storage" end,
-        function(chest) return true end,
     }
 end
 
