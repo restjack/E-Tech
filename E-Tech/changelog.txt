@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.14.3
+Date: 2026-07-18
+  Compatibility:
+    - Cerys 4.24.5 fixes the nitric acid conflict at the source (it no longer defines the fluid
+      when Krastorio 2 is installed), so E-Tech's compat fix now only fires when it actually
+      detects the old 15C overwrite. The recipe temperature-bound stripping is gone entirely -
+      it deleted K2's intended 25-100C gate from every nitric acid recipe, and existing saves
+      self-heal anyway (the engine clamps stored fluid temperatures to the prototype range on
+      load). Players on Cerys 4.24.5+ get K2's untouched fluid and recipes.
+---------------------------------------------------------------------------------------------------
 Version: 0.14.2
 Date: 2026-07-17
   Bugfixes:

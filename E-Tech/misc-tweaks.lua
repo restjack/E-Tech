@@ -113,17 +113,19 @@ if settings.startup["etech-fps-thrusters"].value then
 end
 
 -- ---------------------------------------------------------------------------
--- Krastorio 2 + Cerys nitric acid compat fix (always on when both present).
--- Cerys loads after K2 (optional dependency on K2SO) and redefines the
--- kr-nitric-acid fluid with default_temperature = 15 and none of K2's other
--- fields — so all Cerys-produced acid comes out at 15°C, below the 25°C
--- minimum K2's recipes expect, and the fluid tooltip loses K2's info.
--- Restore K2's full definition, and strip temperature bounds from recipes
--- consuming it so cold acid already in pipes/save stays usable.
+-- Krastorio 2 + Cerys nitric acid compat fix (legacy Cerys only).
+-- Cerys below 4.24.5 loads after K2 (optional dependency on K2SO) and
+-- redefines the kr-nitric-acid fluid with default_temperature = 15 and none
+-- of K2's other fields — so all Cerys-produced acid comes out at 15°C, below
+-- the 25°C minimum K2's recipes expect, and the tooltip loses K2's info.
+-- Cerys 4.24.5 fixed this upstream (it no longer defines the fluid when K2 is
+-- installed), so this only runs when the 15°C overwrite is actually present.
+-- Existing saves self-heal: the engine clamps stored fluid temperatures to the
+-- prototype range on load, so no recipe temperature bounds need touching.
 -- ---------------------------------------------------------------------------
 if mods["Krastorio2"] and mods["Cerys-Moon-of-Fulgora"] then
   local fluid = data.raw.fluid["kr-nitric-acid"]
-  if fluid then
+  if fluid and fluid.default_temperature == 15 then
     fluid.default_temperature = 25
     fluid.gas_temperature = 25
     fluid.max_temperature = 100
@@ -131,18 +133,7 @@ if mods["Krastorio2"] and mods["Cerys-Moon-of-Fulgora"] then
     fluid.base_color = { r = 0.752, g = 0.215, b = 0.337, a = 1.0 }
     fluid.flow_color = { r = 0.752, g = 0.215, b = 0.337, a = 0.8 }
     fluid.auto_barrel = true
-    elog("kr-nitric-acid: restored K2's definition over Cerys's 15C overwrite")
-  end
-  for name, recipe in pairs(data.raw.recipe) do
-    for _, ing in pairs(recipe.ingredients or {}) do
-      if ing.type == "fluid" and ing.name == "kr-nitric-acid"
-         and (ing.minimum_temperature or ing.maximum_temperature or ing.temperature) then
-        ing.minimum_temperature = nil
-        ing.maximum_temperature = nil
-        ing.temperature = nil
-        elog("removed nitric acid temperature bounds from recipe: " .. name)
-      end
-    end
+    elog("kr-nitric-acid: restored K2's definition over pre-4.24.5 Cerys's 15C overwrite")
   end
 end
 

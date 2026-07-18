@@ -37,7 +37,7 @@ Everything is a startup setting, and every recipe change is guarded so it never 
 | Colorful biochamber | off | Needs Space Age. Recolors the biochamber's pools, dome and windows per recipe so you can tell what it's making at a glance. Port of [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray (public domain); auto-skipped if the original is installed |
 | Copy modules with machine settings | off | Shift-click paste moves modules straight from your inventory (old modules handed back, bot request for what's missing); handles ghosts and remote view; furnaces/labs/beacons cross-pastable. Per-player runtime switch. Port of [Copy Paste Modules](https://mods.factorio.com/mod/CopyPasteModules) by kajacx (MIT); auto-skipped if the original is installed |
 
-Always-on compat fix: with **Krastorio 2 + Cerys** together, Cerys redefines K2's nitric acid at 15Â°C (below the 25Â°C minimum K2 recipes expect, starving imersite crystal plants) and drops the fluid's tooltip data. E-Tech restores K2's definition and strips the stale temperature bounds so cold acid in existing pipes stays usable.
+Always-on compat fix (legacy Cerys only): **Cerys below 4.24.5** redefined K2's nitric acid at 15°C (below the 25°C minimum K2 recipes expect, starving imersite crystal plants) and dropped the fluid's tooltip data. E-Tech restores K2's definition when it detects that overwrite. Cerys 4.24.5 fixed this upstream - with it installed the fix stays dormant and K2's recipe temperature bounds are left intact.
 
 Stack-size and spoilage defaults match vanilla, so installing the mod changes nothing until you move a slider or flip a switch â€” safe to share with friends who want different settings.
 
