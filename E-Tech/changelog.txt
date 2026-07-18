@@ -1,4 +1,21 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.15.0
+Date: 2026-07-18
+  Features:
+    - On-demand outlets now cover construction ghosts. Ghosts aren't logistic requests, so an
+      on-demand outlet used to sit empty while construction bots starved (blueprint a factory
+      building, nothing gets built). The outlet now derives ghost demand itself: entity ghosts,
+      tile ghosts, and module requests (on ghosts and on built machines) within the network's
+      construction range count as demand, and the needed items materialize from the factories
+      like any other request. Always on in on-demand mode — no new toggle.
+    - /etech-hub-debug now prints the ghost demand an on-demand outlet currently sees (and
+      warns when the outlet isn't in a logistic network at all).
+  Optimizations:
+    - Ghost scanning is built to scale: one surface scan per force every 5 seconds shared by
+      all outlets on that surface (cached in savegame storage, so multiplayer joiners stay in
+      sync), per-prototype item lookups memoized, and network membership computed as pure
+      coordinate math against the roboports' construction squares - no per-ghost API calls.
+---------------------------------------------------------------------------------------------------
 Version: 0.14.3
 Date: 2026-07-18
   Compatibility:

@@ -6,7 +6,8 @@
 --            itself (passive provider). Two modes per outlet:
 --              buffer (default): keep N stacks of each item on hand
 --              on-demand: sit empty; materialize items only when the local
---                logistic network has unmet requester demand
+--                logistic network has unmet demand (requesters, players,
+--                spidertrons, and construction ghosts in build range)
 --            plus per-outlet filters, priority ordering, circuit enable and
 --            the optional energy cost.
 --   inlet  - distributes its own contents into the requester/buffer chests
@@ -39,6 +40,7 @@ local INLET_PANEL_NAME = "etech-inlet-panel"
 local AUTO_GROUP = "etech-inlet-auto"
 local PULL_TICKS = 120     -- work pass per device, every 2 s (also GUI refresh)
 local RESCAN_TICKS = 600   -- factory-list cache lifetime, 10 s
+local GHOST_TICKS = 300    -- ghost-demand cache lifetime, 5 s
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 10
 local RATE_WINDOW = 3600   -- ticks of pull history for the items/min stat
@@ -474,11 +476,136 @@ end
 
 -- Outlet: on-demand mode ---------------------------------------------------------
 
--- Unmet requester demand on the outlet's own logistic network, per
--- item|quality: how much requesters (chests, players, spidertrons) still
--- want beyond what they hold. Returns nil when the outlet isn't in a
--- network.
-local function network_wants(outlet)
+-- Construction-ghost demand. Ghosts aren't logistic requests, so the engine
+-- never surfaces them through requester_points — an on-demand outlet would
+-- sit empty while construction bots starve. We derive the demand ourselves:
+--   1. per surface+force, every GHOST_TICKS: one find_entities_filtered for
+--      entity/tile ghosts (+ item-request-proxies for module requests) and
+--      flatten each into {x, y, item|quality, count}. Cached in storage —
+--      a session-local cache here would desync multiplayer joiners.
+--   2. per outlet, once per scan generation: keep only ghosts inside this
+--      network's construction range (pure math against the cells'
+--      construction squares — no per-ghost API calls) and aggregate into
+--      wants. Reused by every 2 s pull pass until the next scan.
+
+-- Item that places a ghost prototype; memoized per name (pure prototype
+-- data, so a local cache is deterministic — same trick as layout_name_cache).
+local place_item_cache = {}
+local function ghost_place_item(ghost)
+    local key = ghost.type .. "|" .. ghost.ghost_name
+    local cached = place_item_cache[key]
+    if cached == nil then
+        local spec = ghost.ghost_prototype.items_to_place_this
+        spec = spec and spec[1] -- what bots actually deliver
+        cached = spec and { name = spec.name, count = spec.count or 1 } or false
+        place_item_cache[key] = cached
+    end
+    return cached or nil
+end
+
+-- Total items in a BlueprintInsertPlan list (module requests on ghosts and
+-- on already-built machines via item-request-proxy).
+local function add_insert_plans(list, plans, x, y)
+    for _, plan in pairs(plans or {}) do
+        local items = plan.items
+        local count = items.grid_count or 0
+        for _, pos in pairs(items.in_inventory or {}) do
+            count = count + (pos.count or 1)
+        end
+        if count > 0 then
+            local quality = plan.id.quality
+            if type(quality) ~= "string" then
+                quality = quality and quality.name or "normal"
+            end
+            list[#list + 1] = {
+                x = x, y = y,
+                key = plan.id.name .. "|" .. quality,
+                count = count,
+            }
+        end
+    end
+end
+
+local function scan_surface_ghosts(surface, force)
+    local list = {}
+    for _, ghost in pairs(surface.find_entities_filtered {
+        type = {"entity-ghost", "tile-ghost"}, force = force,
+    }) do
+        local pos = ghost.position
+        local item = ghost_place_item(ghost)
+        if item then
+            list[#list + 1] = {
+                x = pos.x, y = pos.y,
+                key = item.name .. "|" .. ghost.quality.name,
+                count = item.count,
+            }
+        end
+        if ghost.type == "entity-ghost" then
+            add_insert_plans(list, ghost.insert_plan, pos.x, pos.y)
+        end
+    end
+    for _, proxy in pairs(surface.find_entities_filtered {
+        type = "item-request-proxy", force = force,
+    }) do
+        add_insert_plans(list, proxy.insert_plan, proxy.position.x, proxy.position.y)
+    end
+    return list
+end
+
+-- Cached ghost list for a surface+force; entries untouched for two
+-- lifetimes (surface deleted, outlets gone) are pruned by on_pull_tick.
+local function surface_ghosts(surface, force)
+    local data = hub_data()
+    data.ghosts = data.ghosts or {}
+    local key = surface.index .. "|" .. force.index
+    local entry = data.ghosts[key]
+    if not entry or game.tick - entry.tick >= GHOST_TICKS then
+        entry = { tick = game.tick, list = scan_surface_ghosts(surface, force) }
+        data.ghosts[key] = entry
+    end
+    return entry
+end
+
+-- Ghost demand visible to this outlet's network, per item|quality.
+-- Membership = inside any cell's construction square (construction areas
+-- are square). Memoized per scan generation on the record.
+local function ghost_wants(record, network)
+    local hub = record.entity
+    local entry = surface_ghosts(hub.surface, hub.force)
+    if record.ghost_tick == entry.tick and record.ghost_wants then
+        return record.ghost_wants
+    end
+    local wants = {}
+    if #entry.list > 0 then
+        local cells = {}
+        for _, cell in pairs(network.cells) do
+            local r = cell.construction_radius
+            if r and r > 0 and cell.owner and cell.owner.valid then
+                local p = cell.owner.position
+                cells[#cells + 1] = { x = p.x, y = p.y, r = r }
+            end
+        end
+        if #cells > 0 then
+            for _, g in pairs(entry.list) do
+                for _, c in pairs(cells) do
+                    if math.abs(g.x - c.x) <= c.r and math.abs(g.y - c.y) <= c.r then
+                        wants[g.key] = (wants[g.key] or 0) + g.count
+                        break
+                    end
+                end
+            end
+        end
+    end
+    record.ghost_wants = wants
+    record.ghost_tick = entry.tick
+    return wants
+end
+
+-- Unmet demand on the outlet's own logistic network, per item|quality:
+-- how much requesters (chests, players, spidertrons) still want beyond
+-- what they hold, plus construction ghosts in the network's build range.
+-- Returns nil when the outlet isn't in a network.
+local function network_wants(outlet, record)
     local network = outlet.logistic_network
     if not network then return nil end
     local wants = {}
@@ -503,13 +630,19 @@ local function network_wants(outlet)
             end
         end
     end
+    -- construction ghosts count as demand too (the whole point of the
+    -- outlet: anything inside the factories is usable outside, ghosts
+    -- included)
+    for key, count in pairs(ghost_wants(record, network)) do
+        wants[key] = (wants[key] or 0) + count
+    end
     return wants, network
 end
 
 -- On-demand: keep only wanted items in the outlet (return the rest to the
 -- factories), then materialize what the network can't already supply.
 local function pull_on_demand(record, hub_inv, chests, set, state)
-    local wants, network = network_wants(record.entity)
+    local wants, network = network_wants(record.entity, record)
     local moved = 0
 
     -- send back anything no longer wanted (bots occasionally re-route if we
@@ -1212,6 +1345,17 @@ local function on_pull_tick()
         return (a.priority or 100) < (b.priority or 100)
     end)
 
+    -- drop ghost caches nothing refreshed for two lifetimes (outlet gone,
+    -- surface deleted) so storage doesn't accumulate dead surface entries
+    if data.ghosts then
+        local tick = game.tick
+        for key, entry in pairs(data.ghosts) do
+            if tick - entry.tick >= GHOST_TICKS * 2 then
+                data.ghosts[key] = nil
+            end
+        end
+    end
+
     for _, record in pairs(outlets) do pull_for_outlet(record) end
     for _, record in pairs(inlets) do distribute_for_inlet(record) end
     for _, record in pairs(sensors) do update_sensor(record) end
@@ -1265,6 +1409,28 @@ local function debug_command(cmd)
                 entity.position.x, entity.position.y,
                 #record.factories, #chests, rate_per_minute(record),
                 energy_per_item() > 0 and tostring(energy_budget(record)) or "off"))
+            if record.kind == "outlet" and record.on_demand then
+                local network = entity.logistic_network
+                if not network then
+                    player.print("  not in a logistic network — on-demand sees no demand")
+                else
+                    local lines = 0
+                    for key, count in pairs(ghost_wants(record, network)) do
+                        lines = lines + 1
+                        if lines > 20 then
+                            player.print("  ... (ghost list capped at 20 item types)")
+                            break
+                        end
+                        local name, quality = split_key(key)
+                        player.print("  ghost demand: " .. name ..
+                            (quality ~= "normal" and ("(" .. quality .. ")") or "") ..
+                            " x" .. count)
+                    end
+                    if lines == 0 then
+                        player.print("  no construction-ghost demand in build range")
+                    end
+                end
+            end
             if record.kind == "outlet" and not record.on_demand then
                 local hub_inv = entity.get_inventory(defines.inventory.chest)
                 local counts = inventory_counts(hub_inv)
