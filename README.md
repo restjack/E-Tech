@@ -2,7 +2,7 @@
 
 This is the working repository for **[E-Tech](https://mods.factorio.com/mod/E-Tech)**, a Factorio 2.1 mod that restores vanilla recipes while keeping everything [AAI Industry](https://mods.factorio.com/mod/aai-industry) adds, plus a growing pile of optional quality-of-life toggles.
 
-It is also, first and foremost, a **learning project** — an excuse to understand Lua, the Factorio modding API, and how mods fit together. The commit history, docs, and design notes are left in the open on purpose. If any of it helps you learn or build your own mod: **copy it, fork it, strip it for parts.** No permission needed (see License below).
+It is also, first and foremost, a **learning project** — an excuse to understand Lua, the Factorio modding API, and how mods fit together. The commit history and design notes are left in the open on purpose. If any of it helps you learn or build your own mod: **copy it, fork it, strip it for parts.** No permission needed (see License below).
 
 ## What the mod does
 
@@ -16,7 +16,6 @@ Full feature list and design notes: **[E-Tech/README.md](E-Tech/README.md)**
 |---|---|
 | [`E-Tech/`](E-Tech/) | The mod itself — this folder is what gets zipped and shipped |
 | [`E-Tech/build.ps1`](E-Tech/build.ps1) | Build script: packages `E-Tech_<version>.zip` into the Factorio mods folder |
-| [`E-TECH-HANDOFF.md`](E-TECH-HANDOFF.md) | Running dev log / session notes — design decisions, gotchas, version history |
 | [`E-Tech/AAI-CHANGE-INVENTORY.md`](E-Tech/AAI-CHANGE-INVENTORY.md) | Full audit of everything AAI Industry changes, classified by revert difficulty |
 | [`PORTAL-PAGE.md`](PORTAL-PAGE.md) | Source text for the mod portal page |
 
@@ -26,7 +25,7 @@ Release zips are not tracked here — they're built by `build.ps1` and published
 
 - [`E-Tech/data-final-fixes.lua`](E-Tech/data-final-fixes.lua) — data-stage recipe patching with fingerprint guards so it never fights other overhaul mods
 - [`E-Tech/control.lua`](E-Tech/control.lua) — control-stage (runtime) code: events, GUI, teleporting players
-- [`E-TECH-HANDOFF.md`](E-TECH-HANDOFF.md) — the honest version of development, including every mistake and Factorio 2.0→2.1 porting gotcha we hit
+- [`E-Tech/changelog.txt`](E-Tech/changelog.txt) — full version history, including what each fix actually fixed
 
 ## License
 

@@ -8,3 +8,10 @@ Desktop.ini
 
 # Local convenience shortcuts
 *.lnk
+
+# Private working docs — session notes, local-machine inventories (stay in
+# Nextcloud, never on GitHub)
+E-TECH-HANDOFF.md
+SESSION-RECAP-*.md
+MOD-AUDIT-*.md
+LOCAL-PATCHED-MODS.md

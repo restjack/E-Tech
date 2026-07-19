@@ -1,7 +1,7 @@
 # Absorbed mods — original zips
 
 The retired originals of the mods absorbed into E-Tech 0.8.0 (2026-07-15), kept
-for provenance and diffing. These are Eli's locally patched 2.1 builds (portal
+for provenance and diffing. These are locally patched 2.1 builds (portal
 version +1 patch bump), pulled from the live mods folder after the switch.
 
 | zip | absorbed as | license |
