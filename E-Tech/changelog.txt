@@ -2,27 +2,25 @@
 Version: 0.16.1
 Date: 2026-07-18
   Optimizations:
-    - Stretched the last two scheduled scans (live-profiled at ~40 ms and ~23 ms per hit on a
-      large map): factory-list fallback rescan 60 s -> 5 min (storage-tank build/mine events
-      already invalidate it instantly, and dead factories are filtered out immediately, so the
-      timer only catches exotic script edits), item-request-proxy rescan 30 s -> 60 s. The
-      once-a-minute frame blip is now a couple of sub-frame blips per 5 minutes.
+    - Reduced the two remaining scheduled scans: the factory-list fallback rescan now runs
+      every 5 minutes instead of every minute (building or mining a factory still refreshes
+      the list instantly, and removed factories are filtered out immediately), and the
+      item-request-proxy rescan runs every 60 s instead of every 30 s.
 ---------------------------------------------------------------------------------------------------
 Version: 0.16.0
 Date: 2026-07-18
   Optimizations:
-    - Ghost demand is now an event-driven index instead of a periodic scan. 0.15.4's staged
-      profiling settled it: each find_entities_filtered call costs ~23 ms on a large map no
-      matter what it finds, so ANY rescan cadence hitches. The index does the expensive full
-      scan exactly once per surface+force, then maintains itself: every new ghost is added
-      from its build event, every removed ghost (built, deconstructed, decayed, scripted)
-      subtracts exactly what it added via its destroy event. Steady-state periodic cost is
-      zero - the recurring ~100 ms hitch every 10 s is gone.
+    - Ghost demand is now an event-driven index instead of a periodic scan. On large maps,
+      surface-wide entity searches are expensive no matter how little they find, so any
+      rescan interval caused a periodic stutter. The index scans once per surface, then
+      maintains itself: each new ghost is added from its build event, and each removed ghost
+      (built, deconstructed, decayed or removed by script) subtracts exactly what it added.
+      Steady-state scanning cost is zero.
     - Item-request-proxies (module/fuel requests on built machines) have no build event to
-      hook, so they keep a slow periodic scan: every 30 s, area-limited to construction
-      coverage.
-    - Per-outlet ghost membership is recomputed each pass from the chunk buckets (pure math,
-      no API calls) so roboport coverage changes are picked up within 2 s.
+      hook, so they keep a slow periodic scan: every 30 s, limited to the area covered by
+      construction bots.
+    - Ghost coverage per outlet is recomputed every pass, so roboport coverage changes are
+      picked up within 2 s.
 ---------------------------------------------------------------------------------------------------
 Version: 0.15.4
 Date: 2026-07-18
@@ -34,27 +32,21 @@ Date: 2026-07-18
 Version: 0.15.3
 Date: 2026-07-18
   Optimizations:
-    - Profiling on a large map proved whole-surface find_entities_filtered calls cost ~40 ms
-      EACH regardless of how much they find (they crawl the surface's entire generated chunk
-      grid) - 0.15.2's per-ghost optimizations were aimed at the wrong target. Two fixes:
     - Ghost scans are now confined to the bounding box of the force's construction-bot
-      coverage on that surface (union of all logistic cells' construction squares). Ghosts
-      outside bot range can't be built anyway. No coverage = no scan at all.
-    - The factory-list rescan (whole-surface storage-tank sweep, the other 40 ms hit, every
-      10 s per device) is now event-driven: building or mining any storage-tank invalidates
-      the cache instantly, and the timed fallback rescan runs once a minute instead.
+      coverage on that surface. Ghosts outside bot range can't be built anyway; with no
+      coverage, no scan runs at all.
+    - The factory-list rescan is now event-driven: building or mining a factory refreshes
+      the list instantly, and the timed fallback rescan runs once a minute instead of every
+      10 seconds.
 ---------------------------------------------------------------------------------------------------
 Version: 0.15.2
 Date: 2026-07-18
   Optimizations:
-    - Ghost scan rebuilt for big blueprint pastes (profiled at 9.4k ghosts: scan was 89-98 ms
-      every 5 s, the pull pass up to 176 ms - a visible hitch). Three fixes: ghost demand now
-      aggregates per 32x32 chunk at scan time, so outlet membership math is O(chunks) instead
-      of O(ghosts); insert_plan (module/fuel/ammo requests) is only read from prototypes that
-      can actually carry one - belts, walls, rails and other plain buildables skip that API
-      call entirely; and entity/tile ghosts scan in separate passes so tile ghosts skip the
-      per-ghost type and quality reads. Surfaces with >4000 ghosts also rescan at 10 s
-      instead of 5 s.
+    - Ghost scan rebuilt for big blueprint pastes: ghost demand now aggregates per 32x32
+      chunk at scan time, so per-outlet coverage math scales with chunks instead of ghosts;
+      module/fuel/ammo request checks are skipped for prototypes that can't carry them
+      (belts, walls, rails and other plain buildables); and surfaces with more than 4000
+      ghosts rescan at 10 s instead of 5 s.
     - /etech-hub-profile now also logs reach-chests and net-wants sub-phases to break down
       where a pull pass spends its time.
 ---------------------------------------------------------------------------------------------------
@@ -96,12 +88,10 @@ Date: 2026-07-18
 Version: 0.14.2
 Date: 2026-07-17
   Bugfixes:
-    - CRASH FIX (took down the multiplayer server): factory hub's GUI handlers read
-      event.element without checking validity. When another E-Tech module rebuilds its GUI on
-      the same event (e.g. changing the teleporter list's sort dropdown destroys the dropdown
-      mid-event), the element is already invalid and the game hard-crashed with
-      "LuaGuiElement API call when LuaGuiElement was invalid". All four unguarded factory-hub
-      handlers (dropdown, filter slots, checkboxes, textfields) now bail on invalid elements.
+    - Fixed a crash in the factory outlet/inlet GUI handlers: when another mod (or E-Tech
+      module) rebuilds its own GUI during the same event, the element can already be invalid
+      and reading it crashed the game ("LuaGuiElement API call when LuaGuiElement was
+      invalid"). All handlers now check element validity first.
     - Outlet returns no longer scatter items into random factory chests. Overflow and
       on-demand give-backs went to the first chest with a free slot, filling provider chests
       with items that never belonged there. Returns now only go to a chest already holding
