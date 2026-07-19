@@ -7,7 +7,7 @@ E-Tech: Vanilla Recipes for AAI Industry + QoL Toggles
 
 ## Summary
 
-Restores vanilla recipes while keeping everything AAI Industry adds (Krastorio 2 aware). Plus optional startup toggles: all modules in beacons, quality asteroid crushing, stack sizes, K2 nuclear fuel crafting, uranium bacteria on Gleba, teleporter pads with energy cost and cross-surface support, a teleport-to-player shortcut, and more.
+Restores vanilla recipes while keeping everything AAI Industry adds (Krastorio 2 aware). Plus optional startup toggles: a factory outlet/inlet/sensor set that bridges Factorissimo factory interiors with your logistic network (on-demand mode even supplies construction ghosts), teleporter pads, resource map markers, all modules in beacons, void chests, total productivity, and a dozen more — everything defaults to vanilla behavior.
 
 ## Description — copy everything BELOW this line
 
@@ -38,15 +38,41 @@ Defaults marked; everything defaults to vanilla behavior.
 - **Total productivity** (off) — productivity modules on recipes the game normally forbids: belts, inserters, rails, pipes, solar, walls, ammo, equipment, and more, with four category group toggles. Revival of [Total Productivity](https://mods.factorio.com/mod/Productivity) by AivanF (LGPLv3), auto-skipped if the original is installed.
 - **Jetpack fuel HUD** (off, needs [Jetpack](https://mods.factorio.com/mod/jetpack)) — movable in-flight window with current fuel, inventory count, burn bar, and estimated remaining flight time. Revival of [Puppy's Jetpack UI](https://mods.factorio.com/mod/puppy-jetpack-ui) (MIT) with the window-position reset bug fixed; auto-skipped if the original is installed.
 - **Resource map markers** (off) — auto-tags every resource patch on the map: one marker per patch with the resource icon and total amount (oil shows well count + average yield). Updates as you chart and mine, respects markers you delete, `/etech-markers-rebuild` rescans. Written from scratch, 2.1-native — replaces the abandoned Resource Map Label Marker mod (whose 2.1 fork crashes on any mod change).
-- **Teleporter pads** (off) — buildable teleporters (chemical science tech): walk onto a pad, pick a destination from a map GUI. Revival of [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3), updated for 2.1 and extended: pads have a 200 MJ buffer and teleporting drains the DESTINATION pad (map settings; 0 = free like the original), cross-surface teleporting with a surface filter and custom surface display names, a wireless-remote toolbar shortcut (default 2x cost), a free return teleport with live camera preview after remote jumps, and your team's online players at the top of the list. Upgrading from the original mod? Run `/etech-migrate-teleporters` while both mods are installed — placed pads keep their names, items and research carry over — then remove the original.
+- **Teleporter pads** (off) — buildable teleporters (chemical science tech): walk onto a pad, pick a destination from a map GUI. Revival of [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3), updated for 2.1 and extended: pads have a 200 MJ buffer and teleporting drains the DESTINATION pad (map settings; 0 = free like the original), cross-surface teleporting with a surface filter and custom surface display names, a wireless-remote toolbar shortcut (default 2x cost), a free return teleport with live camera preview after remote jumps, and your team's online players at the top of the list. QoL: right-click a pad to star it, Shift+right-click renames, sort dropdown (recent / A-Z / nearest), per-pad distances, unpowered-pad map alerts, teleport sound with volume setting, SHIFT+T remote hotkey. Upgrading from the original mod? Run `/etech-migrate-teleporters` while both mods are installed — placed pads keep their names, items and research carry over — then remove the original.
+- **Factory logistics: outlet, inlet & sensor** (off, needs [Factorissimo 3](https://mods.factorio.com/mod/factorissimo-2-notnotmelon)) — robots can't fly in or out of factory buildings, so these bridge the wall by teleporting items across. The **factory outlet** offers everything made inside your factories to the outside logistic network: in its default on-demand mode it sits empty and fetches items only when the network actually wants them — requester and buffer chests, player and spidertron requests, **and construction ghosts** (including module requests), so blueprints build straight from factory stock; buffer mode instead keeps a set number of stacks of everything on hand. The **factory inlet** is the reverse direction: fill it (or let its auto-request option set its own bot requests) and it distributes into the requester/buffer chests inside. The **factory sensor** outputs interior provider stock as circuit signals. The outlet panel shows everything inside your factories with search, per-factory breakdowns and naming, click-to-locate map pins, and shift-click to grab a stack; per-outlet item filters, stack caps, priorities, circuit enable, and optional storage-chest draining. Reaches nested factories (toggleable), optional range limit and per-item energy cost (map settings). Built for big bases: ghost demand is tracked event-driven, not by rescanning the map. Unlocked alongside logistic robotics; mining an outlet/inlet returns its items to the factories.
+- **Void chest & void pipe** (off) — cheap void chest (destroys any item put in) and void pipe (destroys any fluid pumped in), unlocked by a small early tech. Revival of [Easy Void](https://mods.factorio.com/mod/easyvoid) by zoryn (MIT); placed voids from the original survive the switch; auto-skipped if the original is installed. A second toggle adds a **filtered void chest** that destroys only the items you pick.
+- **Edit map settings in-game** (off) — toolbar shortcut opens an editor for map settings (pollution, evolution, expansion, peaceful/no-enemies, spoilage rate) and per-surface map gen settings; applying requires admin. Revival of [Edit Map Settings](https://mods.factorio.com/mod/EditMapSettings) by Morsk (MIT); auto-skipped if the original is installed.
+- **FPS-friendly thrusters** (off) — removes the animated exhaust plumes from space platform thrusters, the big FPS drain on large platforms. Port of [FPS Friendly Thrusters](https://mods.factorio.com/mod/FPS_Friendly_Thrusters) by RockPaperKatana (MIT); auto-skipped if the original is installed.
+- **Pass-through fusion generators** (off) — fusion generators get plasma connections on all four sides so they chain without separate plasma lines. Port of [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT); auto-skipped if the original is installed.
+- **Colorful biochamber** (off, needs Space Age) — recolors the biochamber's pools, dome and windows per recipe so you can tell what it's making at a glance. Port of [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray; auto-skipped if the original is installed.
+- **Copy modules with machine settings** (off) — shift-click paste moves modules straight from your inventory (old modules handed back, bot request for what's missing); handles ghosts and remote view; furnaces/labs/beacons cross-pastable. Per-player runtime switch. Port of [Copy Paste Modules](https://mods.factorio.com/mod/CopyPasteModules) by kajacx (MIT); auto-skipped if the original is installed.
 
 ## Plays nice with other overhaul mods
 
 Every restore is fingerprint-guarded: a recipe is only touched if it still matches AAI's version or contains an AAI-only item. If another mod already rewrote it, E-Tech leaves it alone. All decisions are logged — search factorio-current.log for [E-Tech].
 
-## Credits
+## Compatibility note
 
-Gleba uranium feature ported from [Simple Gleba Uranium](https://mods.factorio.com/mod/simple-gleba-uranium) by cindersash, MIT license (attribution shipped in the mod as LICENSE-third-party.txt). Everything else: public domain.
+Always-on compat fix (legacy Cerys only): Cerys below 4.24.5 redefined Krastorio 2's nitric acid at 15C, starving imersite crystal plants. E-Tech restores K2's definition when it detects that overwrite; with Cerys 4.24.5+ the fix stays dormant.
+
+## Credits — revived/ported mods
+
+All credit for the original ideas and code goes to their authors; full license texts and per-port modification notes ship in the mod as LICENSE-third-party.txt:
+
+- [Teleporters](https://mods.factorio.com/mod/Teleporters) by Klonan (LGPLv3)
+- [Total Productivity](https://mods.factorio.com/mod/Productivity) by AivanF (LGPLv3)
+- [Puppy's Jetpack UI](https://mods.factorio.com/mod/puppy-jetpack-ui) by Puppy (MIT)
+- [Simple Gleba Uranium](https://mods.factorio.com/mod/simple-gleba-uranium) by cindersash (MIT)
+- [Easy Void](https://mods.factorio.com/mod/easyvoid) by zoryn (MIT)
+- [Edit Map Settings](https://mods.factorio.com/mod/EditMapSettings) by Morsk (MIT)
+- [FPS Friendly Thrusters](https://mods.factorio.com/mod/FPS_Friendly_Thrusters) by RockPaperKatana (MIT)
+- [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT)
+- [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray (Unlicense)
+- [Copy Paste Modules](https://mods.factorio.com/mod/CopyPasteModules) by kajacx (MIT)
+
+Inspired-by (rewritten from scratch, not ports): [Resource Map Label Marker](https://mods.factorio.com/mod/resourceMarker) — resource map markers.
+
+Everything else: public domain. Source: https://github.com/restjack/E-Tech
 
 ---
 
@@ -91,6 +117,14 @@ Three things to check: (1) the startup setting **Teleport-to-player shortcut** i
 ## Does teleport work across planets/surfaces?
 
 Yes. It follows the target's physical position, so it works while they're on another planet or wandering in remote view. With one other player online it teleports instantly; with more it opens a picker.
+
+## The factory outlet sits empty and pulls nothing. Is it broken?
+
+Probably not — that's on-demand mode (the default) working as intended: the outlet only fetches items when its logistic network has unmet demand (requester/buffer chests, player or spidertron requests, construction ghosts). No demand = empty outlet. If you want it to keep stock on hand regardless, open it and uncheck **On-demand mode** (buffer mode). `/etech-hub-debug` prints exactly what every outlet sees and why it is or isn't pulling.
+
+## Bots aren't building my blueprint from factory stock.
+
+Checklist: (1) the outlet is inside the same logistic network as the ghosts (roboport coverage — ghosts outside any construction area generate no demand), (2) the items actually exist in provider chests inside a factory the outlet reaches, (3) construction bots are available in that network. `/etech-hub-debug` shows the ghost demand the outlet currently sees.
 
 ## Multiplayer?
 
