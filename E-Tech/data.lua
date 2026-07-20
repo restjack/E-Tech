@@ -19,6 +19,26 @@ data:extend({
   },
 })
 
+-- Tips and tricks: an E-Tech category with an always-unlocked overview
+-- entry (the category header). Feature entries are added next to their
+-- prototypes (e.g. factory-hub/data.lua) so they only exist when the
+-- feature does. Text lives in locale [tips-and-tricks-item-description].
+data:extend({
+  {
+    type = "tips-and-tricks-item-category",
+    name = "etech",
+    order = "z-[etech]",
+  },
+  {
+    type = "tips-and-tricks-item",
+    name = "etech-overview",
+    category = "etech",
+    order = "a",
+    is_title = true,
+    starting_status = "unlocked",
+  },
+})
+
 if settings.startup["etech-teleporters"].value then
   require("teleporters/data")
 end

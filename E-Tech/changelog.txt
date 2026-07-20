@@ -1,4 +1,44 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.17.1
+Date: 2026-07-20
+  Changes:
+    - Factory outlet: on-demand is now the only behavior - the buffer mode (keep N stacks of
+      everything on hand) and its "Stacks per item" override are gone. The outlet panel
+      already shows the factories' stock, so pre-staging items bought nothing.
+    - Factory outlet: the circuit-enable checkbox is gone; gating is automatic. No wire
+      connected = the outlet always runs; wire connected = it only runs while receiving a
+      nonzero signal.
+    - Factory outlet: the side panel is taller so it matches the height of the chest window.
+    - Teleporter list: surfaces now show their real names - space platforms show the ship
+      name ("Icarus" instead of "platform-1") and planets their proper capitalized name
+      ("Nauvis" instead of "nauvis"). Player-set aliases still win.
+  Features:
+    - Tips and tricks: new E-Tech category with an overview entry, plus a factory
+      outlet/inlet/sensor guide that gets suggested when the Factory logistics technology
+      finishes.
+---------------------------------------------------------------------------------------------------
+Version: 0.17.0
+Date: 2026-07-20
+  Changes:
+    - Krastorio 2 games: AAI's motor ("Single-cylinder engine") is now fully retired instead
+      of only hidden from the player crafting menu - its icon is a vanilla engine-unit
+      lookalike, so assembler recipe pickers still showed two near-identical engines. Every
+      recipe that used it gets iron gear wheels instead (burner lab, fuel processor, Mining
+      Drones, and any other mod's recipe), research triggers that counted crafted motors now
+      count iron gear wheels, the crash-site debris motors become gears on new games, and
+      the item and recipe are hidden. Games without Krastorio 2 keep the motor unchanged.
+    - Factory outlet: only one outlet can be placed per surface (per force). Placing a
+      second refunds the item with a message. Outlets were already surface-local - each
+      planet's outlet only ever saw that planet's factories - this makes the one-per-planet
+      rule explicit. Existing saves with several outlets on one surface keep working; the
+      limit applies to new placements.
+    - Factory outlet/inlet/sensor: the tuning settings are now fixed values instead of mod
+      settings - inventory slots 200, one stack kept per item (the per-outlet override in
+      the outlet window remains), pulls from both passive and active providers, no energy
+      cost per item (the hidden buffer entity is gone; old saves clean it up automatically),
+      whole-surface reach, and nested factories always included. The per-outlet priority
+      field is gone too - with one outlet per surface there is nothing to order.
+---------------------------------------------------------------------------------------------------
 Version: 0.16.1
 Date: 2026-07-18
   Optimizations:

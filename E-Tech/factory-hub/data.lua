@@ -49,7 +49,7 @@ outlet.logistic_mode = "passive-provider"
 -- storage-chest's storage-filter slot; inherited it gives filter_slot_count
 -- == 1 without storage mode and Filter Helper crashes calling get_filter.
 outlet.max_logistic_slots = nil
-outlet.inventory_size = settings.startup["etech-hub-slots"].value
+outlet.inventory_size = 200 -- fixed since 0.17.0 (was the etech-hub-slots setting)
 outlet.enable_inventory_bar = false -- per-item caps make the red-X limiter pointless
 outlet.trash_inventory_size = nil
 
@@ -57,7 +57,7 @@ outlet.trash_inventory_size = nil
 
 local inlet, inlet_item = build_chest("requester-chest",
     "etech-factory-inlet", "__base__/graphics/icons/requester-chest.png")
-inlet.inventory_size = settings.startup["etech-hub-slots"].value
+inlet.inventory_size = 200 -- fixed since 0.17.0 (was the etech-hub-slots setting)
 inlet.enable_inventory_bar = false
 
 -- Factory sensor --------------------------------------------------------------
@@ -78,36 +78,10 @@ sensor_item.order = sensor_item.order .. "-etech"
 sensor_item.icon = nil
 sensor_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png")
 
--- Hidden energy buffer (only used when the energy-per-item setting is > 0) ---
-
-local energy_interface = {
-    type = "electric-energy-interface",
-    name = "etech-hub-energy",
-    localised_name = {"entity-name.etech-factory-provider-hub"},
-    icons = tinted_icons("__base__/graphics/icons/storage-chest.png"),
-    flags = {
-        "not-on-map",
-        "not-blueprintable",
-        "not-deconstructable",
-        "placeable-off-grid",
-        "not-upgradable",
-    },
-    hidden = true,
-    max_health = 1,
-    collision_box = {{0, 0}, {0, 0}},
-    collision_mask = {layers = {}},
-    energy_source = {
-        type = "electric",
-        buffer_capacity = "50MJ",
-        usage_priority = "secondary-input",
-        input_flow_limit = "10MW",
-        output_flow_limit = "0W",
-    },
-    energy_production = "0W",
-    energy_usage = "0W",
-}
-
 -- Recipes + technology --------------------------------------------------------
+-- (the hidden "etech-hub-energy" buffer entity from the removed
+-- energy-per-item setting is gone; the engine deletes any leftovers in old
+-- saves when the prototype disappears)
 
 -- Research cost mirrors logistic-robotics so the unlock lands at the same
 -- science tier no matter which overhaul (K2 etc.) rewrote that tech.
@@ -131,7 +105,6 @@ data:extend({
     outlet, outlet_item,
     inlet, inlet_item,
     sensor, sensor_item,
-    energy_interface,
     {
         type = "recipe",
         name = "etech-factory-provider-hub",
@@ -184,5 +157,18 @@ data:extend({
         },
         unit = unit,
         order = "c-k-d-e",
+    },
+    -- Tips and tricks entry, suggested once the tech is researched
+    {
+        type = "tips-and-tricks-item",
+        name = "etech-factory-outlet",
+        tag = "[entity=etech-factory-provider-hub]",
+        category = "etech",
+        order = "b",
+        indent = 1,
+        trigger = {
+            type = "research",
+            technology = "etech-factory-provider-hub",
+        },
     },
 })

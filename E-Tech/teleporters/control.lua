@@ -258,11 +258,17 @@ local get_teleport_cost = function(source, destination, player)
   return cost * 1000000
 end
 
--- Display name for a surface: player-set alias first, then the engine's
--- localised name (proper planet/platform names), then the raw name.
+-- Display name for a surface: player-set alias first, then the platform's
+-- ship name ("Icarus", not "platform-1"), then the planet prototype's
+-- localised name ("Nauvis", not "nauvis"), then the engine's localised
+-- name, then the raw name.
 local get_surface_label = function(surface)
   local alias = script_data.surface_aliases[surface.index]
   if alias and alias ~= "" then return alias end
+  local platform = surface.platform
+  if platform then return platform.name end
+  local planet = surface.planet
+  if planet then return planet.prototype.localised_name end
   return surface.localised_name or surface.name
 end
 
@@ -742,7 +748,7 @@ local make_surface_rename_frame = function(player)
   end
   player.opened = nil
 
-  local frame = player.gui.screen.add{type = "frame", caption = {"etech-tp-rename-surface", surface.localised_name or surface.name}, direction = "horizontal"}
+  local frame = player.gui.screen.add{type = "frame", caption = {"etech-tp-rename-surface", get_surface_label(surface)}, direction = "horizontal"}
   frame.auto_center = true
   player.opened = frame
   script_data.surface_rename_frames[player.index] = frame

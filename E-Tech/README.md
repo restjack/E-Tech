@@ -44,7 +44,7 @@ Stack-size and spoilage defaults match vanilla, so installing the mod changes no
 ## What the recipe restore deliberately does NOT do
 
 - No tech/progression edits. Pipes etc. still unlock via AAI's research.
-- No removal of AAI items/machines. `motor` ("single-cylinder engine") and friends stay craftable — AAI's own machines use them (e.g. fuel processor = iron 10 + brick 10 + motor 1).
+- No removal of AAI items/machines — with one exception since 0.17.0: **with Krastorio 2 installed**, `motor` ("single-cylinder engine") is retired. Its icon is a vanilla engine-unit lookalike, so recipe pickers showed two near-identical "engines", and with K2's baseline restored nothing essential needs it. Every recipe that still used it gets iron gear wheels instead (burner lab, fuel processor, Mining Drones, …), AAI's craft-50-motors tech trigger counts gears, and the crash-debris motors become gears. Without K2 the motor stays craftable — the first burner assembler needs a hand-made one.
 - `boiler` isn't touched (AAI's ingredients already equal vanilla).
 - `offshore-pump` ingredients left as AAI's (vanilla 2.x values unverified; both versions are cheap).
 
@@ -54,7 +54,7 @@ Every recipe restore is guarded by a fingerprint check: a recipe is only touched
 
 ## Known quirks (by design — tech is out of scope)
 
-- AAI's *basic-logistics* tech trigger is "craft 50 motors" — still required to unlock belts, even though belts no longer use motors.
+- AAI's *basic-logistics* tech trigger is "craft 50 motors" — still required to unlock belts, even though belts no longer use motors. (With Krastorio 2 the trigger counts iron gear wheels instead, since the motor is retired there.)
 - A few recipes unlock before every vanilla ingredient is available (e.g. inserter needs electronic circuits, which unlock slightly later in AAI's tree). Nothing breaks; you just craft them a bit later.
 
 ## For developers / friends who want to tweak

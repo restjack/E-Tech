@@ -139,15 +139,60 @@ if mods["aai-industry"] then
     end
   end
 
-  -- Declutter: with K2's baseline restored, almost nothing uses AAI's motor
-  -- ("Single-cylinder engine") - hide its recipe from the player crafting
-  -- menu so it doesn't sit next to the real Engine unit. NOT fully hidden:
-  -- assemblers can still craft it (burner-lab / fuel-processor recipes use
-  -- it, and AAI's basic-logistics tech trigger is "craft 50 motors").
-  -- K2-only: without K2 the first burner assembler needs a hand-made motor.
-  if mods["Krastorio2"] and data.raw.recipe["motor"] then
-    data.raw.recipe["motor"].hide_from_player_crafting = true
-    elog("hid motor (single-cylinder engine) from player crafting menu")
+  -- Retire AAI's motor ("Single-cylinder engine") under K2. Its icon is a
+  -- vanilla-engine-unit lookalike, so players see two near-identical
+  -- "engines" (assembler recipe pickers ignored 0.16's
+  -- hide_from_player_crafting). With K2's baseline restored nothing
+  -- essential needs it: AAI's own K2 compat already swapped it out of the
+  -- burner assembler, leaving only burner-lab, the optional fuel-processor
+  -- and third-party recipes (Mining Drones). Iron gears are a fair 1:1
+  -- stand-in at that tech level, so: swap motor -> gears in every recipe
+  -- that still uses it, repoint any craft-motor research trigger (AAI's
+  -- basic-logistics), then hide the item and recipe. Without K2 the motor
+  -- stays - the first burner assembler needs a hand-made one.
+  if mods["Krastorio2"] and data.raw.item["motor"] and data.raw.recipe["motor"] then
+    -- Only swap CONSTRUCTION recipes (motor is one ingredient among
+    -- several, and not a result). Recipes ABOUT the motor itself -
+    -- recycling, crushing, incineration, quality augmenting - keep it, so
+    -- leftover motors in existing saves can still be disposed of, and no
+    -- bogus "crush iron gears" recipes appear.
+    local function swap_motor_for_gears(recipe)
+      local ings = recipe.ingredients
+      if not ings then return false end
+      for _, res in pairs(recipe.results or {}) do
+        if res.name == "motor" then return false end
+      end
+      local motor_index, other, gear
+      for i, ing in pairs(ings) do
+        if ing.name == "motor" then motor_index = i else other = true end
+        if ing.name == "iron-gear-wheel" then gear = ing end
+      end
+      if not (motor_index and other) then return false end
+      if gear then
+        gear.amount = gear.amount + ings[motor_index].amount
+        table.remove(ings, motor_index)
+      else
+        ings[motor_index] = {type = "item", name = "iron-gear-wheel",
+                             amount = ings[motor_index].amount}
+      end
+      return true
+    end
+    for name, recipe in pairs(data.raw.recipe) do
+      if swap_motor_for_gears(recipe) then
+        elog("motor retired: swapped motor -> iron-gear-wheel in recipe " .. name)
+      end
+    end
+    for name, tech in pairs(data.raw.technology) do
+      local trigger = tech.research_trigger
+      if trigger and trigger.type == "craft-item" and trigger.item == "motor" then
+        trigger.item = "iron-gear-wheel"
+        elog("motor retired: research trigger of " .. name .. " now counts iron gear wheels")
+      end
+    end
+    data.raw.recipe["motor"].hidden = true
+    data.raw.recipe["motor"].hide_from_player_crafting = nil
+    data.raw.item["motor"].hidden = true
+    elog("motor retired: item and recipe hidden")
   end
 
   -- AAI's "Electronic circuit (Wood)" alternate is redundant with K2:
