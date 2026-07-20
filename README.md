@@ -15,11 +15,15 @@ Full feature list and design notes: **[E-Tech/README.md](E-Tech/README.md)**
 | Path | What it is |
 |---|---|
 | [`E-Tech/`](E-Tech/) | The mod itself — this folder is what gets zipped and shipped |
-| [`E-Tech/build.ps1`](E-Tech/build.ps1) | Build script: packages `E-Tech_<version>.zip` into the Factorio mods folder |
+| [`E-Tech/build.ps1`](E-Tech/build.ps1) | Build script: packages `E-Tech_<version>.zip` into the Factorio mods folder and archives a copy in `E-Tech/releases/` |
 | [`E-Tech/AAI-CHANGE-INVENTORY.md`](E-Tech/AAI-CHANGE-INVENTORY.md) | Full audit of everything AAI Industry changes, classified by revert difficulty |
-| [`PORTAL-PAGE.md`](PORTAL-PAGE.md) | Source text for the mod portal page |
+| [`absorbed-mods/`](absorbed-mods/) | Original zips of abandoned mods whose features were merged INTO E-Tech (void chest, map settings editor, copy-paste modules, …) — kept for reference and license provenance |
+| [`patched-mods/`](patched-mods/) | Third-party mods locally patched for the current Factorio version (zips untracked; manifest = `LOCAL-PATCHED-MODS.md` there) |
+| [`docs/`](docs/) | Project docs: [portal page source](docs/PORTAL-PAGE.md), portal description, plus untracked session notes/handoffs/audits |
 
 Release zips are not tracked here — they're built by `build.ps1` and published on the [mod portal](https://mods.factorio.com/mod/E-Tech).
+
+Related local folder (not in git): `Projects\Factorio (ModUpdateCode)` — the 2.0→2.1 mod-set migration archive: original 2.0.77 mods, dated snapshots, superseded patched zips (`mods-replaced/`), and the README with the full API fix catalog.
 
 ## Useful reading if you're here to learn
 

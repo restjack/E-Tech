@@ -1,6 +1,9 @@
 # Build artifacts — zips rebuilt by build.ps1, archived in Nextcloud
 E-Tech/releases/*.zip
 
+# Third-party patched mod zips — local bookkeeping only, never published
+patched-mods/*.zip
+
 # OS / editor noise
 Thumbs.db
 Desktop.ini
