@@ -18,8 +18,8 @@ Full feature list and design notes: **[E-Tech/README.md](E-Tech/README.md)**
 | [`E-Tech/build.ps1`](E-Tech/build.ps1) | Build script: packages `E-Tech_<version>.zip` into the Factorio mods folder and archives a copy in `E-Tech/releases/` |
 | [`E-Tech/AAI-CHANGE-INVENTORY.md`](E-Tech/AAI-CHANGE-INVENTORY.md) | Full audit of everything AAI Industry changes, classified by revert difficulty |
 | [`absorbed-mods/`](absorbed-mods/) | Original zips of abandoned mods whose features were merged INTO E-Tech (void chest, map settings editor, copy-paste modules, …) — kept for reference and license provenance |
-| [`patched-mods/`](patched-mods/) | Third-party mods locally patched for the current Factorio version (zips untracked; manifest = `LOCAL-PATCHED-MODS.md` there) |
-| [`docs/`](docs/) | Project docs: [portal page source](docs/PORTAL-PAGE.md), portal description, plus untracked session notes/handoffs/audits |
+| [`patched-mods/`](patched-mods/) | Distribution set: third-party mods locally patched for the current Factorio version, plus `install-mods.bat` for friends/family (zips untracked; docs in [`docs/PATCHED-MODS.md`](docs/PATCHED-MODS.md), manifest = `docs/LOCAL-PATCHED-MODS.md`) |
+| [`docs/`](docs/) | Project docs: [portal page source](docs/PORTAL-PAGE.md), portal description, [patched-mods notes](docs/PATCHED-MODS.md), plus untracked session notes/handoffs/audits |
 
 Release zips are not tracked here — they're built by `build.ps1` and published on the [mod portal](https://mods.factorio.com/mod/E-Tech).
 
