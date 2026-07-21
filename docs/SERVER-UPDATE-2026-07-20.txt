@@ -1,0 +1,62 @@
+SERVER UPDATE — 2026-07-20
+Factorio game server mod sync (matches desktop pack as of today).
+Server and clients must have EXACTLY these versions or joins fail.
+
+=== 1. UPLOAD THESE FILES (add or replace) ===
+
+From "Factorio (E-Tech)\patched-mods\":
+  ev-mining-drills_4.0.2.zip               (local fork - K2SO crash fix; NEW mod)
+  companion-drones-2-updated_1.2.3.zip     (local 2.1 patch; replaces companion-drones)
+
+From "Factorio (E-Tech)\server-upload-2026-07-20\" (OFFICIAL portal zip, sha1 eca35bed...):
+  Better-Power-Armor-Grid_9.0.2.zip        (author's official 9.0.2, released 2026-07-20
+                                            21:06 UTC - fixes the K2 bugs our fork fixed.
+                                            SAME version number as our retired fork but
+                                            DIFFERENT checksum. If our fork 9.0.2 was
+                                            already uploaded to the server, REPLACE it
+                                            with this file - a version check will not
+                                            catch it; multiplayer joins fail on checksum
+                                            mismatch until server + every client run
+                                            this exact portal zip.)
+
+From "Factorio (E-Tech)\E-Tech\releases\":
+  E-Tech_0.17.3.zip
+
+From Downloads (or let the server's mod updater fetch from the portal):
+  ev-assets_3.1.1.zip
+  ev-machines_3.0.0.zip
+
+=== 2. DELETE THESE FILES FROM THE SERVER MODS FOLDER ===
+
+  E-Tech_0.17.1.zip            (and any other older E-Tech zip)
+  Better-Power-Armor-Grid_8.0.2.zip
+  companion-drones_2.0.13.zip
+  ev-assets_3.1.0.zip
+  ev-machines_2.1.2.zip
+
+(If the server has Better-Power-Armor-Grid_9.0.1.zip from a portal update,
+delete that too - it crashes with Krastorio2. And if OUR fork 9.0.2 is
+already on the server, replace it with the official portal 9.0.2 from the
+server-upload folder - same version number, different checksum.)
+
+=== 3. EDIT mod-list.json ON THE SERVER ===
+
+  "companion-drones"            -> "enabled": false
+  "companion-drones-2-updated"  -> "enabled": true
+
+(Every other mod's enabled state is unchanged. If companion-drones-2-updated
+has no entry yet, the server adds it enabled on next start - verify after.)
+
+=== 4. AFTER RESTART, VERIFY ===
+
+  Server log shows, with no load errors:
+    E-Tech 0.17.3
+    Better-Power-Armor-Grid 9.0.2
+    ev-mining-drills 4.0.2
+    ev-assets 3.1.1
+    ev-machines 3.0.0
+    companion-drones-2-updated 1.2.3
+  companion-drones absent/disabled.
+
+Background: LOCAL-PATCHED-MODS.md in this folder documents every local
+fork/patch and why it exists.

@@ -45,6 +45,10 @@ local script_data =
   -- Per-player sort mode for the destination list (1 = recent, 2 = A-Z,
   -- 3 = distance). Favorites always sort first regardless.
   sort_mode = {},
+  -- Last dragged position of the destination window per player, so it
+  -- reopens where the player left it instead of re-centering after every
+  -- teleport (position only lived as long as the frame did before).
+  frame_locations = {},
 }
 
 local RETURN_SLOTS = 3
@@ -170,8 +174,17 @@ local add_recent = function(player, teleporter)
   end
 end
 
+-- Remember where the player left the window before destroying it.
+local save_frame_location = function(player)
+  local frame = get_teleporter_frame(player)
+  if frame then
+    script_data.frame_locations[player.index] = frame.location
+  end
+end
+
 local unlink_teleporter = function(player)
   if player.character then player.character.disabled_by_script = false end
+  save_frame_location(player)
   close_gui(get_teleporter_frame(player))
   local source = script_data.player_linked_teleporter[player.index]
   if source and source.valid then
@@ -309,6 +322,7 @@ local make_teleporter_gui = function(player, source)
   local teleporter_frame = get_teleporter_frame(player)
   if teleporter_frame then
     location = teleporter_frame.location
+    script_data.frame_locations[player.index] = location
     script_data.teleporter_frames[player.index] = nil
     print("Frame already exists")
     close_gui(teleporter_frame)
@@ -336,6 +350,20 @@ local make_teleporter_gui = function(player, source)
   local here_surface = source and source.surface or player.surface
 
   local preview_size = settings.global["etech-teleporter-preview-size"].value
+
+  -- No live frame (e.g. reopening after a teleport closed it): fall back to
+  -- the last saved position, unless it's off-screen (resolution changed).
+  if not location then
+    local saved = script_data.frame_locations[player.index]
+    if saved then
+      local res = player.display_resolution
+      if saved.x >= 0 and saved.y >= 0 and saved.x < res.width - 50 and saved.y < res.height - 50 then
+        location = saved
+      else
+        script_data.frame_locations[player.index] = nil
+      end
+    end
+  end
 
   local gui = player.gui.screen
   local frame = gui.add{type = "frame", direction = "vertical", ignored_by_interaction = false}
@@ -465,11 +493,13 @@ local make_teleporter_gui = function(player, source)
   local rets = get_valid_returns(player)
   for i, ret in ipairs(rets) do
     local caption = (#rets > 1) and {"", {"etech-tp-return"}, " " .. i} or {"etech-tp-return"}
+    -- Pass the entry itself, not its index — the list can shift between GUI
+    -- build and click (slots expiring / other slots consumed).
     add_preview_button(get_special_flow(),
       {type = "camera", position = ret.position, surface_index = ret.surface_index, zoom = 0.2},
       caption,
       {"etech-tp-return-tooltip", get_surface_label(game.surfaces[ret.surface_index])},
-      {type = "return_button", index = i})
+      {type = "return_button", ret = ret})
   end
 
   if settings.global["etech-teleporter-players-section"].value then
@@ -489,7 +519,9 @@ local make_teleporter_gui = function(player, source)
   local inner = frame.add{type = "frame", style = "inside_deep_frame"}
   local scroll = inner.add{type = "scroll-pane", direction = "vertical"}
   scroll.style.maximal_height = (player.display_resolution.height / player.display_scale) * 0.8
-  local column_count = ((player.display_resolution.width / player.display_scale) * 0.6) / preview_size
+  -- At least one column — a large preview size on a small window would
+  -- otherwise round to zero and error on the table add.
+  local column_count = math.max(1, math.floor(((player.display_resolution.width / player.display_scale) * 0.6) / preview_size))
   local holding_table = scroll.add{type = "table", column_count = column_count}
   util.register_gui(script_data.button_actions, search_box, {type = "search_text_changed", parent = holding_table})
   holding_table.style.horizontal_spacing = 2
@@ -795,7 +827,8 @@ local gui_actions =
     local old_name = flying_text.text
     local new_name = param.textfield.text
 
-    if new_name ~= old_name and not is_name_available(player.force, new_name) then
+    -- Same rule as the chart-tag path: no empty names, no duplicates.
+    if new_name == "" or (new_name ~= old_name and not is_name_available(player.force, new_name)) then
       player.print({"etech-tp-name-already-taken"})
       return
     end
@@ -812,7 +845,7 @@ local gui_actions =
     local old_name = flying_text.text
     local new_name = param.textfield.text
 
-    if new_name ~= old_name and not is_name_available(player.force, new_name) then
+    if new_name == "" or (new_name ~= old_name and not is_name_available(player.force, new_name)) then
       player.print({"etech-tp-name-already-taken"})
       return
     end
@@ -889,19 +922,29 @@ local gui_actions =
     local player = game.get_player(event.player_index)
     if not (player and player.valid) then return end
     local rets = get_valid_returns(player)
-    local ret = rets[param.index or 1]
+    -- Find the entry by identity — indices may have shifted since the GUI
+    -- was built.
+    local index
+    for i, ret in ipairs(rets) do
+      if ret == param.ret then
+        index = i
+        break
+      end
+    end
+    local ret = index and rets[index]
     if not ret then
       player.print({"etech-tp-return-expired"})
       check_player_linked_teleporter(player)
       return
     end
     local surface = game.surfaces[ret.surface_index]
-    local position = surface.find_non_colliding_position("character", ret.position, 16, 0.5) or ret.position
+    local character_name = player.character and player.character.name or "character"
+    local position = surface.find_non_colliding_position(character_name, ret.position, 16, 0.5) or ret.position
     create_flash(player.surface, player.position)
     create_flash(surface, position)
     player.teleport(position, surface)
     play_teleport_sound(player)
-    table.remove(rets, param.index or 1)
+    table.remove(rets, index)
     script_data.returns[player.index] = (#rets > 0) and rets or nil
     unlink_teleporter(player)
   end,
@@ -917,7 +960,10 @@ local gui_actions =
     end
     local surface = target.physical_surface or target.surface
     local position = target.physical_position or target.position
-    local destination = surface.find_non_colliding_position("character", position, 16, 0.5) or position
+    -- Use the traveling player's actual character prototype (mods like
+    -- Jetpack swap it) so the collision check matches.
+    local character_name = player.character and player.character.name or "character"
+    local destination = surface.find_non_colliding_position(character_name, position, 16, 0.5) or position
     create_flash(player.surface, player.position)
     create_flash(surface, destination)
     local ok = pcall(function()
@@ -1005,9 +1051,21 @@ local on_teleporter_removed = function(entity)
   local force = entity.force
   local teleporter_data = script_data.teleporter_map[entity.unit_number]
   if not teleporter_data then return end
-  local caption = teleporter_data.flying_text.text
   local network = get_network(force)
-  network[caption] = nil
+  -- The flying text can be gone (e.g. another mod ran rendering.clear()),
+  -- so fall back to finding the entry by identity.
+  local flying_text = teleporter_data.flying_text
+  local caption = flying_text and flying_text.valid and flying_text.text
+  if caption and network[caption] == teleporter_data then
+    network[caption] = nil
+  else
+    for name, data in pairs (network) do
+      if data == teleporter_data then
+        network[name] = nil
+        break
+      end
+    end
+  end
   clear_teleporter_data(teleporter_data)
   script_data.teleporter_map[entity.unit_number] = nil
 
@@ -1070,6 +1128,7 @@ local on_gui_closed = function(event)
 
   local teleporter_frame = get_teleporter_frame(player)
   if teleporter_frame and teleporter_frame == element and not teleporter_frame.ignored_by_interaction then
+    save_frame_location(player)
     close_gui(teleporter_frame)
     unlink_teleporter(player)
     return
@@ -1247,6 +1306,36 @@ local on_surface_deleted = function(event)
   end
 end
 
+-- Networks are keyed by force name, so a force merge would otherwise strand
+-- the source force's pads in a dead bucket: invisible in the destination
+-- GUI, un-removable (mining looks them up under the new force), visuals
+-- leaked. Move them over, renaming on collision, and resync so the flying
+-- text / chart tag land on the destination force.
+local on_forces_merged = function(event)
+  local source_network = script_data.networks[event.source_name]
+  if not source_network then return end
+  script_data.networks[event.source_name] = nil
+  local destination = event.destination
+  if not (destination and destination.valid) then return end
+  local network = get_network(destination)
+  for name, teleporter_data in pairs (source_network) do
+    local entity = teleporter_data.teleporter
+    if entity and entity.valid then
+      local target = name
+      local n = 2
+      while network[target] do
+        target = name.." ("..n..")"
+        n = n + 1
+      end
+      network[target] = teleporter_data
+      resync_teleporter(target, teleporter_data)
+    else
+      clear_teleporter_data(teleporter_data)
+    end
+  end
+  refresh_teleporter_frames()
+end
+
 local on_trigger_created_entity = function(event)
   local entity = event.entity
   if not (entity and entity.valid) then return end
@@ -1377,6 +1466,7 @@ teleporters.events =
   [defines.events.on_chart_tag_added] = on_chart_tag_added,
 
   [defines.events.on_surface_deleted] = on_surface_deleted,
+  [defines.events.on_forces_merged] = on_forces_merged,
   [defines.events.on_lua_shortcut] = on_lua_shortcut,
   [names.hotkeys.open_remote] = on_remote_hotkey,
 
@@ -1408,6 +1498,7 @@ teleporters.on_configuration_changed = function()
   stored.returns = stored.returns or {}
   stored.favorites = stored.favorites or {}
   stored.sort_mode = stored.sort_mode or {}
+  stored.frame_locations = stored.frame_locations or {}
   -- 0.10.0: returns went from a single slot to a newest-first array.
   for player_index, ret in pairs (stored.returns) do
     if ret.surface_index then

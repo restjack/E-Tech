@@ -10,18 +10,22 @@
 -- Credits to JDOGG, Optera, kendfrey, Rseding91 for their original void mods.
 
 local function processPipes()
-    if storage.pipes ~= nil then
-        for k, pipe in pairs(storage.pipes) do
-            if pipe.valid then
-                pipe.clear_fluid_inside()
-            else
-                table.remove(storage.pipes, k)
-                if #storage.pipes == 0 then
-                    storage.pipes = nil
-                end
-            end
+    local pipes = storage.pipes
+    if pipes == nil then return end
+    -- compact-in-place: the old table.remove-inside-pairs skipped the pipe
+    -- after any removed one for that pass
+    local n = #pipes
+    local write = 0
+    for i = 1, n do
+        local pipe = pipes[i]
+        if pipe.valid then
+            pipe.clear_fluid_inside()
+            write = write + 1
+            if write ~= i then pipes[write] = pipe end
         end
     end
+    for i = n, write + 1, -1 do pipes[i] = nil end
+    if write == 0 then storage.pipes = nil end
 end
 
 local function createEntity(entity)

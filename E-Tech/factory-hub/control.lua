@@ -38,6 +38,11 @@ local PANEL_NAME = "etech-hub-panel"
 local INLET_PANEL_NAME = "etech-inlet-panel"
 local AUTO_GROUP = "etech-inlet-auto"
 local PULL_TICKS = 120     -- work pass per device, every 2 s (also GUI refresh)
+local SLOT_TICKS = 30      -- scheduler step: the PULL_TICKS cycle is split
+                           -- into 4 phases (outlets / inlets+sensors /
+                           -- cache maintenance / GUI refresh) on separate
+                           -- ticks, so no single tick pays for everything.
+                           -- Per-device cadence is still PULL_TICKS.
 local RESCAN_TICKS = 18000 -- factory-list cache fallback lifetime, 5 min
                            -- (build/mine of any storage-tank invalidates
                            -- instantly via data.factory_gen, and dead
@@ -91,12 +96,16 @@ local function factory_label(id)
 end
 
 local function register_device(entity)
-    hub_data().hubs[entity.unit_number] = {
+    local data = hub_data()
+    data.hubs[entity.unit_number] = {
         entity = entity,
         kind = KINDS[entity.name],
         filters = { mode = 1, items = {} },
         pins = {},
     }
+    -- devices are logistic-containers themselves (an inlet placed inside a
+    -- factory is a valid requester target) — invalidate chest caches too
+    data.chest_gen = (data.chest_gen or 0) + 1
     script.register_on_object_destroyed(entity)
 end
 
@@ -148,6 +157,10 @@ local function on_built(event)
         -- possible Factorissimo building: invalidate every factory-list cache
         local data = hub_data()
         data.factory_gen = (data.factory_gen or 0) + 1
+    elseif etype == "logistic-container" then
+        -- possible interior chest: invalidate every device's chest cache
+        local data = hub_data()
+        data.chest_gen = (data.chest_gen or 0) + 1
     end
 end
 
@@ -231,20 +244,48 @@ local function cached_factories(record)
     return record.factories
 end
 
--- Interior logistic chests of one factory matching a mode predicate.
-local function interior_chests(factory, force, accept_mode)
-    local chests = {}
-    local found = factory.inside_surface.find_entities_filtered {
-        area = factory_interior_area(factory),
-        type = "logistic-container",
-        force = force,
-    }
-    for _, chest in pairs(found) do
-        if chest.name ~= OUTLET_NAME and accept_mode(chest.prototype.logistic_mode) then
-            chests[#chests + 1] = chest
+-- Interior-chest cache. Profiling showed the per-pass
+-- find_entities_filtered over every factory interior was the steady
+-- baseline cost of the pull pass (~3-5 ms at ~90 chests, every pass,
+-- forever), so the chest list is cached per device and only rebuilt when
+-- something can actually have changed: any logistic-container built or
+-- mined anywhere (data.chest_gen bump — coarse but those events are rare)
+-- or the device's factory list itself refreshed (scanned_tick moved).
+-- Chests destroyed without a mine event (biters) leave stale entries; they
+-- fail the per-use valid check and get swept out on the next rebuild.
+-- The prototype logistic_mode is frozen at build time so filtering by mode
+-- costs no API calls.
+local function ensure_chest_cache(record)
+    local data = hub_data()
+    local gen = data.chest_gen or 0
+    local cache = record.chest_cache
+    if cache and cache.gen == gen and cache.scanned_tick == record.scanned_tick then
+        return cache
+    end
+    local entries = {}
+    local force = record.entity.force
+    for _, factory in pairs(cached_factories(record)) do
+        if factory_usable(factory) then
+            local found = factory.inside_surface.find_entities_filtered {
+                area = factory_interior_area(factory),
+                type = "logistic-container",
+                force = force,
+            }
+            for _, chest in pairs(found) do
+                if chest.name ~= OUTLET_NAME then
+                    entries[#entries + 1] = {
+                        chest = chest,
+                        mode = chest.prototype.logistic_mode,
+                        factory = factory,
+                    }
+                end
+            end
         end
     end
-    return chests
+    -- read scanned_tick AFTER cached_factories: it may have refreshed it
+    cache = { gen = gen, scanned_tick = record.scanned_tick, entries = entries }
+    record.chest_cache = cache
+    return cache
 end
 
 local function provider_mode(mode)
@@ -268,11 +309,10 @@ end
 -- factory in each entry for the GUI's per-factory breakdown.
 local function reachable_chests(record, accept_mode)
     local out = {}
-    for _, factory in pairs(cached_factories(record)) do
-        if factory_usable(factory) then
-            for _, chest in pairs(interior_chests(factory, record.entity.force, accept_mode)) do
-                out[#out + 1] = { chest = chest, factory = factory }
-            end
+    for _, entry in ipairs(ensure_chest_cache(record).entries) do
+        if entry.chest.valid and factory_usable(entry.factory)
+            and accept_mode(entry.mode) then
+            out[#out + 1] = { chest = entry.chest, factory = entry.factory }
         end
     end
     return out
@@ -619,12 +659,15 @@ end
 
 -- Item-request-proxies (module/fuel requests on built machines) have no
 -- build event we can hook, so they keep a slow, area-limited periodic scan.
-local function surface_proxies(surface, force)
+-- prewarm: refresh PULL_TICKS early (called from the maintenance phase) so
+-- the ~23 ms rescan never lands on the same tick as a pull pass.
+local function surface_proxies(surface, force, prewarm)
     local data = hub_data()
     data.proxies = data.proxies or {}
     local key = gindex_key(surface, force)
     local entry = data.proxies[key]
-    if not entry or game.tick - entry.tick >= PROXY_TICKS then
+    local ttl = prewarm and (PROXY_TICKS - PULL_TICKS) or PROXY_TICKS
+    if not entry or game.tick - entry.tick >= ttl then
         local prof = data.profiling and helpers.create_profiler()
         local chunks = {}
         local bbox = construction_bbox(surface, force)
@@ -963,6 +1006,9 @@ local function on_mined(event)
     if entity.type == "storage-tank" then -- possible Factorissimo building
         local data = hub_data()
         data.factory_gen = (data.factory_gen or 0) + 1
+    elseif entity.type == "logistic-container" then
+        local data = hub_data()
+        data.chest_gen = (data.chest_gen or 0) + 1
     end
     local kind = KINDS[entity.name]
     if not (kind == "outlet" or kind == "inlet") then return end
@@ -1375,13 +1421,14 @@ end
 
 -- Tick dispatch ----------------------------------------------------------------
 
-local function on_pull_tick()
-    if not factorissimo_available() then return end
-    local data = hub_data()
-    local prof = data.profiling and helpers.create_profiler()
+-- Scheduler ---------------------------------------------------------------------
+-- One SLOT_TICKS step, 4 phases round-robin; each phase recurs every
+-- PULL_TICKS. The old single on_pull_tick did all of this in one tick and
+-- profiled at 10-46 ms every 2 s (a visible hitch); spreading the phases —
+-- and pre-warming the expensive caches in their own phase — is the fix.
 
-    -- outlets first, then inlets, then sensors (one outlet per surface, so
-    -- there is no cross-outlet competition to order)
+local function collect_records()
+    local data = hub_data()
     local outlets, inlets, sensors = {}, {}, {}
     for unit_number, record in pairs(data.hubs) do
         if record.entity.valid then
@@ -1392,23 +1439,54 @@ local function on_pull_tick()
             data.hubs[unit_number] = nil
         end
     end
+    return outlets, inlets, sensors
+end
 
+-- Pre-warm every cache a pull pass would otherwise rebuild inline: factory
+-- lists near expiry (or gen-invalidated), chest caches, the proxy scan.
+-- Runs on its own tick so the ~40 ms factory rescan and ~23 ms proxy scan
+-- never share a tick with the pull work. The inline rebuild paths still
+-- exist as fallbacks (first use after placement, gen bump mid-cycle).
+local function maintenance_pass(outlets, inlets, sensors)
+    local data = hub_data()
+    local tick = game.tick
+    local gen = data.factory_gen or 0
+    -- At most ONE TTL-expiry factory rescan (~40 ms each on a big map) per
+    -- maintenance pass, so several devices expiring together still refresh
+    -- one blink at a time. The 4*PULL_TICKS early-refresh margin gives the
+    -- rotation up to 4 passes of headroom before any device would fall back
+    -- to an inline rescan during its pull. Gen-bump refreshes (a factory
+    -- building was placed/removed - rare, player-visible) stay immediate.
+    local rescan_budget = 1
+    for _, group in pairs({ outlets, inlets, sensors }) do
+        for _, record in pairs(group) do
+            local expired = tick - (record.scanned_tick or 0) >= RESCAN_TICKS - PULL_TICKS * 4
+            if record.factory_gen ~= gen or (expired and rescan_budget > 0) then
+                if record.factory_gen == gen then rescan_budget = rescan_budget - 1 end
+                record.factories = factories_for_hub(record.entity)
+                record.scanned_tick = tick
+                record.factory_gen = gen
+            end
+            ensure_chest_cache(record)
+        end
+    end
+    for _, record in pairs(outlets) do
+        surface_proxies(record.entity.surface, record.entity.force, true)
+    end
     -- drop proxy caches nothing refreshed for two lifetimes (outlet gone,
     -- surface deleted) so storage doesn't accumulate dead surface entries
     if data.proxies then
-        local tick = game.tick
         for key, entry in pairs(data.proxies) do
             if tick - entry.tick >= PROXY_TICKS * 2 then
                 data.proxies[key] = nil
             end
         end
     end
+end
 
-    for _, record in pairs(outlets) do pull_for_outlet(record) end
-    for _, record in pairs(inlets) do distribute_for_inlet(record) end
-    for _, record in pairs(sensors) do update_sensor(record) end
-
-    -- live refresh for anyone looking at an outlet/inlet
+-- live refresh for anyone looking at an outlet/inlet
+local function refresh_open_guis()
+    local data = hub_data()
     for player_index, hub in pairs(data.open) do
         local player = game.get_player(player_index)
         if player and player.valid and hub.valid and player.opened == hub then
@@ -1424,12 +1502,35 @@ local function on_pull_tick()
             data.open[player_index] = nil
         end
     end
+end
 
+local function on_slot_tick(event)
+    if not factorissimo_available() then return end
+    local data = hub_data()
+    local phase = math.floor(event.tick / SLOT_TICKS) % 4
+    local prof = data.profiling and helpers.create_profiler()
+    -- outlets first, then inlets, then sensors (one outlet per surface, so
+    -- there is no cross-outlet competition to order)
+    local outlets, inlets, sensors = collect_records()
+    local label
+    if phase == 0 then
+        for _, record in pairs(outlets) do pull_for_outlet(record) end
+        label = "pull-pass(outlets=" .. #outlets .. ")"
+    elseif phase == 1 then
+        for _, record in pairs(inlets) do distribute_for_inlet(record) end
+        for _, record in pairs(sensors) do update_sensor(record) end
+        label = "inlet-pass(inlets=" .. #inlets .. " sensors=" .. #sensors .. ")"
+    elseif phase == 2 then
+        maintenance_pass(outlets, inlets, sensors)
+        label = "maintenance"
+    else
+        refresh_open_guis()
+        label = "gui-refresh"
+    end
     if prof then
         prof.stop()
         helpers.write_file(PROFILE_FILE,
-            {"", game.tick, ",pull-pass(outlets=", #outlets, " inlets=", #inlets,
-             " sensors=", #sensors, "),", prof, "\n"}, true)
+            {"", event.tick, ",", label, ",", prof, "\n"}, true)
     end
 end
 
@@ -1498,6 +1599,9 @@ local function adopt_existing()
     -- gunit entries whose destroy events fire later no-op harmlessly.
     local data = hub_data()
     data.gindex, data.gunit, data.proxies, data.ghosts = nil, nil, nil, nil
+    -- invalidate every device's interior-chest cache too (prototype
+    -- logistic_mode is frozen into the entries; mods may have changed it)
+    data.chest_gen = (data.chest_gen or 0) + 1
     local hubs = data.hubs
     for _, surface in pairs(game.surfaces) do
         for name in pairs(KINDS) do
@@ -1582,7 +1686,7 @@ M.events = {
 }
 
 M.on_nth_tick = {
-    [PULL_TICKS] = on_pull_tick,
+    [SLOT_TICKS] = on_slot_tick,
 }
 
 return M

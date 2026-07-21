@@ -77,11 +77,20 @@ local destroy_tag = function(patch)
   patch.tag = nil
 end
 
+-- How far (tiles, squared) the centroid may drift from the existing tag
+-- before the tag is recreated at the new spot. Within that range only the
+-- text is updated in place — destroying and re-adding a tag on every amount
+-- change spams on_chart_tag_removed/added into every listening mod and
+-- makes the marker flicker.
+local RETAG_DRIFT_SQ = 8 * 8
+
 local retag = function(force, surface, resource_name, bucket, patch_id)
   local patch = bucket.patches[patch_id]
   if not patch then return end
-  destroy_tag(patch)
-  if patch.muted then return end
+  if patch.muted then
+    destroy_tag(patch)
+    return
+  end
 
   local amount, count, sum_x, sum_y = 0, 0, 0, 0
   local first_cell
@@ -96,10 +105,14 @@ local retag = function(force, surface, resource_name, bucket, patch_id)
     end
   end
   if count == 0 then
+    destroy_tag(patch)
     bucket.patches[patch_id] = nil
     return
   end
-  if count < settings.global["etech-markers-min-size"].value then return end
+  if count < settings.global["etech-markers-min-size"].value then
+    destroy_tag(patch)
+    return
+  end
 
   local text
   local proto = prototypes.entity[resource_name]
@@ -111,9 +124,21 @@ local retag = function(force, surface, resource_name, bucket, patch_id)
     text = fmt_amount(amount)
   end
 
+  local cx, cy = sum_x / count, sum_y / count
+  local old_tag = patch.tag
+  if old_tag and old_tag.valid then
+    local pos = old_tag.position
+    local dx, dy = pos.x - cx, pos.y - cy
+    if dx * dx + dy * dy <= RETAG_DRIFT_SQ then
+      if old_tag.text ~= text then old_tag.text = text end
+      return
+    end
+  end
+
+  destroy_tag(patch)
   local icon = get_icon(resource_name)
   suppress = true
-  local tag = force.add_chart_tag(surface, {position = {x = sum_x / count, y = sum_y / count}, icon = icon, text = text})
+  local tag = force.add_chart_tag(surface, {position = {x = cx, y = cy}, icon = icon, text = text})
   if not tag and first_cell and first_cell.count > 0 then
     -- centroid can land on an uncharted chunk of an L-shaped patch
     tag = force.add_chart_tag(surface, {position = {x = first_cell.sum_x / first_cell.count, y = first_cell.sum_y / first_cell.count}, icon = icon, text = text})
@@ -185,13 +210,15 @@ local remove_cell = function(force, surface, resource_name, bucket, key)
   end
 end
 
-local scan_chunk = function(force, surface, cx, cy, area)
+-- only_name: restrict the scan to one resource (on_resource_depleted knows
+-- which resource changed — no need to re-count everything in the chunk).
+local scan_chunk = function(force, surface, cx, cy, area, only_name)
   if not (force and force.valid and surface and surface.valid) then return end
   if #force.players == 0 then return end
   local key = cell_key(cx, cy)
 
   local found = {}
-  for _, entity in pairs (surface.find_entities_filtered{area = area, type = "resource"}) do
+  for _, entity in pairs (surface.find_entities_filtered{area = area, type = "resource", name = only_name}) do
     local name = entity.name
     local totals = found[name]
     if not totals then
@@ -226,7 +253,7 @@ local scan_chunk = function(force, surface, cx, cy, area)
   local sb = fb and fb[surface_index]
   if sb then
     for name, bucket in pairs (sb) do
-      if bucket.cells[key] and not found[name] then
+      if (not only_name or name == only_name) and bucket.cells[key] and not found[name] then
         remove_cell(force, surface, name, bucket, key)
       end
     end
@@ -346,7 +373,7 @@ local on_resource_depleted = function(event)
   local area = {{cx * 32, cy * 32}, {cx * 32 + 32, cy * 32 + 32}}
   for _, force in pairs (game.forces) do
     if #force.players > 0 and force.is_chunk_charted(surface, {x = cx, y = cy}) then
-      scan_chunk(force, surface, cx, cy, area)
+      scan_chunk(force, surface, cx, cy, area, entity.name)
     end
   end
 end
@@ -358,15 +385,23 @@ local on_chart_tag_removed = function(event)
   local info = script_data.tag_map[tag.tag_number]
   if not info then return end
   script_data.tag_map[tag.tag_number] = nil
-  if not event.player_index then return end -- another mod's cleanup: just recreate later
   local fb = script_data.buckets[info.force_name]
   local sb = fb and fb[info.surface_index]
   local bucket = sb and sb[info.resource]
   local patch = bucket and bucket.patches[info.patch_id]
-  if patch then
-    patch.muted = true
+  if not patch then return end
+  if not event.player_index then
+    -- another mod's cleanup: recreate the marker right away
     patch.tag = nil
+    local force = game.forces[info.force_name]
+    local surface = game.surfaces[info.surface_index]
+    if force and force.valid and surface and surface.valid then
+      retag(force, surface, info.resource, bucket, info.patch_id)
+    end
+    return
   end
+  patch.muted = true
+  patch.tag = nil
 end
 
 local on_surface_deleted = function(event)
@@ -400,12 +435,14 @@ local on_chunk_deleted = function(event)
 end
 
 local on_forces_merged = function(event)
-  script_data.buckets[event.source_name] = nil
-  for tag_number, info in pairs (script_data.tag_map) do
-    if info.force_name == event.source_name then
-      script_data.tag_map[tag_number] = nil
-    end
-  end
+  -- The engine transfers the source force's chart tags to the destination
+  -- force on merge. Dropping only the bookkeeping would leave those tags
+  -- orphaned on the map and the next scan would add duplicates next to
+  -- them. full_rescan destroys every tag we track (including the
+  -- transferred ones — the references stay valid across the merge) and
+  -- rebuilds one marker per patch for the merged force. Muted patches
+  -- reset, same as /etech-markers-rebuild.
+  full_rescan()
 end
 
 local markers = {}
