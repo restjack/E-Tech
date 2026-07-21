@@ -187,3 +187,33 @@ if settings.startup["etech-fusion-passthrough"].value then
     elog("fusion generator pass-through connections applied")
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- Quality adds module slots to every machine that has any (needs Quality).
+-- Blanket replacement for the retired QualityEffectsFixed mod (clean
+-- reimplementation, no code reused): sets the engine flag
+-- quality_affects_module_slots on all six prototype types that can hold
+-- modules. Machines with 0 base slots are untouched (the flag would do
+-- nothing there anyway). Honors the qef_ignore opt-out field other mods
+-- may have set for QualityEffectsFixed.
+-- ---------------------------------------------------------------------------
+if settings.startup["etech-quality-module-slots"].value then
+  if mods["quality"] then
+    local n = 0
+    for _, t in ipairs({"assembling-machine", "furnace", "rocket-silo",
+                        "beacon", "mining-drill", "lab"}) do
+      for _, proto in pairs(data.raw[t] or {}) do
+        if (proto.module_slots or 0) > 0 and not proto.qef_ignore then
+          proto.quality_affects_module_slots = true
+          n = n + 1
+        end
+      end
+    end
+    if mods["QualityEffectsFixed"] then
+      elog("QualityEffectsFixed is still installed - it can be removed, this setting covers everything it did")
+    end
+    elog("quality module slots enabled on " .. n .. " machine prototypes")
+  else
+    elog("quality module slots setting on but Quality mod not active - skipped")
+  end
+end

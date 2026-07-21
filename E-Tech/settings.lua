@@ -423,6 +423,15 @@ data:extend({
   -- since 0.17.0 - see factory-hub/data.lua and factory-hub/control.lua.
   {
     type = "bool-setting",
+    name = "etech-quality-module-slots",
+    setting_type = "startup",
+    default_value = true,
+    order = "w",
+    localised_name = {"", "Quality adds module slots to all machines"},
+    localised_description = {"", "Every machine that has at least one module slot gains extra slots at higher quality - assemblers, furnaces, rocket silos, beacons, mining drills, and labs (modded ones included). Machines with no module slots are untouched. Replaces the retired QualityEffectsFixed mod with a blanket rule. Needs the Quality mod; on by default."},
+  },
+  {
+    type = "bool-setting",
     name = "etech-gleba-uranium",
     setting_type = "startup",
     default_value = false,

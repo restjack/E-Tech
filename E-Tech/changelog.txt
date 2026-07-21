@@ -1,4 +1,78 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.18.0
+Date: 2026-07-21
+  Features:
+    - New startup toggle "Quality adds module slots to all machines" (on by default,
+      needs the Quality mod): every machine with at least one module slot - assemblers,
+      furnaces, rocket silos, beacons, mining drills, and labs, modded ones included -
+      gains extra module slots at higher quality. Machines with no module slots are
+      untouched. Blanket replacement for the retired QualityEffectsFixed mod (clean
+      reimplementation, no code reused); honors that mod's qef_ignore opt-out field.
+---------------------------------------------------------------------------------------------------
+Version: 0.17.5
+Date: 2026-07-20
+  Bugfixes:
+    - Void pipe: draining no longer skips the pipe after a removed one in the same pass
+      (removal during list iteration shifted the remaining entries).
+  Optimizations:
+    - Factory outlet/inlet/sensor: when several devices' factory-list caches expire at the
+      same time, they now re-scan one device per maintenance pass instead of all at once,
+      refreshing early enough that none of them falls back to scanning during a pull.
+---------------------------------------------------------------------------------------------------
+Version: 0.17.4
+Date: 2026-07-20
+  Optimizations:
+    - Factory outlet/inlet/sensor: the work pass no longer runs everything in a single tick
+      every 2 seconds (profiled at 10-46 ms per pass - a visible periodic hitch). The pass
+      is now split into four phases on separate ticks: outlet pulls, inlet/sensor updates,
+      cache maintenance, and GUI refresh. Each device still updates every 2 seconds.
+    - Factory outlet/inlet/sensor: the interior chest lists are now cached and only rebuilt
+      when a logistic chest is built or mined, or the factory list changes - previously
+      every pass re-scanned every factory interior for chests.
+    - Factory outlet: the periodic factory-list rescan and module-request scan now refresh
+      ahead of time in the maintenance phase, so their cost never lands on the same tick as
+      an outlet pull.
+---------------------------------------------------------------------------------------------------
+Version: 0.17.3
+Date: 2026-07-20
+  Bugfixes:
+    - Teleporters: the destination window now reopens at the position you dragged it to.
+      Previously the position was lost whenever a teleport closed the window - the next
+      open re-centered it, which read as the window "moving" after using the surface
+      filter and teleporting. Off-screen saved positions (after a resolution change)
+      fall back to centered.
+---------------------------------------------------------------------------------------------------
+Version: 0.17.2
+Date: 2026-07-20
+  Bugfixes:
+    - Teleporters: merging two forces no longer strands the source force's pads - they move
+      into the destination force's network (renamed on name collision) and stay usable and
+      removable. Previously they vanished from the destination list and mining them leaked
+      their name label and map tag.
+    - Teleporters: mining a pad no longer errors if another mod wiped the mod's screen
+      renderings (the pad's name label) first.
+    - Teleporters: renaming a pad to an empty name via the rename window is now rejected,
+      matching the map-tag rename path.
+    - Teleporters: clicking a return slot whose list shifted since the window opened (a slot
+      expired or was used) now teleports to the slot that was clicked instead of whichever
+      entry took over that position.
+    - Teleporters: arrival-position checks now use the player's actual character prototype,
+      so mods that swap it (e.g. Jetpack in flight) get a correct landing spot.
+    - Teleporters: the destination window no longer errors when the preview size is larger
+      than fits the window width - the list just becomes a single column.
+    - Resource markers: merging two forces now rebuilds all markers for the merged force.
+      Previously the source force's markers were forgotten but stayed on the map, and the
+      next chart scan added duplicates next to them.
+    - Resource markers: when another mod deletes a marker tag, the marker is recreated
+      immediately instead of only after the patch next changes.
+  Optimizations:
+    - Resource markers: amount changes now update the existing map tag's text in place;
+      the tag is only destroyed and recreated when the patch centroid drifts more than
+      8 tiles. This stops marker flicker during active mining and no longer spams tag
+      add/remove events into other mods on every depleted ore tile.
+    - Resource markers: an ore tile running dry now rescans its chunk for that resource
+      only, instead of re-counting every resource type in the chunk.
+---------------------------------------------------------------------------------------------------
 Version: 0.17.1
 Date: 2026-07-20
   Changes:
