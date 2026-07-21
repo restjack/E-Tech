@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.18.1
+Date: 2026-07-21
+  Changes:
+    - Machines affected by "Quality adds module slots to all machines" now say so in
+      their entity and item tooltips ("Quality increases module slots").
+---------------------------------------------------------------------------------------------------
 Version: 0.18.0
 Date: 2026-07-21
   Features:

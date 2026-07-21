@@ -199,12 +199,28 @@ end
 -- ---------------------------------------------------------------------------
 if settings.startup["etech-quality-module-slots"].value then
   if mods["quality"] then
+    -- Appended to tooltips of affected machines so players can see the rule
+    -- in-game without digging through mod settings.
+    local note = "[color=yellow]Quality increases module slots.[/color]"
+    local function add_note(proto, primary, fallback)
+      if proto.localised_description then
+        proto.localised_description = {"", proto.localised_description, "\n", note}
+      else
+        proto.localised_description = {"?",
+          {"", {primary .. "." .. proto.name}, "\n", note},
+          {"", {fallback .. "." .. proto.name}, "\n", note},
+          note}
+      end
+    end
     local n = 0
     for _, t in ipairs({"assembling-machine", "furnace", "rocket-silo",
                         "beacon", "mining-drill", "lab"}) do
       for _, proto in pairs(data.raw[t] or {}) do
         if (proto.module_slots or 0) > 0 and not proto.qef_ignore then
           proto.quality_affects_module_slots = true
+          add_note(proto, "entity-description", "item-description")
+          local item = data.raw.item[proto.name]
+          if item then add_note(item, "item-description", "entity-description") end
           n = n + 1
         end
       end
