@@ -134,7 +134,7 @@ local function edit_map_settings(player)
       surface.clear_pollution()
     end
   end
-  for k, v in pairs(pollution) do -- fucking structs
+  for k, v in pairs(pollution) do -- struct fields must be written one by one
     map_settings.pollution[k] = v
   end
   for k, v in pairs(enemy_expansion) do

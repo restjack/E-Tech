@@ -2,7 +2,23 @@
 
 60 improvement candidates from a 3-agent code sweep (teleporters/GUIs, factory-hub/void/markers, data-stage/settings/locale), 6 areas × 10. File:line refs verified at sweep time (E-Tech 0.18.1). Excludes ideas already killed (Factorissimo map icons, waterfill patch, tech-tree changes — see kill history in E-TECH-HANDOFF.md / Build-Log).
 
-Pick items → they become the 0.19.x line. Strike items here when shipped, stamp version.
+## STATUS: ALL 60 ADDRESSED IN 0.19.0 (2026-07-21, branch polish-0.19)
+
+Verified: luaparser syntax on every changed file, dump-data clean (0 errors, 49 recipes reverted), 120-tick benchmark of live save "2026 July 22 2p" clean (avg 7.1 ms). NOT yet: in-game GUI eyeballing, server deploy, portal upload.
+
+Deviations from the list as written (everything else implemented as described):
+- 1.4 remote rename: per-pad Shift+Right-click already works in remote mode (documented in the favorite tooltip); the title-bar rename button stays pad-GUI-only (it renames the source pad, which remote mode doesn't have).
+- 1.8 cost preview: tooltips already carry cost + stored MJ and unaffordable pads disable; a confirm dialog was judged friction, not safety. Return/player buttons already say "Free".
+- 1.10/2.8 "incremental GUI refresh" + network_wants caching: not restructured — search-state persistence removed the sting of the teleporter rebuild, and one-outlet-per-surface means the requester walk has nothing to share. Sensor dirty-check, rate-sample prune, chart throttle, alert early-out all shipped.
+- 2.2 inlet priority: skipped (inlets don't compete); filters + deficit panel shipped.
+- 3.2 void pipe circuit enable: skipped (infinity pipes have no circuit connector; a hidden-combinator companion wasn't worth it) — throughput readout on hover shipped instead.
+- 3.7 markers playerless merge: verified NOT a bug (the destroy pass covers all buckets before the player-force filter applies); background rescan shipped.
+- 4.1 "7 dead entries": false alarm — all seven AAI versions contain marker items (verified vs AAI-CHANGE-INVENTORY.md), so contains_marker restores them. Comment added at the looks_aai definition.
+- 4.3 K2 third-mod guard: idempotent skip shipped; the ownership WARNING was built, fired false positives on the normal vanilla→K2 path in dump-data, and was removed same session. Real guard needs per-entry AAI fingerprints in k2_restores — future work if it ever matters.
+- 5.8 locale headerless files: deliberate — bare etech-prefixed keys are valid and collision-safe; renaming sections would break every reference for zero gain.
+- 6.5 hub insert/request-walk dedupe: reviewed, kept separate — stack-based vs spec-based insertion have different spoil semantics, and the two request walks differ in deficit handling. They already share return_passes.
+
+Original list below for reference.
 
 ## 1. Teleporters
 

@@ -1,4 +1,73 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.19.0
+Date: 2026-07-21
+  Features:
+    - Factory fluid outlet and fluid inlet: storage-tank devices that bridge FLUIDS
+      across the factory wall. The outlet fills itself from storage tanks inside the
+      factories (one fluid per device - it locks onto what it holds), the inlet drains
+      itself into interior tanks already holding the same fluid. Same tech unlock.
+    - Restored the vanilla offshore pump recipe (pipe 3 + iron gear wheel 2 - values
+      verified against base 2.1), closing the mod's oldest open item.
+    - Teleporter pads keep their names through blueprints (stored as blueprint entity
+      tags; pasted pads reuse the name, suffixed on collision).
+    - Factory outlet/inlet settings (filters, mode, storage toggle, auto-request)
+      survive cloning and blueprints.
+    - Teleporting while driving a car, tank or spidertron now teleports the vehicle
+      with you (pads, remote, return and teleport-to-player alike). Riding a train
+      refuses politely instead of failing silently.
+    - The factory inlet gained the outlet's distribution filter (whitelist/blacklist)
+      and a "still missing inside" panel showing interior deficits after each pass.
+    - New startup toggles: "Vanilla engine unit names and icons" (the cosmetic restore
+      can now be turned off) and "Verbose recipe-restore logging" (per-recipe log
+      lines are off by default - only summaries are always logged).
+  Changes:
+    - All mod settings moved to proper locale entries and regrouped: core tweaks,
+      absorbed features and teleport features now sort together per settings tab.
+    - Teleporter sound volume, pad preview size and hide-platforms are per-player
+      settings now (they were map-wide; stored values reset once).
+    - Hovering a void pipe shows what it voided in the last pass; the first time a
+      filtered void chest is opened its infinity-filter workflow is explained in chat.
+    - Resource marker rebuilds run in the background (a batch of chunks at a time)
+      instead of stalling the game for seconds on large maps; the summary reports
+      patches hidden by the minimum-size setting; failed marker placements on
+      uncharted ground now retry periodically.
+    - Outlet panel: the pause reason is shown when a circuit gates the outlet off,
+      and the empty state distinguishes "no chests reachable" from "factories empty"
+      from "nothing matches the search". Truncated factory lists show "+N more"
+      instead of "...". Filter slots grew from 10 to 15.
+    - Placing an outlet/inlet with no reachable factories says so as flying text.
+    - Teleporter list: the search text survives list rebuilds, hiding the search box
+      clears the filter, and searching also matches surface names and aliases.
+    - Teleporter favorites and recents follow the player (keyed by player, not by
+      player name - renames no longer orphan them) and are cleaned up when a pad is
+      removed.
+  Optimizations:
+    - Factory sensor only rewrites its circuit section when the totals actually
+      changed; the outlet's rate-sample pruning no longer copies every pass.
+    - Teleporter minimap chart calls are throttled to once a minute per pad; the
+      unpowered-pad alert scan skips forces with nobody online.
+    - Jetpack HUD: when nobody is airborne the per-player remote calls are skipped.
+  Bugfixes:
+    - Cloned void pipes (and platform-built ones) never registered, so they never
+      drained fluid. Cloned void chests missed their filter setup.
+    - Colorful biochamber no longer crashes the load when another mod removed one of
+      the tinted recipes; a missing biochamber prototype skips the feature cleanly.
+    - Copy Paste Modules: a machine without a module inventory aborts the module
+      request gracefully instead of crashing the paste.
+    - Edit map settings: applying no longer errors in packs that removed the enemy
+      force.
+    - Krastorio 2 recipe restores are idempotent (no misleading "restored" log when
+      nothing changed) and warn when overwriting a recipe that matches neither AAI
+      nor K2 - a third mod may own it.
+    - The recipe fingerprint now includes fluid temperature bounds, so recipes
+      differing only in fluid temperature can't false-match.
+    - Teleporter energy is drained only after a successful jump; stale GUI actions
+      and missing rename targets are guarded.
+  Info:
+    - README and the in-game tips page no longer claim everything is off by default
+      (four vanilla-behavior restores default on); the optional-tweaks table gained
+      the missing quality-module-slots and factory hub rows.
+---------------------------------------------------------------------------------------------------
 Version: 0.18.1
 Date: 2026-07-21
   Changes:

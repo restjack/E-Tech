@@ -144,20 +144,17 @@ if mods["aai-industry"] then
       local recipe = data.raw.recipe[entry.name]
       if recipe and (entry.contains == nil or contains_name(recipe.ingredients, entry.contains)) then
         local k = entry.k2
-        -- Idempotency/ownership guard (0.19.0): if the recipe already
-        -- matches the K2 target, nothing to do (and no misleading
-        -- "restored" log). Entries without a `contains` fingerprint used to
-        -- overwrite unconditionally - they still apply, but a recipe that
-        -- matches NEITHER the K2 target nor an AAI marker is flagged, since
-        -- that usually means a third mod owns it now.
+        -- Idempotency guard (0.19.0): if the recipe already matches the K2
+        -- target, nothing to do (and no misleading "restored" log). A
+        -- non-matching recipe is the NORMAL case here (it holds AAI's or
+        -- the vanilla pass's version), so no third-mod warning is possible
+        -- without per-entry AAI fingerprints - entries with `contains` are
+        -- guarded, the rest apply as before.
         local already = (not k.ingredients or list_key(recipe.ingredients) == list_key(k.ingredients))
                     and (not k.results or list_key(recipe.results) == list_key(k.results))
         if already then
           dlog("K2 recipe already correct: " .. entry.name)
         else
-          if entry.contains == nil and not contains_marker(recipe.ingredients) then
-            elog("WARNING: K2 restore of " .. entry.name .. " overwrites a recipe that matches neither AAI nor K2 - a third mod may own it")
-          end
           if k.ingredients then recipe.ingredients = table.deepcopy(k.ingredients) end
           if k.results then recipe.results = table.deepcopy(k.results) end
           if k.energy_required then recipe.energy_required = k.energy_required end

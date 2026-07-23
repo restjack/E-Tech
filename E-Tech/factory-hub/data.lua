@@ -60,6 +60,31 @@ local inlet, inlet_item = build_chest("requester-chest",
 inlet.inventory_size = 200 -- fixed since 0.17.0 (was the etech-hub-slots setting)
 inlet.enable_inventory_bar = false
 
+-- Factory fluid outlet / inlet ------------------------------------------------
+-- Storage-tank copies bridging FLUIDS across the factory wall (0.19.0):
+-- the fluid outlet fills itself from storage tanks inside the factories,
+-- the fluid inlet drains itself into them. One fluid per device at a time.
+
+local function build_tank(name)
+    local tank = table.deepcopy(data.raw["storage-tank"]["storage-tank"])
+    tank.name = name
+    tank.minable.result = name
+    tank.icon = nil
+    tank.icons = tinted_icons("__base__/graphics/icons/storage-tank.png")
+    tank.pictures.picture.sheets[1].tint = hubTint
+
+    local item = table.deepcopy(data.raw.item["storage-tank"])
+    item.name = name
+    item.place_result = name
+    item.order = item.order .. "-" .. name
+    item.icon = nil
+    item.icons = tinted_icons("__base__/graphics/icons/storage-tank.png")
+    return tank, item
+end
+
+local fluid_outlet, fluid_outlet_item = build_tank("etech-factory-fluid-outlet")
+local fluid_inlet, fluid_inlet_item = build_tank("etech-factory-fluid-inlet")
+
 -- Factory sensor --------------------------------------------------------------
 
 local sensor = table.deepcopy(data.raw["constant-combinator"]["constant-combinator"])
@@ -105,6 +130,36 @@ data:extend({
     outlet, outlet_item,
     inlet, inlet_item,
     sensor, sensor_item,
+    fluid_outlet, fluid_outlet_item,
+    fluid_inlet, fluid_inlet_item,
+    {
+        type = "recipe",
+        name = "etech-factory-fluid-outlet",
+        enabled = false,
+        energy_required = 10,
+        ingredients = {
+            {type = "item", name = "factory-1", amount = 1},
+            {type = "item", name = "storage-tank", amount = 1},
+            {type = "item", name = "advanced-circuit", amount = 20},
+            {type = "item", name = "processing-unit", amount = 10},
+            {type = "item", name = "steel-plate", amount = 25},
+        },
+        results = {{type = "item", name = "etech-factory-fluid-outlet", amount = 1}},
+    },
+    {
+        type = "recipe",
+        name = "etech-factory-fluid-inlet",
+        enabled = false,
+        energy_required = 10,
+        ingredients = {
+            {type = "item", name = "factory-1", amount = 1},
+            {type = "item", name = "storage-tank", amount = 1},
+            {type = "item", name = "advanced-circuit", amount = 20},
+            {type = "item", name = "processing-unit", amount = 10},
+            {type = "item", name = "steel-plate", amount = 25},
+        },
+        results = {{type = "item", name = "etech-factory-fluid-inlet", amount = 1}},
+    },
     {
         type = "recipe",
         name = "etech-factory-provider-hub",
@@ -154,6 +209,8 @@ data:extend({
             { type = "unlock-recipe", recipe = "etech-factory-provider-hub" },
             { type = "unlock-recipe", recipe = "etech-factory-inlet" },
             { type = "unlock-recipe", recipe = "etech-factory-sensor" },
+            { type = "unlock-recipe", recipe = "etech-factory-fluid-outlet" },
+            { type = "unlock-recipe", recipe = "etech-factory-fluid-inlet" },
         },
         unit = unit,
         order = "c-k-d-e",
