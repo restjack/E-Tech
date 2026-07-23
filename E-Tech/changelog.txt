@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.19.3
+Date: 2026-07-21
+  Gui:
+    - Factory fluid outlet: opening it now shows a "Fluid to pull" panel with a fluid
+      picker - 0.19.2 pointed at the tank's filter slot, which vanilla storage tanks
+      don't actually offer. The pick survives blueprints and cloning; clearing it
+      returns to lock-onto-contents behavior.
+---------------------------------------------------------------------------------------------------
 Version: 0.19.2
 Date: 2026-07-21
   Changes:

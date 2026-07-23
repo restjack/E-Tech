@@ -136,6 +136,7 @@ local function register_device(entity, copy_from)
         if copy_from.pins then record.pins = table.deepcopy(copy_from.pins) end
         record.pull_storage = copy_from.pull_storage
         record.auto_request = copy_from.auto_request
+        record.fluid_filter = copy_from.fluid_filter
     end
     data.hubs[entity.unit_number] = record
     -- devices are logistic-containers themselves (an inlet placed inside a
@@ -1080,16 +1081,9 @@ local function device_fluid(entity)
     end
 end
 
--- The fluid filter the player set in the device's own tank GUI (2.x storage
--- tanks are filterable). This is how the outlet is told WHICH interior
--- fluid to pull when factories hold several.
-local function device_fluid_filter(device)
-    local filter = device.get_fluid_filter(1)
-    if not filter then return nil end
-    local f = filter.fluid
-    if type(f) == "string" then return f end
-    return f and f.name or nil
-end
+-- The pull filter lives in record.fluid_filter (set via the small relative
+-- panel next to the outlet's tank GUI — vanilla storage tanks expose no
+-- player-settable filter slot of their own).
 
 -- Push `amount` of `name` from the device into interior tanks that already
 -- hold the same fluid. Shared by the fluid inlet and the outlet's
@@ -1122,10 +1116,10 @@ local function pass_for_fluid_outlet(record)
     -- 2.1: LuaEntity.fluidbox is gone; capacity/removal go through
     -- get_fluid_capacity / extract_fluid directly on the entity.
     local capacity = device.get_fluid_capacity(1)
-    -- Which fluid to pull: the GUI filter wins; without one the outlet
+    -- Which fluid to pull: the panel filter wins; without one the outlet
     -- locks onto whatever it already holds (first interior fluid found
     -- otherwise).
-    local want = device_fluid_filter(device)
+    local want = record.fluid_filter
     local current_name, current_amount = device_fluid(device)
     local moved = 0
 
@@ -1603,6 +1597,42 @@ local function refresh_inlet_panel(player, record)
     end
 end
 
+-- GUI: fluid outlet panel --------------------------------------------------------
+
+local FLUID_PANEL_NAME = "etech-fluid-panel"
+
+-- Small relative panel next to the fluid outlet's tank GUI holding the pull
+-- filter (a fluid choose-elem-button). Storage tanks in 2.x open the
+-- unified pipe/fluid GUI (relative_gui_type.pipe_gui) and have no filter
+-- slot of their own.
+local function build_fluid_panel(player, record)
+    local old = player.gui.relative[FLUID_PANEL_NAME]
+    if old then old.destroy() end
+    local panel = player.gui.relative.add {
+        type = "frame",
+        name = FLUID_PANEL_NAME,
+        direction = "vertical",
+        caption = {"gui-etech-hub.fluid-title"},
+        anchor = {
+            gui = defines.relative_gui_type.pipe_gui,
+            position = defines.relative_gui_position.right,
+            names = {FLUID_OUTLET_NAME},
+        },
+    }
+    local inner = panel.add {
+        type = "frame",
+        name = "inner",
+        style = "inside_shallow_frame_with_padding",
+        direction = "vertical",
+    }
+    inner.add {type = "label", name = "filter_label",
+        caption = {"gui-etech-hub.fluid-filter"},
+        tooltip = {"gui-etech-hub.fluid-filter-tooltip"}}
+    local btn = inner.add {type = "choose-elem-button", name = "etech-fluid-filter",
+        elem_type = "fluid", tooltip = {"gui-etech-hub.fluid-filter-tooltip"}}
+    btn.elem_value = record.fluid_filter
+end
+
 -- GUI events ---------------------------------------------------------------------
 
 local function open_record(player_index)
@@ -1616,7 +1646,7 @@ local function on_gui_opened(event)
     local entity = event.entity
     if not (entity and entity.valid) then return end
     local kind = KINDS[entity.name]
-    if not (kind == "outlet" or kind == "inlet") then return end
+    if not (kind == "outlet" or kind == "inlet" or kind == "fluid-outlet") then return end
     if not factorissimo_available() then return end
     local player = game.get_player(event.player_index)
     if not player then return end
@@ -1629,9 +1659,11 @@ local function on_gui_opened(event)
     if kind == "outlet" then
         load_panel_settings(player, record)
         refresh_grid(player, record)
-    else
+    elseif kind == "inlet" then
         build_inlet_panel(player, record)
         refresh_inlet_panel(player, record)
+    else
+        build_fluid_panel(player, record)
     end
 end
 
@@ -1654,10 +1686,14 @@ end
 
 local function on_gui_elem_changed(event)
     if not (event.element and event.element.valid) then return end
-    local slot = event.element.name:match("^etech%-hub%-filter%-(%d+)$")
-    if not slot then return end
     local record = open_record(event.player_index)
-    if record then record.filters.items[tonumber(slot)] = event.element.elem_value end
+    if not record then return end
+    if event.element.name == "etech-fluid-filter" then
+        record.fluid_filter = event.element.elem_value
+        return
+    end
+    local slot = event.element.name:match("^etech%-hub%-filter%-(%d+)$")
+    if slot then record.filters.items[tonumber(slot)] = event.element.elem_value end
 end
 
 local function on_gui_checked_state_changed(event)
@@ -1745,6 +1781,7 @@ local function on_player_setup_blueprint(event)
                     filters = record.filters,
                     pull_storage = record.pull_storage,
                     auto_request = record.auto_request,
+                    fluid_filter = record.fluid_filter,
                 })
             end
         end
@@ -1975,7 +2012,7 @@ local function adopt_existing()
         end
     end
     for _, player in pairs(game.players) do
-        for _, panel_name in pairs({PANEL_NAME, INLET_PANEL_NAME}) do
+        for _, panel_name in pairs({PANEL_NAME, INLET_PANEL_NAME, "etech-fluid-panel"}) do
             local panel = player.gui.relative[panel_name]
             if panel then panel.destroy() end
         end
