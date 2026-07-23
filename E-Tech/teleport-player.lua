@@ -10,10 +10,13 @@
 -- share on_gui_click etc. with the teleporters module without the handlers
 -- overwriting each other.
 
+local common = require("teleport-common")
+
 local SHORTCUT = "etech-teleport-to-player"
 local FRAME = "etech-tp-frame"
 local BTN_PREFIX = "etech-tp-player-"
 local CANCEL = "etech-tp-cancel"
+local CLOSE = "etech-tp-close"
 
 -- Teleport flash at both ends, when the explosion prototypes exist (they're
 -- part of the teleporter-pads toggle; this shortcut can be enabled alone).
@@ -30,23 +33,18 @@ end
 local function teleport_to(player, target)
   local surface = target.physical_surface or target.surface
   local pos = target.physical_position or target.position
-  local dest = surface.find_non_colliding_position("character", pos, 16, 0.5) or pos
   local from_surface = player.physical_surface or player.surface
   local from_position = player.physical_position or player.position
-  local ok, err = pcall(function()
-    if player.character then
-      player.character.teleport(dest, surface)
-    else
-      player.teleport(dest, surface)
-    end
-  end)
+  local ok, result = common.teleport_player(player, surface, pos)
   if ok then
     flash_at(from_surface, from_position)
-    flash_at(surface, dest)
-    player.play_sound{path = "etech-teleporter-sound", volume_modifier = settings.global["etech-teleporter-sound-volume"].value}
-    player.print("[E-Tech] Teleported to " .. target.name .. ".")
+    flash_at(surface, result)
+    common.play_sound(player)
+    player.print({"etech-tp2p-done", target.name})
+  elseif result == "train" then
+    player.print({"etech-tp-in-train"})
   else
-    player.print("[E-Tech] Teleport failed: " .. tostring(err))
+    player.print({"etech-tp2p-failed"})
   end
 end
 
@@ -60,14 +58,22 @@ local function open_picker(player, others)
   local frame = player.gui.screen.add{
     type = "frame",
     name = FRAME,
-    caption = "Teleport to player",
     direction = "vertical",
   }
   frame.auto_center = true
+  local title_flow = frame.add{type = "flow", direction = "horizontal"}
+  title_flow.style.vertical_align = "center"
+  local title = title_flow.add{type = "label", style = "frame_title", caption = {"etech-tp2p-title"}}
+  title.drag_target = frame
+  local pusher = title_flow.add{type = "empty-widget", style = "draggable_space_header"}
+  pusher.style.horizontally_stretchable = true
+  pusher.style.vertically_stretchable = true
+  pusher.drag_target = frame
+  title_flow.add{type = "sprite-button", name = CLOSE, style = "frame_action_button", sprite = "utility/close"}
   for _, p in pairs(others) do
     frame.add{type = "button", name = BTN_PREFIX .. p.index, caption = p.name}
   end
-  frame.add{type = "button", name = CANCEL, caption = "Cancel"}
+  frame.add{type = "button", name = CANCEL, caption = {"etech-tp2p-cancel"}}
   player.opened = frame -- lets E / Escape close it via on_gui_closed
 end
 
@@ -80,7 +86,7 @@ local function on_lua_shortcut(event)
     if p.index ~= player.index then others[#others + 1] = p end
   end
   if #others == 0 then
-    player.print("[E-Tech] No other players online.")
+    player.print({"etech-tp2p-nobody"})
   elseif #others == 1 then
     teleport_to(player, others[1])
   else
@@ -93,7 +99,7 @@ local function on_gui_click(event)
   if not (el and el.valid) then return end
   local player = game.get_player(event.player_index)
   if not player then return end
-  if el.name == CANCEL then
+  if el.name == CANCEL or el.name == CLOSE then
     close_picker(player)
   elseif el.name:sub(1, #BTN_PREFIX) == BTN_PREFIX then
     local target = game.get_player(tonumber(el.name:sub(#BTN_PREFIX + 1)))
@@ -101,7 +107,7 @@ local function on_gui_click(event)
     if target and target.connected then
       teleport_to(player, target)
     else
-      player.print("[E-Tech] That player is no longer online.")
+      player.print({"etech-tp-player-offline"})
     end
   end
 end

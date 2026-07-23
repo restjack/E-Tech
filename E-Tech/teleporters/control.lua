@@ -11,6 +11,7 @@
 
 local util = require("teleporters/script_util")
 local names = require("teleporters/shared")
+local common = require("teleport-common")
 local teleporter_name = names.entities.teleporter
 local teleporter_sticker = names.entities.teleporter_sticker
 
@@ -49,6 +50,9 @@ local script_data =
   -- reopens where the player left it instead of re-centering after every
   -- teleport (position only lived as long as the frame did before).
   frame_locations = {},
+  -- Per-player search filter text, so the typed search survives the full
+  -- GUI rebuild that every pad built/mined/rename event triggers.
+  search_text = {},
 }
 
 local RETURN_SLOTS = 3
@@ -56,8 +60,19 @@ local RETURN_SLOTS = 3
 -- The teleport sound the player themselves hears. The world flash's own
 -- sound plays at the destination BEFORE the player arrives, so it's
 -- inaudible cross-surface — this one follows the player.
-local play_teleport_sound = function(player)
-  player.play_sound{path = "etech-teleporter-sound", volume_modifier = settings.get_player_settings(player)["etech-teleporter-sound-volume"].value}
+local play_teleport_sound = common.play_sound
+
+-- Show only pad buttons whose searchable text (pad name + surface name +
+-- alias, carried in the button's tags) contains `search`. The "no
+-- teleporters" label has no tags and an empty name, so it only survives an
+-- empty search — acceptable.
+local apply_search_filter = function(parent, search)
+  if not (parent and parent.valid) then return end
+  search = search:lower()
+  for _, child in pairs (parent.children) do
+    local hay = (child.tags and child.tags.etech_search) or child.name
+    child.visible = tostring(hay):lower():find(search, 1, true) ~= nil
+  end
 end
 
 -- Pad preview size comes from the etech-teleporter-preview-size per-player
@@ -111,7 +126,8 @@ local make_rename_frame = function(player, caption)
 
   local force = player.force
   local teleporters = script_data.networks[force.name]
-  local param = teleporters[caption]
+  local param = teleporters and teleporters[caption]
+  if not param then return end
   local text = param.flying_text
   local gui = player.gui.screen
   local frame = gui.add{type = "frame", caption = {"etech-tp-rename-teleporter", caption}, direction = "horizontal"}
@@ -138,20 +154,22 @@ local get_force_color = function(force)
   return {r = 1, b = 1, g = 1}
 end
 
+-- Favorites/recents are keyed by player.index since 0.19.0 (player.name
+-- broke on player rename; on_configuration_changed migrates old keys).
 local get_favorites = function(player)
-  local favorites = script_data.favorites[player.name]
+  local favorites = script_data.favorites[player.index]
   if not favorites then
     favorites = {}
-    script_data.favorites[player.name] = favorites
+    script_data.favorites[player.index] = favorites
   end
   return favorites
 end
 
 local add_recent = function(player, teleporter)
-  local recent = script_data.recent[player.name]
+  local recent = script_data.recent[player.index]
   if not recent then
     recent = {}
-    script_data.recent[player.name] = recent
+    script_data.recent[player.index] = recent
   end
   recent[teleporter.unit_number] = game.tick
   if table_size(recent) >= 9 then
@@ -378,11 +396,13 @@ local make_teleporter_gui = function(player, source)
   pusher.style.horizontally_stretchable = true
   pusher.style.vertically_stretchable = true
   pusher.drag_target = frame
-  local search_box = title_flow.add{type = "textfield", visible = false}
+  -- The search text persists in storage: the GUI is fully rebuilt on every
+  -- pad built/mined/rename event, and the typed filter used to vanish.
+  local saved_search = script_data.search_text[player.index] or ""
+  local search_box = title_flow.add{type = "textfield", visible = saved_search ~= "", text = saved_search}
   local search_button = title_flow.add{type = "sprite-button", style = "frame_action_button", sprite = "utility/search", tooltip = {"gui.search-with-focus", {"etech-tp-search"}}}
-  util.register_gui(script_data.button_actions, search_button, {type = "search_button", box = search_box})
   script_data.search_boxes[player.index] = search_box
-  local recent = script_data.recent[player.name] or {}
+  local recent = script_data.recent[player.index] or {}
   local favorites = get_favorites(player)
 
   local sorted = {}
@@ -514,6 +534,7 @@ local make_teleporter_gui = function(player, source)
   local column_count = math.max(1, math.floor(((player.display_resolution.width / player.display_scale) * 0.6) / preview_size))
   local holding_table = scroll.add{type = "table", column_count = column_count}
   util.register_gui(script_data.button_actions, search_box, {type = "search_text_changed", parent = holding_table})
+  util.register_gui(script_data.button_actions, search_button, {type = "search_button", box = search_box, parent = holding_table})
   holding_table.style.horizontal_spacing = 2
   holding_table.style.vertical_spacing = 2
   local any = false
@@ -588,10 +609,23 @@ local make_teleporter_gui = function(player, source)
       end
       if show then
       local position = teleporter_entity.position
-      local area = {{position.x - preview_size / 2, position.y - preview_size / 2}, {position.x + preview_size / 2, position.y + preview_size / 2}}
-      chart(pad_surface, area)
+      -- Charting the preview area per pad per rebuild was measurable with
+      -- many pads - once a minute per pad is plenty for minimap previews.
+      if (teleporter.charted_tick or 0) + 3600 <= game.tick then
+        local area = {{position.x - preview_size / 2, position.y - preview_size / 2}, {position.x + preview_size / 2, position.y + preview_size / 2}}
+        chart(pad_surface, area)
+        teleporter.charted_tick = game.tick
+      end
       local cost = get_teleport_cost(source, teleporter_entity, player)
-      local button = holding_table.add{type = "button", name = "_"..name}
+      -- Searchable text: pad name + raw surface name + string surface label
+      -- (alias / platform name). Localised planet names can't be searched -
+      -- the raw name ("nauvis") covers that case.
+      local searchable = name .. " " .. pad_surface.name
+      local surface_label_value = get_surface_label(pad_surface)
+      if type(surface_label_value) == "string" and surface_label_value ~= pad_surface.name then
+        searchable = searchable .. " " .. surface_label_value
+      end
+      local button = holding_table.add{type = "button", name = "_"..name, tags = {etech_search = searchable}}
       -- Buttons clip their children to the button's own size, so the height
       -- must account for every label row: name + distance/surface line,
       -- plus the button's own vertical padding (zeroed below, headroom kept).
@@ -661,6 +695,9 @@ local make_teleporter_gui = function(player, source)
   end
   if not any then
     holding_table.add{type = "label", caption = {"etech-tp-no-teleporters"}}
+  end
+  if saved_search ~= "" then
+    apply_search_filter(holding_table, saved_search)
   end
 end
 
@@ -794,6 +831,26 @@ local apply_surface_rename = function(event, param)
   check_player_linked_teleporter(player)
 end
 
+-- Shared by the rename confirm button and the textfield confirm (they were
+-- copy-pasted bodies before 0.19.0).
+local apply_pad_rename = function(event, param)
+  local flying_text = param.flying_text
+  if not (flying_text and flying_text.valid) then return end
+  local player = game.players[event.player_index]
+  if not (player and player.valid) then return end
+  local old_name = flying_text.text
+  local new_name = param.textfield.text
+
+  -- Same rule as the chart-tag path: no empty names, no duplicates.
+  if new_name == "" or (new_name ~= old_name and not is_name_available(player.force, new_name)) then
+    player.print({"etech-tp-name-already-taken"})
+    return
+  end
+
+  close_gui(get_rename_frame(player))
+  rename_teleporter(player.force, old_name, new_name)
+end
+
 local gui_actions =
 {
   rename_button = function(event, param)
@@ -806,38 +863,11 @@ local gui_actions =
   end,
   confirm_rename_button = function(event, param)
     if event.name ~= defines.events.on_gui_click then return end
-    local flying_text = param.flying_text
-    if not (flying_text and flying_text.valid) then return end
-    local player = game.players[event.player_index]
-    if not (player and player.valid) then return end
-    local old_name = flying_text.text
-    local new_name = param.textfield.text
-
-    -- Same rule as the chart-tag path: no empty names, no duplicates.
-    if new_name == "" or (new_name ~= old_name and not is_name_available(player.force, new_name)) then
-      player.print({"etech-tp-name-already-taken"})
-      return
-    end
-
-    close_gui(get_rename_frame(player))
-    rename_teleporter(player.force, old_name, new_name)
+    apply_pad_rename(event, param)
   end,
   confirm_rename_textfield = function(event, param)
     if event.name ~= defines.events.on_gui_confirmed then return end
-    local flying_text = param.flying_text
-    if not (flying_text and flying_text.valid) then return end
-    local player = game.players[event.player_index]
-    if not (player and player.valid) then return end
-    local old_name = flying_text.text
-    local new_name = param.textfield.text
-
-    if new_name == "" or (new_name ~= old_name and not is_name_available(player.force, new_name)) then
-      player.print({"etech-tp-name-already-taken"})
-      return
-    end
-
-    close_gui(get_rename_frame(player))
-    rename_teleporter(player.force, old_name, new_name)
+    apply_pad_rename(event, param)
   end,
   teleport_button = function(event, param)
     local teleport_param = param.param
@@ -875,14 +905,14 @@ local gui_actions =
       end
     end
     local cost = get_teleport_cost(source, destination, player)
+    local eei
     if cost > 0 then
-      local eei = get_energy_interface(teleport_param, destination)
+      eei = get_energy_interface(teleport_param, destination)
       local stored = (eei and eei.valid and eei.energy) or 0
       if stored < cost then
         player.print({"etech-tp-not-enough-energy"})
         return
       end
-      eei.energy = stored - cost
     end
 
     local from_surface = player.surface
@@ -891,9 +921,19 @@ local gui_actions =
     destination.timeout = destination.prototype.timeout
     local destination_surface = destination.surface
     local destination_position = destination.position
+    -- On foot the player lands exactly on the pad; driving a car/spidertron
+    -- teleports the vehicle to a clear spot next to it. Rolling stock
+    -- refuses. Energy is only drained once the jump actually happened.
+    local ok, result = common.teleport_player(player, destination_surface, destination_position, {exact = true})
+    if not ok then
+      player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+      return
+    end
+    if cost > 0 and eei and eei.valid then
+      eei.energy = eei.energy - cost
+    end
     create_flash(destination_surface, destination_position)
     create_flash(from_surface, from_position)
-    player.teleport(destination_position, destination_surface)
     play_teleport_sound(player)
     unlink_teleporter(player)
     add_recent(player, destination)
@@ -924,11 +964,15 @@ local gui_actions =
       return
     end
     local surface = game.surfaces[ret.surface_index]
-    local character_name = player.character and player.character.name or "character"
-    local position = surface.find_non_colliding_position(character_name, ret.position, 16, 0.5) or ret.position
-    create_flash(player.surface, player.position)
-    create_flash(surface, position)
-    player.teleport(position, surface)
+    local from_surface = player.surface
+    local from_position = player.position
+    local ok, result = common.teleport_player(player, surface, ret.position)
+    if not ok then
+      player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+      return
+    end
+    create_flash(from_surface, from_position)
+    create_flash(surface, result)
     play_teleport_sound(player)
     table.remove(rets, index)
     script_data.returns[player.index] = (#rets > 0) and rets or nil
@@ -946,23 +990,15 @@ local gui_actions =
     end
     local surface = target.physical_surface or target.surface
     local position = target.physical_position or target.position
-    -- Use the traveling player's actual character prototype (mods like
-    -- Jetpack swap it) so the collision check matches.
-    local character_name = player.character and player.character.name or "character"
-    local destination = surface.find_non_colliding_position(character_name, position, 16, 0.5) or position
-    create_flash(player.surface, player.position)
-    create_flash(surface, destination)
-    local ok = pcall(function()
-      if player.character then
-        player.character.teleport(destination, surface)
-      else
-        player.teleport(destination, surface)
-      end
-    end)
+    local from_surface = player.surface
+    local from_position = player.position
+    local ok, result = common.teleport_player(player, surface, position)
     if not ok then
-      player.print({"etech-tp-player-teleport-failed"})
+      player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
       return
     end
+    create_flash(from_surface, from_position)
+    create_flash(surface, result)
     play_teleport_sound(player)
     unlink_teleporter(player)
   end,
@@ -996,15 +1032,21 @@ local gui_actions =
 
   search_text_changed = function(event, param)
     local box = event.element
-    local search = box.text
-    local parent = param.parent
-    for k, child in pairs (parent.children) do
-      child.visible = child.name:lower():find(search:lower(), 1, true) ~= nil
-    end
+    script_data.search_text[event.player_index] = (box.text ~= "") and box.text or nil
+    apply_search_filter(param.parent, box.text)
   end,
   search_button = function(event, param)
-    param.box.visible = not param.box.visible
-    if param.box.visible then param.box.focus() end
+    local box = param.box
+    box.visible = not box.visible
+    if box.visible then
+      box.focus()
+    else
+      -- Hiding the box clears the filter — pads filtered out by a lingering
+      -- term used to stay invisible with no visible cause.
+      box.text = ""
+      script_data.search_text[event.player_index] = nil
+      apply_search_filter(param.parent, "")
+    end
   end
 }
 
@@ -1017,12 +1059,23 @@ local get_network = function(force)
 end
 
 local on_built_entity = function(event)
-  local entity = event.created_entity or event.entity or event.destination
+  local entity = event.entity or event.destination
   if not (entity and entity.valid) then return end
   if entity.name ~= teleporter_name then return end
   local force = entity.force
-  local name = "Teleporter ".. entity.unit_number
   local network = get_network(force)
+  local name = "Teleporter ".. entity.unit_number
+  -- Blueprint-pasted pads carry their original name as a blueprint tag
+  -- (written in on_player_setup_blueprint); reuse it, suffixing on collision.
+  local wanted = event.tags and event.tags.etech_tp_name
+  if type(wanted) == "string" and wanted ~= "" then
+    local target, n = wanted, 2
+    while network[target] do
+      target = wanted .. " (" .. n .. ")"
+      n = n + 1
+    end
+    name = target
+  end
   local teleporter_data = {teleporter = entity}
   network[name] = teleporter_data
   script_data.teleporter_map[entity.unit_number] = teleporter_data
@@ -1054,6 +1107,14 @@ local on_teleporter_removed = function(entity)
   end
   clear_teleporter_data(teleporter_data)
   script_data.teleporter_map[entity.unit_number] = nil
+
+  -- Favorites/recents referencing the gone pad would otherwise leak forever.
+  for _, favorites in pairs (script_data.favorites) do
+    favorites[entity.unit_number] = nil
+  end
+  for _, recent in pairs (script_data.recent) do
+    recent[entity.unit_number] = nil
+  end
 
   script_data.to_be_removed[entity.unit_number] = true
   refresh_teleporter_frames()
@@ -1087,7 +1148,9 @@ local on_gui_action = function(event)
   if not player_script_data then return end
   local action = player_script_data[element.index]
   if action then
-    gui_actions[action.type](event, action)
+    local handler = gui_actions[action.type]
+    if not handler then return end
+    handler(event, action)
     return true
   end
 end
@@ -1269,7 +1332,7 @@ local check_pad_alerts = function()
   end
   for force_name, network in pairs (script_data.networks) do
     local force = game.forces[force_name]
-    if force and force.valid then
+    if force and force.valid and next(network) and #force.connected_players > 0 then
       for name, teleporter_data in pairs (network) do
         local entity = teleporter_data.teleporter
         local eei = teleporter_data.energy_interface
@@ -1289,6 +1352,17 @@ local on_surface_deleted = function(event)
     if surface_index == event.surface_index then
       script_data.surface_filter[player_index] = nil
     end
+  end
+  -- Return slots pointing at the deleted surface were only pruned lazily on
+  -- the next GUI open; drop them eagerly.
+  for player_index, rets in pairs (script_data.returns) do
+    local kept = {}
+    for _, ret in ipairs(rets) do
+      if ret.surface_index ~= event.surface_index then
+        kept[#kept + 1] = ret
+      end
+    end
+    script_data.returns[player_index] = (#kept > 0) and kept or nil
   end
 end
 
@@ -1320,6 +1394,43 @@ local on_forces_merged = function(event)
     end
   end
   refresh_teleporter_frames()
+end
+
+-- The current display name of a placed pad (flying text first, network scan
+-- as fallback when another mod wiped the renderings).
+local get_pad_name = function(entity)
+  local teleporter_data = script_data.teleporter_map[entity.unit_number]
+  if not teleporter_data then return end
+  local flying_text = teleporter_data.flying_text
+  if flying_text and flying_text.valid then return flying_text.text end
+  local network = script_data.networks[entity.force.name]
+  if network then
+    for name, data in pairs (network) do
+      if data == teleporter_data then return name end
+    end
+  end
+end
+
+-- Write each pad's name into the blueprint as an entity tag, so pasted pads
+-- keep their names (read back in on_built_entity via event.tags).
+local on_player_setup_blueprint = function(event)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  local mapping = event.mapping.get()
+  if not next(mapping) then return end
+  local bp = player.blueprint_to_setup
+  if not (bp and bp.valid_for_read) then
+    bp = player.cursor_stack
+  end
+  if not (bp and bp.valid_for_read and bp.is_blueprint) then return end
+  for index, entity in pairs (mapping) do
+    if entity.valid and entity.name == teleporter_name then
+      local name = get_pad_name(entity)
+      if name then
+        bp.set_blueprint_entity_tag(index, "etech_tp_name", name)
+      end
+    end
+  end
 end
 
 local on_trigger_created_entity = function(event)
@@ -1456,7 +1567,8 @@ teleporters.events =
   [defines.events.on_lua_shortcut] = on_lua_shortcut,
   [names.hotkeys.open_remote] = on_remote_hotkey,
 
-  [defines.events.on_trigger_created_entity] = on_trigger_created_entity
+  [defines.events.on_trigger_created_entity] = on_trigger_created_entity,
+  [defines.events.on_player_setup_blueprint] = on_player_setup_blueprint,
 }
 
 teleporters.on_nth_tick =
@@ -1483,12 +1595,26 @@ teleporters.on_configuration_changed = function()
   stored.remote_open = stored.remote_open or {}
   stored.returns = stored.returns or {}
   stored.favorites = stored.favorites or {}
+  stored.recent = stored.recent or {}
   stored.sort_mode = stored.sort_mode or {}
   stored.frame_locations = stored.frame_locations or {}
+  stored.search_text = stored.search_text or {}
   -- 0.10.0: returns went from a single slot to a newest-first array.
   for player_index, ret in pairs (stored.returns) do
     if ret.surface_index then
       stored.returns[player_index] = {ret}
+    end
+  end
+  -- 0.19.0: favorites/recents rekeyed player.name -> player.index (name
+  -- keys broke on player rename). Unknown names are dropped.
+  for _, key in ipairs({"favorites", "recent"}) do
+    local per_player = stored[key]
+    for k, v in pairs (per_player) do
+      if type(k) == "string" then
+        local p = game.get_player(k)
+        if p then per_player[p.index] = per_player[p.index] or v end
+        per_player[k] = nil
+      end
     end
   end
   script_data = stored

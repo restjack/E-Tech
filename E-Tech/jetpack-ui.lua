@@ -139,6 +139,18 @@ local sync = function()
   local ok, fuels = pcall(remote.call, "jetpack", "get_current_fuels")
   if not (ok and fuels) then return end
 
+  -- Nobody airborne (the overwhelmingly common pass): close any leftover
+  -- windows and skip the per-player is_jetpacking remote calls entirely.
+  if not next(fuels) then
+    for player_index, state in pairs (script_data.players) do
+      if state.gui then
+        local player = game.get_player(player_index)
+        if player and player.valid then close_window(player, state) end
+      end
+    end
+    return
+  end
+
   for _, player in pairs (game.connected_players) do
     local state = get_state(player.index)
     local character = player.character

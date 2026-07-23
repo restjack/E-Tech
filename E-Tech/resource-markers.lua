@@ -26,6 +26,13 @@ local script_data =
   buckets = {},
   -- tag_map[tag_number] = {force_name, surface_index, resource, patch_id}
   tag_map = {},
+  -- pending[force_name|surface_index|resource|patch_id] = true: patches
+  -- whose add_chart_tag failed (centroid + fallback both on uncharted
+  -- ground). Retried periodically until a tag sticks.
+  pending = {},
+  -- rescan_queue: array of {force_name, surface_index, cx, cy} chunks still
+  -- to scan for a running background rebuild (see start_rescan).
+  rescan_queue = nil,
 }
 
 -- True while we create/destroy our own tags so on_chart_tag_removed can
@@ -144,9 +151,16 @@ local retag = function(force, surface, resource_name, bucket, patch_id)
     tag = force.add_chart_tag(surface, {position = {x = first_cell.sum_x / first_cell.count, y = first_cell.sum_y / first_cell.count}, icon = icon, text = text})
   end
   suppress = false
+  local pending_key = force.name .. "|" .. surface.index .. "|" .. resource_name .. "|" .. patch_id
   if tag then
     patch.tag = tag
     script_data.tag_map[tag.tag_number] = {force_name = force.name, surface_index = surface.index, resource = resource_name, patch_id = patch_id}
+    if script_data.pending then script_data.pending[pending_key] = nil end
+  else
+    -- Both spots uncharted right now — queue for a periodic retry instead of
+    -- leaving the patch permanently tagless.
+    script_data.pending = script_data.pending or {}
+    script_data.pending[pending_key] = true
   end
 end
 
@@ -260,7 +274,28 @@ local scan_chunk = function(force, surface, cx, cy, area, only_name)
   end
 end
 
-local full_rescan = function()
+-- Patches currently without a marker for a reason other than the player
+-- muting them (below the min-size setting, or a failed tag placement).
+local count_hidden_patches = function()
+  local hidden = 0
+  for _, fb in pairs (script_data.buckets) do
+    for _, sb in pairs (fb) do
+      for _, bucket in pairs (sb) do
+        for _, patch in pairs (bucket.patches) do
+          if not patch.muted and not (patch.tag and patch.tag.valid) then
+            hidden = hidden + 1
+          end
+        end
+      end
+    end
+  end
+  return hidden
+end
+
+-- Wipe all bookkeeping/tags and queue every charted chunk for a background
+-- rescan (processed a batch at a time in on_nth_tick — the old synchronous
+-- version stalled multi-second on big maps). Returns the queued chunk count.
+local start_rescan = function()
   for _, fb in pairs (script_data.buckets) do
     for _, sb in pairs (fb) do
       for _, bucket in pairs (sb) do
@@ -272,28 +307,85 @@ local full_rescan = function()
   end
   script_data.buckets = {}
   script_data.tag_map = {}
+  script_data.pending = {}
 
-  local chunks = 0
+  local queue = {}
   for _, force in pairs (game.forces) do
     if #force.players > 0 then
+      local force_name = force.name
       for _, surface in pairs (game.surfaces) do
+        local surface_index = surface.index
         for chunk in surface.get_chunks() do
           if force.is_chunk_charted(surface, chunk) then
-            scan_chunk(force, surface, chunk.x, chunk.y, chunk.area)
-            chunks = chunks + 1
+            queue[#queue + 1] = {force_name, surface_index, chunk.x, chunk.y}
           end
         end
       end
     end
   end
-  return chunks
+  script_data.rescan_queue = (#queue > 0) and queue or nil
+  script_data.rescan_total = #queue
+  if #queue == 0 then
+    game.print({"etech-rm-rebuilt", 0, 0})
+  end
+  return #queue
+end
+
+local RESCAN_BATCH = 20
+
+-- Background worker for start_rescan: a batch of queued chunks per pass,
+-- done-message when the queue drains.
+local process_rescan_queue = function()
+  local queue = script_data.rescan_queue
+  if not queue then return end
+  local n = #queue
+  for _ = 1, math.min(RESCAN_BATCH, n) do
+    local entry = queue[n]
+    queue[n] = nil
+    n = n - 1
+    local force = game.forces[entry[1]]
+    local surface = game.surfaces[entry[2]]
+    if force and force.valid and surface and surface.valid then
+      local cx, cy = entry[3], entry[4]
+      local area = {{cx * 32, cy * 32}, {cx * 32 + 32, cy * 32 + 32}}
+      scan_chunk(force, surface, cx, cy, area)
+    end
+  end
+  if n == 0 then
+    script_data.rescan_queue = nil
+    game.print({"etech-rm-rebuilt", script_data.rescan_total or 0, count_hidden_patches()})
+    script_data.rescan_total = nil
+  end
+end
+
+-- Retry patches whose tag placement failed (see retag) — the ground under
+-- the centroid may have been charted since.
+local process_pending = function()
+  local pending = script_data.pending
+  if not (pending and next(pending)) then return end
+  for key in pairs (pending) do
+    local force_name, surface_index, resource, patch_id = key:match("^(.-)|(%d+)|(.-)|(%d+)$")
+    pending[key] = nil
+    if force_name then
+      local force = game.forces[force_name]
+      local surface = game.surfaces[tonumber(surface_index)]
+      local fb = script_data.buckets[force_name]
+      local sb = fb and fb[tonumber(surface_index)]
+      local bucket = sb and sb[resource]
+      if force and force.valid and surface and surface.valid and bucket then
+        retag(force, surface, resource, bucket, tonumber(patch_id))
+      end
+    end
+  end
 end
 
 local rebuild_command = function(command)
   local player = command.player_index and game.get_player(command.player_index)
-  local chunks = full_rescan()
-  local msg = {"etech-rm-rebuilt", chunks}
-  if player and player.valid then player.print(msg) else game.print(msg) end
+  local queued = start_rescan()
+  if queued > 0 then
+    local msg = {"etech-rm-rebuild-started", queued}
+    if player and player.valid then player.print(msg) else game.print(msg) end
+  end
 end
 
 -- Legacy cleanup: other resource-marker mods (e.g. Resource Map Label
@@ -438,11 +530,12 @@ local on_forces_merged = function(event)
   -- The engine transfers the source force's chart tags to the destination
   -- force on merge. Dropping only the bookkeeping would leave those tags
   -- orphaned on the map and the next scan would add duplicates next to
-  -- them. full_rescan destroys every tag we track (including the
-  -- transferred ones — the references stay valid across the merge) and
-  -- rebuilds one marker per patch for the merged force. Muted patches
+  -- them. start_rescan destroys every tag we track upfront (including the
+  -- transferred ones — the references stay valid across the merge; this
+  -- also covers merging into a currently playerless force) and rebuilds one
+  -- marker per patch for the merged force in the background. Muted patches
   -- reset, same as /etech-markers-rebuild.
-  full_rescan()
+  start_rescan()
 end
 
 local markers = {}
@@ -471,13 +564,19 @@ local LEGACY_MARKER_MODS =
   "resourceMarker",
 }
 
+markers.on_nth_tick =
+{
+  [2] = process_rescan_queue,
+  [907] = process_pending,
+}
+
 markers.on_init = function()
   storage.etech_markers = storage.etech_markers or script_data
   local removed = clean_legacy()
   if removed > 0 then
     game.print({"etech-rm-legacy-removed", removed})
   end
-  full_rescan()
+  start_rescan()
 end
 
 markers.on_load = function()
@@ -487,16 +586,17 @@ end
 markers.on_configuration_changed = function(data)
   if not storage.etech_markers then
     -- toggle turned on mid-save: sweep other mods' leftovers, then
-    -- backfill everything already charted
+    -- backfill everything already charted (in the background)
     storage.etech_markers = script_data
     local removed = clean_legacy()
     if removed > 0 then
       game.print({"etech-rm-legacy-removed", removed})
     end
-    full_rescan()
+    start_rescan()
     return
   end
   script_data = storage.etech_markers
+  script_data.pending = script_data.pending or {}
 
   -- a known marker mod was just removed: sweep the tags it left behind
   local mod_changes = data and data.mod_changes
