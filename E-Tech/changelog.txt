@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.19.4
+Date: 2026-07-21
+  Changes:
+    - Factory fluid outlet: idle until a fluid is picked. The lock-onto-contents
+      fallback is gone - a freshly placed outlet no longer grabs whatever interior
+      fluid it happens to find first.
+---------------------------------------------------------------------------------------------------
 Version: 0.19.3
 Date: 2026-07-21
   Gui:

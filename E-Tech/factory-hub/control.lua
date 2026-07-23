@@ -1115,19 +1115,21 @@ local function pass_for_fluid_outlet(record)
     local device = record.entity
     -- 2.1: LuaEntity.fluidbox is gone; capacity/removal go through
     -- get_fluid_capacity / extract_fluid directly on the entity.
-    local capacity = device.get_fluid_capacity(1)
-    -- Which fluid to pull: the panel filter wins; without one the outlet
-    -- locks onto whatever it already holds (first interior fluid found
-    -- otherwise).
+    -- NO pick = NO pulling (Eli's call: never grab a random fluid).
     local want = record.fluid_filter
+    if not want then
+        note_moved(record, 0)
+        return
+    end
+    local capacity = device.get_fluid_capacity(1)
     local current_name, current_amount = device_fluid(device)
     local moved = 0
 
-    -- Filter changed while holding a different fluid: flush the old fluid
-    -- back into interior tanks that hold it, then start pulling the
-    -- filtered one. If nothing inside can take it, wait (the player can
-    -- also just pump/empty it out).
-    if want and current_name and current_name ~= want then
+    -- Pick changed while holding a different fluid: flush the old fluid
+    -- back into interior tanks that hold it, then start pulling the picked
+    -- one. If nothing inside can take it, wait (the player can also just
+    -- pump/empty it out).
+    if current_name and current_name ~= want then
         moved = moved + push_fluid_to_tanks(record, device, current_name, current_amount)
         current_name, current_amount = device_fluid(device)
         if current_name and current_name ~= want then
@@ -1141,12 +1143,11 @@ local function pass_for_fluid_outlet(record)
         note_moved(record, math.floor(moved))
         return
     end
-    local target = want or current_name
     for _, tank in pairs(reachable_tanks(record)) do
         if room < 1 then break end
         if tank.valid then
             local name, amount = device_fluid(tank)
-            if name and amount and amount >= 1 and (target == nil or name == target) then
+            if name == want and amount and amount >= 1 then
                 local take = math.min(room, amount)
                 local removed = tank.extract_fluid{name = name, amount = take}
                 if removed > 0 then
@@ -1156,7 +1157,6 @@ local function pass_for_fluid_outlet(record)
                         tank.insert_fluid{name = name, amount = removed - inserted}
                     end
                     if inserted > 0 then
-                        target = name
                         room = room - inserted
                         moved = moved + inserted
                     end
