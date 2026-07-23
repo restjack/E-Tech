@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.19.5
+Date: 2026-07-21
+  Gui:
+    - Factory fluid outlet: the panel now lists every fluid inside the reachable
+      factories with total amounts (live, refreshed every 2 s while open). Clicking
+      a fluid sets it as the pull pick (click again to stop pulling); the picked one
+      shows highlighted.
+---------------------------------------------------------------------------------------------------
 Version: 0.19.4
 Date: 2026-07-21
   Changes:

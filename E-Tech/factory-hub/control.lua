@@ -1601,8 +1601,64 @@ end
 
 local FLUID_PANEL_NAME = "etech-fluid-panel"
 
--- Small relative panel next to the fluid outlet's tank GUI holding the pull
--- filter (a fluid choose-elem-button). Storage tanks in 2.x open the
+-- Total interior fluid stock the device can reach, per fluid name.
+local function interior_fluids(record)
+    local totals = {}
+    for _, tank in pairs(reachable_tanks(record)) do
+        if tank.valid then
+            for name, amount in pairs(tank.get_fluid_contents()) do
+                totals[name] = (totals[name] or 0) + amount
+            end
+        end
+    end
+    return totals
+end
+
+-- The "what's inside" grid: one button per interior fluid with the total
+-- amount; clicking one sets it as the pull pick.
+local function refresh_fluid_panel(player, record)
+    local panel = player.gui.relative[FLUID_PANEL_NAME]
+    if not panel then return end
+    local inner = panel.inner
+    local picker = inner["etech-fluid-filter"]
+    if picker and picker.valid and picker.elem_value ~= record.fluid_filter then
+        picker.elem_value = record.fluid_filter
+    end
+
+    local scroll = inner.fscroll
+    scroll.clear()
+    local totals = interior_fluids(record)
+    local list = {}
+    for name, amount in pairs(totals) do
+        list[#list + 1] = {name = name, amount = amount}
+    end
+    if #list == 0 then
+        scroll.add {type = "label", caption = {"gui-etech-hub.fluid-none"}}
+        return
+    end
+    table.sort(list, function(a, b)
+        if a.amount ~= b.amount then return a.amount > b.amount end
+        return a.name < b.name
+    end)
+    local grid = scroll.add {type = "table", name = "fgrid", column_count = 5}
+    for _, t in ipairs(list) do
+        local sprite = "fluid/" .. t.name
+        if not helpers.is_valid_sprite_path(sprite) then sprite = "utility/questionmark" end
+        local btn = grid.add {
+            type = "sprite-button",
+            sprite = sprite,
+            number = math.floor(t.amount),
+            style = "slot_button",
+            tooltip = {"gui-etech-hub.fluid-stock-tooltip", t.name, math.floor(t.amount)},
+        }
+        btn.toggled = record.fluid_filter == t.name
+        btn.tags = { etech = "fluid-pick", name = t.name }
+    end
+end
+
+-- Small relative panel next to the fluid outlet's tank GUI: the pull pick
+-- (a fluid choose-elem-button) plus a live view of every fluid inside the
+-- reachable factories with total amounts. Storage tanks in 2.x open the
 -- unified pipe/fluid GUI (relative_gui_type.pipe_gui) and have no filter
 -- slot of their own.
 local function build_fluid_panel(player, record)
@@ -1631,6 +1687,11 @@ local function build_fluid_panel(player, record)
     local btn = inner.add {type = "choose-elem-button", name = "etech-fluid-filter",
         elem_type = "fluid", tooltip = {"gui-etech-hub.fluid-filter-tooltip"}}
     btn.elem_value = record.fluid_filter
+    inner.add {type = "label", name = "stock_label",
+        caption = {"gui-etech-hub.fluid-stock"}}
+    local scroll = inner.add {type = "scroll-pane", name = "fscroll"}
+    scroll.style.maximal_height = 300
+    refresh_fluid_panel(player, record)
 end
 
 -- GUI events ---------------------------------------------------------------------
@@ -1690,6 +1751,8 @@ local function on_gui_elem_changed(event)
     if not record then return end
     if event.element.name == "etech-fluid-filter" then
         record.fluid_filter = event.element.elem_value
+        local player = game.get_player(event.player_index)
+        if player then refresh_fluid_panel(player, record) end
         return
     end
     local slot = event.element.name:match("^etech%-hub%-filter%-(%d+)$")
@@ -1736,6 +1799,13 @@ local function on_gui_click(event)
     local player = game.get_player(event.player_index)
     local record = open_record(event.player_index)
     if not (player and record) then return end
+
+    if tags.etech == "fluid-pick" then
+        -- clicking a stock button toggles it as the pull pick
+        record.fluid_filter = (record.fluid_filter ~= tags.name) and tags.name or nil
+        refresh_fluid_panel(player, record)
+        return
+    end
 
     if tags.etech == "item" then
         if event.button == defines.mouse_button_type.right then
@@ -1869,6 +1939,8 @@ local function refresh_open_guis()
             if record then
                 if record.kind == "outlet" then
                     refresh_grid(player, record)
+                elseif record.kind == "fluid-outlet" then
+                    refresh_fluid_panel(player, record)
                 else
                     refresh_inlet_panel(player, record)
                 end
