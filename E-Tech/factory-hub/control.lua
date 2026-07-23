@@ -1082,8 +1082,9 @@ end
 
 local function pass_for_fluid_outlet(record)
     local device = record.entity
-    local fluidbox = device.fluidbox
-    local capacity = fluidbox.get_capacity(1)
+    -- 2.1: LuaEntity.fluidbox is gone; capacity/removal go through
+    -- get_fluid_capacity / extract_fluid directly on the entity.
+    local capacity = device.get_fluid_capacity(1)
     local current_name, current_amount = device_fluid(device)
     local room = capacity - (current_amount or 0)
     if room < 1 then return end
@@ -1094,7 +1095,7 @@ local function pass_for_fluid_outlet(record)
             local name, amount = device_fluid(tank)
             if name and amount and amount >= 1 and (current_name == nil or name == current_name) then
                 local take = math.min(room, amount)
-                local removed = tank.remove_fluid{name = name, amount = take}
+                local removed = tank.extract_fluid{name = name, amount = take}
                 if removed > 0 then
                     local inserted = device.insert_fluid{name = name, amount = removed}
                     -- overfill safety: give back what didn't fit
@@ -1126,12 +1127,12 @@ local function pass_for_fluid_inlet(record)
         if tank.valid then
             local tank_fluid, tank_amount = device_fluid(tank)
             if tank_fluid == name then
-                local room = tank.fluidbox.get_capacity(1) - (tank_amount or 0)
+                local room = tank.get_fluid_capacity(1) - (tank_amount or 0)
                 if room >= 1 then
                     local give = math.min(room, amount)
                     local inserted = tank.insert_fluid{name = name, amount = give}
                     if inserted > 0 then
-                        device.remove_fluid{name = name, amount = inserted}
+                        device.extract_fluid{name = name, amount = inserted}
                         amount = amount - inserted
                         moved = moved + inserted
                     end
