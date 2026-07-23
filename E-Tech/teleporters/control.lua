@@ -57,18 +57,11 @@ local RETURN_SLOTS = 3
 -- sound plays at the destination BEFORE the player arrives, so it's
 -- inaudible cross-surface — this one follows the player.
 local play_teleport_sound = function(player)
-  player.play_sound{path = "etech-teleporter-sound", volume_modifier = settings.global["etech-teleporter-sound-volume"].value}
+  player.play_sound{path = "etech-teleporter-sound", volume_modifier = settings.get_player_settings(player)["etech-teleporter-sound-volume"].value}
 end
 
--- Pad preview size comes from the etech-teleporter-preview-size map setting
--- (read per GUI build in make_teleporter_gui).
-
-local debug_print = false
-local print = function(string)
-  if not debug_print then return end
-  game.print(string)
-  log(string)
-end
+-- Pad preview size comes from the etech-teleporter-preview-size per-player
+-- setting (read per GUI build in make_teleporter_gui).
 
 local create_flash = function(surface, position)
   surface.create_entity{name = names.explosions.flash, position = position}
@@ -324,12 +317,9 @@ local make_teleporter_gui = function(player, source)
     location = teleporter_frame.location
     script_data.frame_locations[player.index] = location
     script_data.teleporter_frames[player.index] = nil
-    print("Frame already exists")
     close_gui(teleporter_frame)
     player.opened = nil
   end
-
-  print("Making new frame")
 
   -- source = the pad the player is standing on, or nil when opened via the
   -- wireless-remote shortcut.
@@ -349,7 +339,7 @@ local make_teleporter_gui = function(player, source)
   -- for remote use).
   local here_surface = source and source.surface or player.surface
 
-  local preview_size = settings.global["etech-teleporter-preview-size"].value
+  local preview_size = settings.get_player_settings(player)["etech-teleporter-preview-size"].value
 
   -- No live frame (e.g. reopening after a teleport closed it): fall back to
   -- the last saved position, unless it's off-screen (resolution changed).
@@ -407,7 +397,7 @@ local make_teleporter_gui = function(player, source)
   end
 
   local cross_surface = settings.global["etech-teleporter-cross-surface"].value
-  local hide_platforms = settings.global["etech-teleporter-hide-platforms"].value
+  local hide_platforms = settings.get_player_settings(player)["etech-teleporter-hide-platforms"].value
 
   -- Surfaces that actually have pads, for the filter dropdown.
   local surface_indices = {}
@@ -680,7 +670,6 @@ local refresh_teleporter_frames = function()
     local player = players[player_index]
     local frame = get_teleporter_frame(player)
     if frame then
-      print("Refreshing frame")
       make_teleporter_gui(player, source)
     end
   end
@@ -693,17 +682,14 @@ local refresh_teleporter_frames = function()
 end
 
 local check_player_linked_teleporter = function(player)
-  print("Checking player linked teleporter")
   if script_data.remote_open[player.index] then
     make_teleporter_gui(player, nil)
     return
   end
   local source = script_data.player_linked_teleporter[player.index]
   if source and source.valid then
-    print("Linked teleporter exists...")
     make_teleporter_gui(player, source)
   else
-    print("Unlinking")
     unlink_teleporter(player)
   end
 end

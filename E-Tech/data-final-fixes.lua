@@ -12,6 +12,12 @@ local vr = require("vanilla-recipes")
 
 local function elog(msg) log("[E-Tech] " .. msg) end
 
+-- Per-recipe decision lines are debug-only (etech-debug-log startup toggle) -
+-- on a big modpack they were ~50 log lines every load. Summaries and
+-- warnings still use elog unconditionally.
+local debug_log = settings.startup["etech-debug-log"].value
+local function dlog(msg) if debug_log then elog(msg) end end
+
 -- ---------------------------------------------------------------------------
 -- 1. Vanilla recipe restore (only when AAI Industry is active)
 -- ---------------------------------------------------------------------------
@@ -31,11 +37,18 @@ if mods["aai-industry"] then
   if aai_glass_name then MARKERS[aai_glass_name] = true else MARKERS["glass"] = true end
   if aai_sand_name  then MARKERS[aai_sand_name]  = true else MARKERS["sand"]  = true end
 
-  -- Order-independent (type,name,amount) key for an ingredient/result list.
+  -- Order-independent (type,name,amount[,temperature]) key for an
+  -- ingredient/result list. Fluid temperature bounds are part of the key so
+  -- two recipes that differ only in fluid temperature (e.g. a mod tightening
+  -- an acid's range) don't false-match.
   local function list_key(list)
     local parts = {}
     for _, e in pairs(list or {}) do
-      parts[#parts + 1] = (e.type or "item") .. ":" .. e.name .. ":" .. tostring(e.amount)
+      local key = (e.type or "item") .. ":" .. e.name .. ":" .. tostring(e.amount)
+      if e.temperature then key = key .. ":t" .. tostring(e.temperature) end
+      if e.minimum_temperature then key = key .. ":tmin" .. tostring(e.minimum_temperature) end
+      if e.maximum_temperature then key = key .. ":tmax" .. tostring(e.maximum_temperature) end
+      parts[#parts + 1] = key
     end
     table.sort(parts)
     return table.concat(parts, "|")
@@ -55,6 +68,11 @@ if mods["aai-industry"] then
     return false
   end
 
+  -- NOTE: entries in vanilla-recipes.lua without an `aai` fingerprint are
+  -- still covered - every AAI version of those recipes (chemical-plant,
+  -- oil-refinery, lab, small-lamp, gate, laser-turret, personal-laser-
+  -- defense...) contains a marker item (glass/electric-motor/motor), so
+  -- contains_marker matches them. Verified against AAI-CHANGE-INVENTORY.md.
   local function looks_aai(recipe, entry)
     if contains_marker(recipe.ingredients) then return true end
     local aai = entry.aai
@@ -91,10 +109,10 @@ if mods["aai-industry"] then
         recipe.category = nil
       end
       reverted = reverted + 1
-      elog("restored vanilla recipe: " .. entry.name)
+      dlog("restored vanilla recipe: " .. entry.name)
     else
       skipped = skipped + 1
-      elog("SKIPPED " .. entry.name .. " (doesn't match AAI's version - another mod owns it now)")
+      dlog("SKIPPED " .. entry.name .. " (doesn't match AAI's version - another mod owns it now)")
     end
   end
 
@@ -115,7 +133,7 @@ if mods["aai-industry"] then
       recipe.categories = nil
       recipe.category = nil -- default "crafting" = hand-craftable
       reverted = reverted + 1
-      elog("restored hand-crafting: " .. name)
+      dlog("restored hand-crafting: " .. name)
     end
   end
 
@@ -126,15 +144,30 @@ if mods["aai-industry"] then
       local recipe = data.raw.recipe[entry.name]
       if recipe and (entry.contains == nil or contains_name(recipe.ingredients, entry.contains)) then
         local k = entry.k2
-        if k.ingredients then recipe.ingredients = table.deepcopy(k.ingredients) end
-        if k.results then recipe.results = table.deepcopy(k.results) end
-        if k.energy_required then recipe.energy_required = k.energy_required end
-        if k.categories then
-          recipe.categories = table.deepcopy(k.categories)
-          recipe.category = nil
+        -- Idempotency/ownership guard (0.19.0): if the recipe already
+        -- matches the K2 target, nothing to do (and no misleading
+        -- "restored" log). Entries without a `contains` fingerprint used to
+        -- overwrite unconditionally - they still apply, but a recipe that
+        -- matches NEITHER the K2 target nor an AAI marker is flagged, since
+        -- that usually means a third mod owns it now.
+        local already = (not k.ingredients or list_key(recipe.ingredients) == list_key(k.ingredients))
+                    and (not k.results or list_key(recipe.results) == list_key(k.results))
+        if already then
+          dlog("K2 recipe already correct: " .. entry.name)
+        else
+          if entry.contains == nil and not contains_marker(recipe.ingredients) then
+            elog("WARNING: K2 restore of " .. entry.name .. " overwrites a recipe that matches neither AAI nor K2 - a third mod may own it")
+          end
+          if k.ingredients then recipe.ingredients = table.deepcopy(k.ingredients) end
+          if k.results then recipe.results = table.deepcopy(k.results) end
+          if k.energy_required then recipe.energy_required = k.energy_required end
+          if k.categories then
+            recipe.categories = table.deepcopy(k.categories)
+            recipe.category = nil
+          end
+          reverted = reverted + 1
+          dlog("restored K2 recipe: " .. entry.name)
         end
-        reverted = reverted + 1
-        elog("restored K2 recipe: " .. entry.name)
       end
     end
   end
@@ -179,14 +212,14 @@ if mods["aai-industry"] then
     end
     for name, recipe in pairs(data.raw.recipe) do
       if swap_motor_for_gears(recipe) then
-        elog("motor retired: swapped motor -> iron-gear-wheel in recipe " .. name)
+        dlog("motor retired: swapped motor -> iron-gear-wheel in recipe " .. name)
       end
     end
     for name, tech in pairs(data.raw.technology) do
       local trigger = tech.research_trigger
       if trigger and trigger.type == "craft-item" and trigger.item == "motor" then
         trigger.item = "iron-gear-wheel"
-        elog("motor retired: research trigger of " .. name .. " now counts iron gear wheels")
+        dlog("motor retired: research trigger of " .. name .. " now counts iron gear wheels")
       end
     end
     data.raw.recipe["motor"].hidden = true
@@ -203,19 +236,25 @@ if mods["aai-industry"] then
     elog("hid AAI's electronic-circuit-wood alternate recipe")
   end
 
-  -- Cosmetic restore: AAI renames/reskins vanilla engine-unit as
-  -- "Multi-cylinder engine" and electric-engine-unit as a big motor. Restore
-  -- the vanilla icons (names are restored via this mod's locale file, which
-  -- wins because E-Tech loads after AAI).
-  if data.raw.item["engine-unit"] then
-    data.raw.item["engine-unit"].icon = "__base__/graphics/icons/engine-unit.png"
-    data.raw.item["engine-unit"].icon_size = 64
-    elog("restored vanilla engine-unit icon")
-  end
-  if data.raw.item["electric-engine-unit"] then
-    data.raw.item["electric-engine-unit"].icon = "__base__/graphics/icons/electric-engine-unit.png"
-    data.raw.item["electric-engine-unit"].icon_size = 64
-    elog("restored vanilla electric-engine-unit icon")
+  -- Cosmetic restore (toggleable since 0.19.0): AAI renames/reskins vanilla
+  -- engine-unit as "Multi-cylinder engine" and electric-engine-unit as a big
+  -- motor. Names are restored by pointing localised_name at this mod's own
+  -- [etech-name] locale keys (a plain locale override can't be gated by a
+  -- setting), icons by reassigning the vanilla files.
+  if settings.startup["etech-restore-engine-cosmetics"].value then
+    for _, name in ipairs({"engine-unit", "electric-engine-unit"}) do
+      local item = data.raw.item[name]
+      if item then
+        item.icon = "__base__/graphics/icons/" .. name .. ".png"
+        item.icon_size = 64
+        item.localised_name = {"etech-name." .. name}
+        dlog("restored vanilla " .. name .. " icon and name")
+      end
+      local recipe = data.raw.recipe[name]
+      if recipe then
+        recipe.localised_name = {"etech-name." .. name}
+      end
+    end
   end
 
   elog(string.format("vanilla restore done: %d reverted, %d skipped, %d absent", reverted, skipped, absent))

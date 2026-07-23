@@ -145,7 +145,11 @@ local function edit_map_settings(player)
       map_settings.enemy_evolution[k] = v
     end
   end
-  game.forces["enemy"].set_evolution_factor(enemy_evolution.evolution_factor, player.surface)
+  -- Guarded: a total-overhaul pack can remove the enemy force entirely.
+  local enemy_force = game.forces["enemy"]
+  if enemy_force then
+    enemy_force.set_evolution_factor(enemy_evolution.evolution_factor, player.surface)
+  end
   game.map_settings.asteroids.spawning_rate = general.asteroids_spawning_rate
   game.difficulty_settings.spoil_time_modifier = general.spoiling_rate
 

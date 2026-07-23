@@ -15,6 +15,8 @@ local PREFIX = "crash-site-spaceship"
 local FALLBACK_ICON = "__base__/graphics/icons/steel-chest.png"
 local FALLBACK_ICON_SIZE = 64
 
+local debug_log = settings.startup["etech-debug-log"].value
+
 local new_items = {}
 local touched = 0
 
@@ -61,7 +63,9 @@ for _, prototypes in pairs(data.raw) do
         new_items[#new_items + 1] = {
           type = "item",
           name = item_name,
-          localised_name = {"", "Crashed ship part (", name, ")"},
+          -- Localised: "Crashed ship part (<entity name>)", falling back to
+          -- the prototype name when the entity has no locale entry.
+          localised_name = {"etech-crash-part-name", {"?", {"entity-name." .. name}, name}},
           icon = icon,
           icons = icons,
           icon_size = proto.icon_size or FALLBACK_ICON_SIZE,
@@ -71,7 +75,7 @@ for _, prototypes in pairs(data.raw) do
           place_result = name,
         }
         touched = touched + 1
-        log("[E-Tech] crashed-ship part made minable+placeable: '" .. name .. "'")
+        if debug_log then log("[E-Tech] crashed-ship part made minable+placeable: '" .. name .. "'") end
       end
     end
   end

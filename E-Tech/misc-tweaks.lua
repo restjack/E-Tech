@@ -3,6 +3,8 @@
 -- setting. Data stage; no dependency on AAI or K2.
 
 local function elog(msg) log("[E-Tech] " .. msg) end
+local debug_log = settings.startup["etech-debug-log"].value
+local function dlog(msg) if debug_log then elog(msg) end end
 
 -- ---------------------------------------------------------------------------
 -- Quality modules in asteroid crushing / reprocessing
@@ -11,14 +13,25 @@ local function elog(msg) log("[E-Tech] " .. msg) end
 -- Flip that on every asteroid crushing/reprocessing recipe (modded ones too).
 -- ---------------------------------------------------------------------------
 if settings.startup["etech-quality-asteroid"].value then
+  -- The name match alone could hit an unrelated modded recipe that merely
+  -- has "asteroid" in its name - when the recipe declares crafting
+  -- categories, require one of them to be crusher-related.
+  local function crusher_category(recipe)
+    if not recipe.categories then return true end
+    for _, c in pairs(recipe.categories) do
+      if c:find("crush") then return true end
+    end
+    return false
+  end
   local n = 0
   for name, recipe in pairs(data.raw.recipe) do
     if name:find("asteroid")
        and (name:find("crushing") or name:find("reprocessing") or name:find("asteroid%-processing"))
-       and recipe.allow_quality == false then
+       and recipe.allow_quality == false
+       and crusher_category(recipe) then
       recipe.allow_quality = true
       n = n + 1
-      elog("allow_quality enabled on recipe: " .. name)
+      dlog("allow_quality enabled on recipe: " .. name)
     end
   end
   elog("asteroid recipes quality-enabled: " .. n)
@@ -200,8 +213,9 @@ end
 if settings.startup["etech-quality-module-slots"].value then
   if mods["quality"] then
     -- Appended to tooltips of affected machines so players can see the rule
-    -- in-game without digging through mod settings.
-    local note = "[color=yellow]Quality increases module slots.[/color]"
+    -- in-game without digging through mod settings. Localised key (bare, at
+    -- the top of locale/en/en.cfg).
+    local note = {"etech-quality-slots-note"}
     local function add_note(proto, primary, fallback)
       if proto.localised_description then
         proto.localised_description = {"", proto.localised_description, "\n", note}

@@ -5,6 +5,11 @@
 -- biochamber). Field edits on existing prototypes live in data-final-fixes
 -- and misc-tweaks. Each port is skipped when its original mod is still
 -- enabled so the two never define the same prototype names.
+--
+-- Convention: "is mod X present" checks use `mods[...]` in the data stage
+-- and `script.active_mods[...]` in the control stage - same information,
+-- different API per stage. Keep any new guard in BOTH stages when a feature
+-- spans them.
 
 -- Teleport sound, heard by the teleporting player themselves (the world
 -- flash's sound plays at the destination before arrival, inaudible
@@ -73,8 +78,8 @@ if settings.startup["etech-teleport-shortcut"].value then
       icon_size = 64,
       small_icon = "__base__/graphics/icons/spidertron-remote.png",
       small_icon_size = 64,
-      localised_name = {"", "Teleport to player"},
-      localised_description = {"", "Teleport to another player. One other player online: teleports straight to them. Several: opens a picker."},
+      localised_name = {"etech-tp2p-shortcut-name"},
+      localised_description = {"etech-tp2p-shortcut-description"},
     },
   })
 end

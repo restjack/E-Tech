@@ -178,8 +178,8 @@ local remote_hotkey =
   type = "custom-input",
   name = names.hotkeys.open_remote,
   key_sequence = "SHIFT + T",
-  localised_name = {"", "Open teleporter remote"},
-  localised_description = {"", "Opens the teleporter destination list from anywhere (same as the toolbar shortcut)."},
+  localised_name = {"etech-tp-remote-hotkey-name"},
+  localised_description = {"etech-tp-remote-hotkey-description"},
 }
 
 -- Invisible electric buffer placed on top of each pad by the control stage.

@@ -22,8 +22,6 @@
 -- Deliberately NOT listed:
 --   boiler          - AAI's ingredients are identical to vanilla (only the
 --                     tech gate differs, and we don't touch tech).
---   offshore-pump   - vanilla 2.x values unverified; AAI's version is cheap
---                     and reasonable. Revisit if it bothers anyone.
 --   All AAI-added recipes (motor, glass, burner machines, walls, gates,
 --   industrial-furnace, area-mining-drill, fuel-processor, sand, ...) -
 --   new content stays exactly as AAI made it.
@@ -32,6 +30,19 @@ local M = {}
 
 M.entries = {
   -- ============================ logistics ============================
+  {
+    -- Vanilla values verified against base 2.1 prototypes/recipe.lua
+    -- (0.19.0) - closed the long-standing "unverified" note.
+    name = "offshore-pump",
+    vanilla = { ingredients = {
+      {type="item", name="pipe", amount=3},
+      {type="item", name="iron-gear-wheel", amount=2},
+    }},
+    aai = { ingredients = {
+      {type="item", name="electric-motor", amount=2},
+      {type="item", name="pipe", amount=4},
+    }},
+  },
   {
     name = "transport-belt",
     vanilla = { ingredients = {

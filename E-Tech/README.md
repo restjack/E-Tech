@@ -19,6 +19,8 @@ Everything is a startup setting, and every recipe change is guarded so it never 
 | Pick up & re-place the crashed ship | on | Crash-site spaceship parts become minable and get placement items |
 | Allow all modules in beacons | on | Every beacon accepts every module type, productivity and quality included (modded beacons too). Beacon strength unchanged |
 | Allow quality in asteroid crushing/reprocessing | on | Enables quality on all asteroid crush/reprocess recipes so quality modules in the crusher take effect |
+| Quality adds module slots to all machines | on | Needs the Quality mod. Every machine with at least one module slot gains extra slots at higher quality — assemblers, furnaces, silos, beacons, drills, labs, modded ones included. Affected machines say so in their tooltip. Replaces the retired QualityEffectsFixed mod |
+| Vanilla engine unit names & icons | on | Restores the vanilla names/icons AAI reskins ("Multi-cylinder engine" → Engine unit). Turn off if another mod should own their look |
 | Nuclear fuel stack size | 1 (vanilla) | Set any stack size 1–1000 |
 | Artillery shell stack size | 1 (vanilla) | Set any stack size 1–1000 |
 | Agricultural science pack spoils | on (vanilla) | Turn off to stop agricultural science packs from spoiling |
@@ -36,21 +38,21 @@ Everything is a startup setting, and every recipe change is guarded so it never 
 | Pass-through fusion generators | off | Fusion generators get input-output plasma connections on all four sides so they chain without separate plasma lines. Port of [pass-through-fusion-generator](https://mods.factorio.com/mod/pass-through-fusion-generator) by daahl (MIT); auto-skipped if the original is installed |
 | Colorful biochamber | off | Needs Space Age. Recolors the biochamber's pools, dome and windows per recipe so you can tell what it's making at a glance. Port of [Colorful Biochamber](https://mods.factorio.com/mod/colorful_biochamber) by meifray (public domain); auto-skipped if the original is installed |
 | Copy modules with machine settings | off | Shift-click paste moves modules straight from your inventory (old modules handed back, bot request for what's missing); handles ghosts and remote view; furnaces/labs/beacons cross-pastable. Per-player runtime switch. Port of [Copy Paste Modules](https://mods.factorio.com/mod/CopyPasteModules) by kajacx (MIT); auto-skipped if the original is installed |
+| Factory outlet, inlet & sensor | off | Needs [Factorissimo 3](https://mods.factorio.com/mod/factorissimo-2-notnotmelon). Bridges items between factory interiors and the outside logistic network: the outlet offers interior provider-chest stock to outside bots (with on-demand mode covering logistic requests AND construction ghosts), the inlet distributes into interior requesters (with auto-request), the sensor writes interior totals to the circuit network. GUI panels with per-factory breakdowns, search, filters, priority, circuit enable. Original E-Tech feature |
 
 Always-on compat fix (legacy Cerys only): **Cerys below 4.24.5** redefined K2's nitric acid at 15°C (below the 25°C minimum K2 recipes expect, starving imersite crystal plants) and dropped the fluid's tooltip data. E-Tech restores K2's definition when it detects that overwrite. Cerys 4.24.5 fixed this upstream — with it installed the fix stays dormant and K2's recipe temperature bounds are left intact.
 
-Stack-size and spoilage defaults match vanilla, so installing the mod changes nothing until you move a slider or flip a switch — safe to share with friends who want different settings.
+Stack-size and spoilage defaults match vanilla. A few vanilla-behavior restores are on by default (crashed-ship pickup, all modules in beacons, quality in asteroid crushing, quality module slots, engine-unit cosmetics) — turn those off for a strictly untouched game. Everything that adds content is off by default, so the mod is safe to share with friends who want different settings.
 
 ## What the recipe restore deliberately does NOT do
 
 - No tech/progression edits. Pipes etc. still unlock via AAI's research.
 - No removal of AAI items/machines — with one exception since 0.17.0: **with Krastorio 2 installed**, `motor` ("single-cylinder engine") is retired. Its icon is a vanilla engine-unit lookalike, so recipe pickers showed two near-identical "engines", and with K2's baseline restored nothing essential needs it. Every recipe that still used it gets iron gear wheels instead (burner lab, fuel processor, Mining Drones, …), AAI's craft-50-motors tech trigger counts gears, and the crash-debris motors become gears. Without K2 the motor stays craftable — the first burner assembler needs a hand-made one.
 - `boiler` isn't touched (AAI's ingredients already equal vanilla).
-- `offshore-pump` ingredients left as AAI's (vanilla 2.x values unverified; both versions are cheap).
 
 ## Plays nice with other overhaul mods
 
-Every recipe restore is guarded by a fingerprint check: a recipe is only touched if it still matches AAI's version or contains an AAI-only item (motor, electric-motor, stone-tablet, glass, sand, …). If another mod — Krastorio 2, for example — has already rewritten a recipe into something else, E-Tech detects that and **leaves it alone**. Krastorio 2 and K2 Spaced Out are optional dependencies so E-Tech loads after them and sees the final state. All decisions are logged; search `factorio-current.log` for `[E-Tech]`.
+Every recipe restore is guarded by a fingerprint check: a recipe is only touched if it still matches AAI's version or contains an AAI-only item (motor, electric-motor, stone-tablet, glass, sand, …). If another mod — Krastorio 2, for example — has already rewritten a recipe into something else, E-Tech detects that and **leaves it alone**. Krastorio 2 and K2 Spaced Out are optional dependencies so E-Tech loads after them and sees the final state. Summary lines are always logged; turn on the "Verbose recipe-restore logging" startup setting for a per-recipe decision log, then search `factorio-current.log` for `[E-Tech]`.
 
 ## Known quirks (by design — tech is out of scope)
 
@@ -83,6 +85,7 @@ Every feature is a self-contained module: a startup toggle in `settings.lua`, it
 | Map settings editor | `edit-map-settings/` | `etech-map-settings` | — (GUI only) |
 | Copy modules | `copy-paste-modules.lua` | `etech-copy-paste-modules` | — |
 | Colorful biochamber | `biochamber/` | `etech-colorful-biochamber` | — |
+| Factory outlet/inlet/sensor | `factory-hub/` | `etech-factory-hub` | `storage.etech_factory_hub` |
 
 One-shot save cleanups go in `migrations/` (run once per save), not `on_configuration_changed`. Lua is linted by luacheck in CI (`.luacheckrc`).
 

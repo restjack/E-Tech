@@ -11,11 +11,13 @@
 
 local ALL_EFFECTS = {"speed", "productivity", "consumption", "pollution", "quality"}
 
+local debug_log = settings.startup["etech-debug-log"].value
+
 local count = 0
-for name, beacon in pairs(data.raw["beacon"]) do
+for name, beacon in pairs(data.raw["beacon"] or {}) do
   beacon.allowed_effects = ALL_EFFECTS
   beacon.allowed_module_categories = nil
   count = count + 1
-  log("[E-Tech] opened all modules on beacon: " .. name)
+  if debug_log then log("[E-Tech] opened all modules on beacon: " .. name) end
 end
 log("[E-Tech] beacons opened for all modules: " .. count)

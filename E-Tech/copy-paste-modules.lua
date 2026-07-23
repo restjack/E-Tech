@@ -335,7 +335,14 @@ local function on_entity_settings_pasted(event)
 
 	-- finally, create logistic request in the target entity
 	if #toRemove > 0 or #missing > 0 then
-		assert(target_module_inventory_index ~= nil, "Could not obtain module inventory id")
+		-- E-Tech 0.19.0: was an assert() - a machine type without a module
+		-- inventory (modded edge case) crashed the game mid-paste. Abort the
+		-- module request quietly instead; the settings paste itself already
+		-- happened and stands.
+		if target_module_inventory_index == nil then
+			log("[E-Tech] copy-paste-modules: could not obtain module inventory id for " .. (target.name or "?") .. " - module request skipped")
+			return
+		end
 	end
 	local request = {}
 	local removal = {}
