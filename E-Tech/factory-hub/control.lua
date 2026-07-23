@@ -1080,47 +1080,21 @@ local function device_fluid(entity)
     end
 end
 
-local function pass_for_fluid_outlet(record)
-    local device = record.entity
-    -- 2.1: LuaEntity.fluidbox is gone; capacity/removal go through
-    -- get_fluid_capacity / extract_fluid directly on the entity.
-    local capacity = device.get_fluid_capacity(1)
-    local current_name, current_amount = device_fluid(device)
-    local room = capacity - (current_amount or 0)
-    if room < 1 then return end
-    local moved = 0
-    for _, tank in pairs(reachable_tanks(record)) do
-        if room < 1 then break end
-        if tank.valid then
-            local name, amount = device_fluid(tank)
-            if name and amount and amount >= 1 and (current_name == nil or name == current_name) then
-                local take = math.min(room, amount)
-                local removed = tank.extract_fluid{name = name, amount = take}
-                if removed > 0 then
-                    local inserted = device.insert_fluid{name = name, amount = removed}
-                    -- overfill safety: give back what didn't fit
-                    if inserted < removed then
-                        tank.insert_fluid{name = name, amount = removed - inserted}
-                    end
-                    if inserted > 0 then
-                        current_name = name
-                        room = room - inserted
-                        moved = moved + inserted
-                    end
-                end
-            end
-        end
-    end
-    note_moved(record, math.floor(moved))
+-- The fluid filter the player set in the device's own tank GUI (2.x storage
+-- tanks are filterable). This is how the outlet is told WHICH interior
+-- fluid to pull when factories hold several.
+local function device_fluid_filter(device)
+    local filter = device.get_fluid_filter(1)
+    if not filter then return nil end
+    local f = filter.fluid
+    if type(f) == "string" then return f end
+    return f and f.name or nil
 end
 
-local function pass_for_fluid_inlet(record)
-    local device = record.entity
-    local name, amount = device_fluid(device)
-    if not (name and amount and amount >= 1) then
-        note_moved(record, 0)
-        return
-    end
+-- Push `amount` of `name` from the device into interior tanks that already
+-- hold the same fluid. Shared by the fluid inlet and the outlet's
+-- filter-change flush. Returns the amount moved.
+local function push_fluid_to_tanks(record, device, name, amount)
     local moved = 0
     for _, tank in pairs(reachable_tanks(record)) do
         if amount < 1 then break end
@@ -1140,7 +1114,73 @@ local function pass_for_fluid_inlet(record)
             end
         end
     end
+    return moved
+end
+
+local function pass_for_fluid_outlet(record)
+    local device = record.entity
+    -- 2.1: LuaEntity.fluidbox is gone; capacity/removal go through
+    -- get_fluid_capacity / extract_fluid directly on the entity.
+    local capacity = device.get_fluid_capacity(1)
+    -- Which fluid to pull: the GUI filter wins; without one the outlet
+    -- locks onto whatever it already holds (first interior fluid found
+    -- otherwise).
+    local want = device_fluid_filter(device)
+    local current_name, current_amount = device_fluid(device)
+    local moved = 0
+
+    -- Filter changed while holding a different fluid: flush the old fluid
+    -- back into interior tanks that hold it, then start pulling the
+    -- filtered one. If nothing inside can take it, wait (the player can
+    -- also just pump/empty it out).
+    if want and current_name and current_name ~= want then
+        moved = moved + push_fluid_to_tanks(record, device, current_name, current_amount)
+        current_name, current_amount = device_fluid(device)
+        if current_name and current_name ~= want then
+            note_moved(record, math.floor(moved))
+            return
+        end
+    end
+
+    local room = capacity - (current_amount or 0)
+    if room < 1 then
+        note_moved(record, math.floor(moved))
+        return
+    end
+    local target = want or current_name
+    for _, tank in pairs(reachable_tanks(record)) do
+        if room < 1 then break end
+        if tank.valid then
+            local name, amount = device_fluid(tank)
+            if name and amount and amount >= 1 and (target == nil or name == target) then
+                local take = math.min(room, amount)
+                local removed = tank.extract_fluid{name = name, amount = take}
+                if removed > 0 then
+                    local inserted = device.insert_fluid{name = name, amount = removed}
+                    -- overfill safety: give back what didn't fit
+                    if inserted < removed then
+                        tank.insert_fluid{name = name, amount = removed - inserted}
+                    end
+                    if inserted > 0 then
+                        target = name
+                        room = room - inserted
+                        moved = moved + inserted
+                    end
+                end
+            end
+        end
+    end
     note_moved(record, math.floor(moved))
+end
+
+local function pass_for_fluid_inlet(record)
+    local device = record.entity
+    local name, amount = device_fluid(device)
+    if not (name and amount and amount >= 1) then
+        note_moved(record, 0)
+        return
+    end
+    note_moved(record, math.floor(push_fluid_to_tanks(record, device, name, amount)))
 end
 
 -- Sensor: broadcast interior provider totals as signals ------------------------

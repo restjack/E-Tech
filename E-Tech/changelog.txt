@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.19.2
+Date: 2026-07-21
+  Changes:
+    - Factory fluid outlet: set its tank FILTER (in its own GUI) to choose which
+      interior fluid it pulls - with many different tanks inside the factories the
+      first-found fluid was effectively random. Without a filter it still locks onto
+      whatever it holds. Changing the filter flushes the old fluid back into matching
+      interior tanks before the new one is pulled.
+---------------------------------------------------------------------------------------------------
 Version: 0.19.1
 Date: 2026-07-21
   Bugfixes:
