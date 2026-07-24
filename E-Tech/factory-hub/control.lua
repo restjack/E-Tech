@@ -353,6 +353,13 @@ local function provider_mode(mode)
     return mode == "active-provider" or mode == "passive-provider"
 end
 
+-- Chests eligible as give-back destinations: providers (the usual origin of
+-- pulled items) plus storage chests, always — storage is the semantically
+-- right home for leftovers even when the pull-from-storage toggle is off.
+local function return_mode(mode)
+    return provider_mode(mode) or mode == "storage"
+end
+
 -- Outlets can optionally also drain yellow storage chests (deconstruction
 -- leftovers etc.); the toggle is per outlet.
 local function outlet_source_mode(record)
@@ -373,7 +380,7 @@ local function reachable_chests(record, accept_mode)
     for _, entry in ipairs(ensure_chest_cache(record).entries) do
         if entry.chest.valid and factory_usable(entry.factory)
             and accept_mode(entry.mode) then
-            out[#out + 1] = { chest = entry.chest, factory = entry.factory }
+            out[#out + 1] = { chest = entry.chest, factory = entry.factory, mode = entry.mode }
         end
     end
     return out
@@ -455,17 +462,41 @@ end
 
 -- Returned items (overflow, on-demand give-backs, mined-device dumps) must
 -- not scatter into the first chest with a free slot — that fills factory
--- chests with items that never belonged there. Only two acceptable homes:
+-- chests with items that never belonged there. Acceptable homes, in order:
 -- a chest that already holds that exact item (its origin chest wins
--- naturally), then a completely EMPTY chest (nothing to contaminate). If
--- neither exists the item deliberately stays where it is (outlet buffer /
--- mining buffer) rather than mixing into someone else's chest.
+-- naturally), then storage chests — filtered ones matching the item first,
+-- then unfiltered empty, then unfiltered with space (vanilla "leftovers go
+-- to storage" semantics). An empty PROVIDER chest is NOT acceptable: it's
+-- usually a machine output that consumers momentarily drained, and dumping
+-- a foreign item there is exactly the contamination Eli kept finding
+-- (0.19.6). If nothing qualifies the item deliberately stays where it is
+-- (outlet buffer / mining buffer) rather than mixing into someone else's
+-- chest.
+local function storage_filter_name(chest)
+    local filter = chest.storage_filter
+    if not filter then return nil end
+    local name = filter.name or filter
+    if type(name) ~= "string" then name = name.name end
+    return name
+end
+
 local function return_passes(name, quality)
     return {
-        function(chest) return chest.get_item_count({name = name, quality = quality}) > 0 end,
-        function(chest)
-            local inv = chest.get_inventory(defines.inventory.chest)
+        function(entry)
+            return entry.chest.get_item_count({name = name, quality = quality}) > 0
+        end,
+        function(entry)
+            return entry.mode == "storage" and storage_filter_name(entry.chest) == name
+        end,
+        function(entry)
+            if entry.mode ~= "storage" or storage_filter_name(entry.chest) ~= nil then
+                return false
+            end
+            local inv = entry.chest.get_inventory(defines.inventory.chest)
             return inv and inv.is_empty()
+        end,
+        function(entry)
+            return entry.mode == "storage" and storage_filter_name(entry.chest) == nil
         end,
     }
 end
@@ -479,7 +510,7 @@ local function insert_stack_into_chests(chests, stack)
         for _, entry in pairs(chests) do
             if not stack.valid_for_read then return end
             local chest = entry.chest
-            if chest.valid and accept(chest) then
+            if chest.valid and accept(entry) then
                 local inv = chest.get_inventory(defines.inventory.chest)
                 if inv then
                     local inserted = inv.insert(stack)
@@ -502,7 +533,7 @@ local function insert_spec_into_chests(chests, name, quality, count)
             local remaining = count - total
             if remaining <= 0 then return total end
             local chest = entry.chest
-            if chest.valid and accept(chest) then
+            if chest.valid and accept(entry) then
                 local inv = chest.get_inventory(defines.inventory.chest)
                 if inv then
                     total = total + inv.insert({name = name, count = remaining, quality = quality})
@@ -846,7 +877,7 @@ end
 
 -- On-demand: keep only wanted items in the outlet (return the rest to the
 -- factories), then materialize what the network can't already supply.
-local function pull_on_demand(record, hub_inv, chests, set)
+local function pull_on_demand(record, hub_inv, chests, return_chests, set)
     local prof = hub_data().profiling and helpers.create_profiler()
     local wants, network = network_wants(record.entity, record)
     if prof then
@@ -863,7 +894,7 @@ local function pull_on_demand(record, hub_inv, chests, set)
         local excess = count - wanted
         if excess > 0 then
             local name, quality = split_key(key)
-            local inserted = insert_spec_into_chests(chests, name, quality, excess)
+            local inserted = insert_spec_into_chests(return_chests, name, quality, excess)
             if inserted > 0 then
                 hub_inv.remove({name = name, count = inserted, quality = quality})
             end
@@ -932,7 +963,8 @@ local function pull_for_outlet(record)
     end
 
     local set = filter_set(record)
-    note_moved(record, pull_on_demand(record, hub_inv, chests, set))
+    note_moved(record, pull_on_demand(record, hub_inv, chests,
+        reachable_chests(record, return_mode), set))
 end
 
 -- Inlet: distribute into interior requester/buffer chests ---------------------
@@ -1241,7 +1273,7 @@ local function on_mined(event)
 
     local record = hub_data().hubs[entity.unit_number]
         or { entity = entity, kind = kind, filters = { mode = 1, items = {} }, pins = {} }
-    local chests = reachable_chests(record, provider_mode)
+    local chests = reachable_chests(record, return_mode)
     if #chests == 0 then return end
     for i = 1, #buffer do
         local stack = buffer[i]

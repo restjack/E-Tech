@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.19.6
+Date: 2026-07-23
+  Bugfixes:
+    - Factory outlet: returned items (on-demand give-backs, mined-device dumps) no
+      longer land in whatever provider chest happened to be empty - that scattered
+      random items into machine-output chests. Returns now go to a chest already
+      holding the item, then interior storage chests (filtered match first, then
+      unfiltered), and otherwise stay in the outlet buffer.
+---------------------------------------------------------------------------------------------------
 Version: 0.19.5
 Date: 2026-07-21
   Gui:
