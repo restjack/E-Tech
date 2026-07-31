@@ -1,4 +1,40 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.21.0
+Date: 2026-07-30
+  Changes:
+    - Nearly every feature now defaults ON instead of off. A toggle you never
+      knew existed is a feature you never got, and turning something off is one
+      switch, whereas discovering it is not. Thirteen features flipped: uranium
+      bacteria on Gleba, void chest & pipe (and the filtered void chest),
+      FPS-friendly thrusters, pass-through fusion generators, colorful
+      biochamber, copy modules with machine settings, the jetpack fuel HUD, the
+      in-game map settings editor, resource map markers, the factory
+      outlet/inlet/sensor, teleporter pads, and the Factorissimo Factory
+      building Mk4 tier.
+    - This is safe by construction rather than by hope: every port of a
+      standalone mod already disables itself when the original is installed,
+      and every feature that needs Space Age, Factorissimo or Jetpack does
+      nothing at all without them. Nothing new touches a vanilla recipe.
+    - IMPORTANT: this changes nothing for existing saves or servers. A
+      setting's default only applies where that setting has never been written
+      to mod-settings.dat - i.e. fresh installs, and a server that has never
+      loaded the mod. Existing games keep exactly what they had.
+    - Four features stay off, each for a specific reason. Total productivity is
+      a large balance change rather than a convenience. Restoring Krastorio 2's
+      hidden nuclear fuel overrides another mod's deliberate balance call. The
+      teleport-to-player shortcut is experimental and free instant travel
+      changes a lot. Verbose recipe logging is a diagnostic.
+    - One thing to know before ever turning the Mk4 back OFF: it deletes the Mk4
+      buildings, because their prototype no longer exists. The interiors are NOT
+      deleted - Factorissimo only cleans an interior up when its building is
+      mined, which removing a prototype is not - but the building was the only
+      way in, so everything inside becomes unreachable without console commands,
+      and turning the setting back on does not rebuild the buildings. Stranded,
+      not destroyed. Turn it off before building the first Mk4, or leave it on.
+    - Setting descriptions and the README were rewritten to match; several
+      still claimed "off by default".
+
+---------------------------------------------------------------------------------------------------
 Version: 0.20.2
 Date: 2026-07-30
   Features:
