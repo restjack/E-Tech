@@ -299,3 +299,11 @@ if settings.startup["etech-total-productivity"].value then
     require("productivity/data")
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- 7. Factory building Mk4: re-derive research cost and recipe from the tier
+--    below, after every overhaul has rewritten them (see the file's header)
+-- ---------------------------------------------------------------------------
+if settings.startup["etech-factory-mk4"].value and mods["factorissimo-2-notnotmelon"] then
+  require("factory-mk4/data-final-fixes")
+end

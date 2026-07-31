@@ -247,3 +247,283 @@ if settings.startup["etech-quality-module-slots"].value then
     elog("quality module slots setting on but Quality mod not active - skipped")
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- Factorissimo interior roboport: whole-floor logistics + real charging
+-- Absorbs factorissimo-roboport-buff by RandomBruh (Unlicense/public domain),
+-- and adds the charging fix that mod never had.
+--
+-- Factorissimo builds "factory-construction-roboport" as a deepcopy of the
+-- vanilla roboport shrunk to 2x2, so it inherits vanilla's 4 charging pads -
+-- and its vector_downscale() halves the pad offsets to ~0.75 tiles. Stock it
+-- also gets logistics_radius 2, robot_slots_count 0, material_slots_count 1,
+-- i.e. it covers almost nothing and holds no bots. Once the radius covers the
+-- whole floor, those 4 pads become the bottleneck: hundreds of logistic bots
+-- queue to charge instead of working. They also charge at half the rate of a
+-- real roboport in this pack: Factorissimo copies vanilla in data.lua, when
+-- charging_energy is the base game's 500 kW, and Krastorio 2 only raises the
+-- vanilla roboport to 1000 kW later in data-updates (updates/base/entities.lua)
+-- - too late for a copy that was already taken.
+--
+-- Runs in data-final-fixes (required from there), so we land after every other
+-- mod's data-updates - which is where the standalone buff mod wrote and lost.
+--
+-- Only the VISIBLE roboport is touched. Factorissimo also builds
+-- "factory-hidden-construction-roboport", a reservoir that tops the factory
+-- network up to 200 free hidden construction robots. Those robots are defined
+-- with energy_per_move/energy_per_tick = nil, so they never charge at all; its
+-- single centre pad, logistics_radius 2 and material_slots_count 0 are
+-- deliberate. Buffing it is a no-op at best, so we leave it alone.
+-- ---------------------------------------------------------------------------
+-- The interior roboport is built at the factory's DOOR (layout.inside_energy,
+-- y = +half+2), not at its centre. On every stock tier that is harmless: a
+-- factory-3 roboport sits at y = +32 and radius 64 reaches y = -32, past the
+-- far wall at -31. A Mk4 is 120 wide - its roboport sits at y = +62 and radius
+-- 64 dies at y = -2, leaving the entire northern half of the floor with no
+-- logistics and no construction coverage. 128 reaches y = -66, clear of the
+-- wall at -61.
+--
+-- Safe for the small tiers too. Factory interiors are 512 tiles apart, so the
+-- farthest this can reach from a cell centre is 190 - nowhere near the 449 at
+-- which the next factory's floor begins - and this prototype only ever exists
+-- inside a factory.
+local MK4_ROBOPORT_REACH = 128
+local function apply_mk4_roboport_reach(rb)
+  if not settings.startup["etech-factory-mk4"].value then return end
+  if not rb then return end
+  if (rb.logistics_radius or 0) < MK4_ROBOPORT_REACH then
+    rb.logistics_radius = MK4_ROBOPORT_REACH
+  end
+  if (rb.construction_radius or 0) < MK4_ROBOPORT_REACH then
+    rb.construction_radius = MK4_ROBOPORT_REACH
+  end
+  -- The engine REFUSES to load a roboport whose logistics_connection_distance
+  -- is below its logistics_radius. Factorissimo ships 64/64, so raising only
+  -- the radius is a hard prototype error, not a warning.
+  if (rb.logistics_connection_distance or 0) < rb.logistics_radius then
+    rb.logistics_connection_distance = rb.logistics_radius
+  end
+  dlog("factory Mk4 on: interior roboport reach raised to " .. MK4_ROBOPORT_REACH
+    .. " so it covers a 120x120 floor from the door")
+end
+
+if settings.startup["etech-factory-roboport"].value then
+  if mods["factorissimo-2-notnotmelon"] then
+    local rb = data.raw.roboport and data.raw.roboport["factory-construction-roboport"]
+    if rb then
+      local pads = settings.startup["etech-factory-roboport-pads"].value
+      local kw = settings.startup["etech-factory-roboport-kw"].value
+      local ring = settings.startup["etech-factory-roboport-pad-radius"].value
+      local stock_pads = rb.charging_station_count
+        or (rb.charging_offsets and #rb.charging_offsets) or 0
+
+      dlog("interior roboport before: logistics_radius=" .. tostring(rb.logistics_radius)
+        .. " robot_slots=" .. tostring(rb.robot_slots_count)
+        .. " material_slots=" .. tostring(rb.material_slots_count)
+        .. " pads=" .. tostring(stock_pads)
+        .. " charging_energy=" .. tostring(rb.charging_energy))
+
+      -- Factorissimo gives the copied roboport a construction-CHEST icon. That
+      -- is invisible while the roboport is just a hidden entity on a factory
+      -- floor, but metered mode puts it in the electric network list, where a
+      -- chest drawing tens of MW reads as nonsense. Point it back at whatever
+      -- the current roboport item uses (so a K2/mod reskin is respected).
+      local roboport_item = data.raw.item["roboport"]
+      if roboport_item and roboport_item.icon then
+        rb.icon = roboport_item.icon
+        rb.icon_size = roboport_item.icon_size
+        rb.icons = nil
+      end
+
+      rb.logistics_radius = settings.startup["etech-factory-roboport-logistics-radius"].value
+      rb.robot_slots_count = settings.startup["etech-factory-roboport-robot-slots"].value
+      rb.material_slots_count = settings.startup["etech-factory-roboport-material-slots"].value
+
+      -- Factorissimo ships logistics_connection_distance = 64, and the engine
+      -- refuses to load a roboport whose connection distance is below its
+      -- logistics radius. The radius setting goes up to 512, so anything above
+      -- 64 was a hard load error until now.
+      if (rb.logistics_connection_distance or 0) < rb.logistics_radius then
+        rb.logistics_connection_distance = rb.logistics_radius
+      end
+
+      -- After the radius setting is applied, never before - and before the K2
+      -- mode-variant loop below, which derives the twins' radii from these.
+      apply_mk4_roboport_reach(rb)
+
+      -- THE ACTUAL CHARGING FIX. Factorissimo swaps this roboport's
+      -- energy_source for {type = "void"} but builds it as a table.deepcopy of
+      -- the vanilla roboport, so it keeps vanilla's recharge_minimum = 40MJ.
+      -- Vanilla can satisfy that from its 100MJ electric buffer; a void source
+      -- has no buffer to accumulate into, so the threshold is never met and the
+      -- roboport never starts charging a robot at all. Symptom: bots pile up on
+      -- the roboport with no recharging animation, and no number of pads or kW
+      -- changes anything. Factorissimo hit this on its hand-built hidden
+      -- roboport and set BOTH energy_usage and recharge_minimum to "1W" there;
+      -- we match that pair. Both are needed: the engine rejects any prototype
+      -- with recharge_minimum < energy_usage ("the roboport will toggle on and
+      -- off every tick"), so dropping recharge_minimum alone fails to load.
+      -- energy_usage is free to lower because a void source draws from no grid.
+      --
+      -- ...except that lowering the threshold turned out NOT to be enough. A
+      -- void source stores no energy, and robot charging is paid out of the
+      -- roboport's stored energy - so a void-powered roboport cannot charge a
+      -- robot at all, at any pad count or per-pad power. Verified in game:
+      -- bots parked on it drain to empty. Every roboport in the pack that does
+      -- charge (vanilla, K2's, mk2/mk3, umr) has an electric source; the only
+      -- void ones are Factorissimo's two, and its hidden roboport serves robots
+      -- defined with zero energy drain, so upstream would never notice.
+      --
+      -- Metered mode (etech-factory-roboport-electric, ON by default) swaps the
+      -- void source for a real electric one. That is what actually makes
+      -- charging work, and it means charging costs grid power - there is no
+      -- free-charging configuration. Factorissimo 3 wires a factory's interior
+      -- pole straight to an outside pole with copper (script/electricity.lua),
+      -- and nested factories chain into their parent, so "the grid" here is the
+      -- same network as the rest of your base at any nesting depth - there is
+      -- no per-factory power budget to blow. usage_priority "secondary-input"
+      -- is what vanilla roboports use: charging is served after primary
+      -- consumers, so an under-supplied grid throttles bot charging instead of
+      -- browning out machines. recharge_minimum stays well under vanilla's 40MJ
+      -- so the roboport resumes charging promptly after a dip rather than
+      -- refilling 40MJ first.
+      local metered = settings.startup["etech-factory-roboport-electric"].value
+      local source_type = rb.energy_source and rb.energy_source.type
+      local void_source = source_type == "void"
+
+      if metered then
+        local input_mw = settings.startup["etech-factory-roboport-input-mw"].value
+        -- Buffer: ~2 s of inflow, with a floor well above a single robot's
+        -- energy capacity (6 MJ for a quality logistic bot here). Too small a
+        -- buffer next to a deliberately low recharge_minimum makes the roboport
+        -- oscillate across the threshold instead of degrading smoothly.
+        local buffer_mj = math.max(50, input_mw * 2)
+        if not void_source then
+          elog("interior roboport energy_source was '" .. tostring(source_type)
+            .. "' (not Factorissimo's void source - another mod changed it);"
+            .. " replacing it anyway because metered mode is on")
+        end
+        rb.energy_source = {
+          type = "electric",
+          usage_priority = "secondary-input",
+          input_flow_limit = input_mw .. "MW",
+          buffer_capacity = buffer_mj .. "MJ",
+        }
+        rb.energy_usage = "50kW"
+        rb.recharge_minimum = "1MJ"
+        elog("interior roboport METERED: electric source, " .. input_mw
+          .. " MW input flow limit, " .. buffer_mj .. " MJ buffer. Charging now"
+          .. " costs real power, and sustained throughput is capped by the flow"
+          .. " limit rather than by pads x kW. A factory with no power pole in"
+          .. " range of it has no supply at all, so its bots will never charge.")
+      elseif void_source then
+        elog("interior roboport left on Factorissimo's VOID energy source"
+          .. " (etech-factory-roboport-electric is off). A void source stores no"
+          .. " energy, and robot charging is paid from stored energy, so robots"
+          .. " will NOT charge inside factories no matter how many pads or how"
+          .. " much per-pad power is configured. Turn the setting on to fix it.")
+        elog("interior roboport energy_usage " .. tostring(rb.energy_usage)
+          .. " / recharge_minimum " .. tostring(rb.recharge_minimum)
+          .. " -> 1W / 1W (void energy source has no buffer to reach the old"
+          .. " threshold, so charging never started)")
+        rb.energy_usage = "1W"
+        rb.recharge_minimum = "1W"
+      end
+
+      -- charging_station_count > 0 makes the engine ignore charging_offsets and
+      -- space the pads evenly on a circle of charging_distance tiles. We leave
+      -- charging_station_count_affected_by_quality as Factorissimo set it
+      -- (true), so higher-quality factories still earn extra pads on top.
+      if pads > 0 then
+        rb.charging_offsets = nil
+        rb.charging_station_count = pads
+        rb.charging_distance = ring
+      end
+
+      if kw > 0 then
+        -- Robot charging is paid out of the roboport's OWN energy source.
+        -- Factorissimo gives this one {type = "void"}, so the power is free.
+        -- If another mod swaps that for an electric source, the real charge
+        -- rate is capped by the buffer refill and raising per-pad power
+        -- achieves nothing - so say so instead of failing quietly.
+        if not metered and not void_source then
+          elog("interior roboport energy_source is '" .. tostring(source_type)
+            .. "', not 'void' - charging at " .. kw
+            .. " kW per pad may be capped by its energy buffer, and its"
+            .. " recharge_minimum was left alone")
+        end
+        rb.charging_energy = kw .. "kW"
+      end
+
+      elog("factorissimo interior roboport: logistics radius " .. rb.logistics_radius
+        .. ", " .. rb.robot_slots_count .. " robot / " .. rb.material_slots_count
+        .. " material slots, "
+        .. (pads > 0 and (stock_pads .. " -> " .. pads .. " charging pads")
+                      or "stock charging pads")
+        .. ", "
+        .. (kw > 0 and (kw .. " kW per pad") or "stock charging power"))
+
+      -- Krastorio 2's roboport mode switch (logistic-only / construction-only)
+      -- is implemented by deep-copying EVERY prototype in data.raw.roboport
+      -- into "<name>-logistic-mode" and "<name>-construction-mode"
+      -- (Krastorio2/prototypes/updates/generate-roboport-variations.lua). That
+      -- runs in data-updates - before this file - so the factory roboport's
+      -- twins are copies of Factorissimo's STOCK prototype: void energy source,
+      -- 4 pads at 500 kW, logistics_radius 3, 0 robot slots. Flipping a factory
+      -- roboport to either mode would swap in that stale copy and silently undo
+      -- everything above, energy source included, so its robots would stop
+      -- charging again with no visible cause.
+      --
+      -- Re-apply the mode-independent fields, then recompute K2's derived radii
+      -- from our new values using their own formulas (ceil(r * 1.275) for
+      -- logistic, ceil(c * 1.25) for construction). This is deliberately
+      -- coupled to K2's implementation: if they change the formulas, the twins
+      -- end up with slightly different radii, not broken ones.
+      for _, mode in ipairs({"logistic", "construction"}) do
+        local twin = data.raw.roboport["factory-construction-roboport-" .. mode .. "-mode"]
+        if twin then
+          twin.energy_source = table.deepcopy(rb.energy_source)
+          twin.energy_usage = rb.energy_usage
+          twin.recharge_minimum = rb.recharge_minimum
+          twin.charging_energy = rb.charging_energy
+          twin.charging_station_count = rb.charging_station_count
+          twin.charging_distance = rb.charging_distance
+          twin.charging_offsets = rb.charging_offsets and table.deepcopy(rb.charging_offsets) or nil
+          twin.robot_slots_count = rb.robot_slots_count
+          twin.material_slots_count = rb.material_slots_count
+          twin.icon = rb.icon
+          twin.icon_size = rb.icon_size
+          twin.icons = nil
+
+          if mode == "logistic" then
+            twin.logistics_radius = math.ceil(rb.logistics_radius * 1.275)
+            twin.logistics_connection_distance = twin.logistics_radius
+            twin.construction_radius = 0
+          else
+            twin.construction_radius = math.ceil((rb.construction_radius or 0) * 1.25)
+            twin.logistics_connection_distance =
+              math.ceil(math.min(rb.logistics_radius * 1.5, twin.construction_radius))
+            twin.logistics_radius = 0
+          end
+
+          dlog("patched K2 mode variant factory-construction-roboport-" .. mode
+            .. "-mode: logistics_radius=" .. tostring(twin.logistics_radius)
+            .. " construction_radius=" .. tostring(twin.construction_radius))
+        end
+      end
+
+      if mods["factorissimo-roboport-buff"] then
+        elog("factorissimo-roboport-buff is still installed - it can be removed, this setting covers everything it did")
+      end
+    else
+      elog("factorissimo interior roboport not found (prototype factory-construction-roboport) - skipped, Factorissimo may have renamed it")
+    end
+  else
+    elog("factorissimo roboport setting on but Factorissimo 3 not active - skipped")
+  end
+elseif settings.startup["etech-factory-mk4"].value and mods["factorissimo-2-notnotmelon"] then
+  -- Mk4 without the roboport buff: the reach fix is still required, otherwise
+  -- half of every Mk4 floor is outside the interior roboport. Nothing else
+  -- from the buff block is applied here.
+  apply_mk4_roboport_reach(data.raw.roboport and data.raw.roboport["factory-construction-roboport"])
+end

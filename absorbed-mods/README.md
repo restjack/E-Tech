@@ -13,6 +13,7 @@ version +1 patch bump), pulled from the live mods folder after the switch.
 | colorful_biochamber_1.1.5.zip | `biochamber/` — etech-colorful-biochamber | Unlicense |
 | CopyPasteModules_0.2.1.zip | `copy-paste-modules.lua` — etech-copy-paste-modules (added in 0.9.0, 2026-07-15) | MIT |
 | QualityEffectsFixed_1.1.2.zip | misc-tweaks.lua — etech-quality-module-slots (added in 0.18.0, 2026-07-21). Clean reimplementation as a blanket rule, NO code reused (original is CC BY-NC-SA); zip kept for provenance only. | CC BY-NC-SA |
+| factorissimo-roboport-buff_1.1.0.zip | misc-tweaks.lua — etech-factory-roboport (added in 0.19.7, 2026-07-29). Unmodified portal build, not a local patch. Reimplemented (no code reused, and none needed — the original is 3 field assignments), moved to data-final-fixes so later mods can't overwrite it, logistics radius made a setting, and the charging-pad/charging-power fix added on top. Only E-Tech feature toggle that defaults ON, since it replaces a mod already in use. | Unlicense |
 
 Full attribution + license texts: `E-Tech/LICENSE-third-party.txt`.
 Other retired zips (swap-replaced, rejected, superseded builds) live in

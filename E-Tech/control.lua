@@ -38,6 +38,14 @@ if settings.startup["etech-factory-hub"].value
   handler.add_lib(require("factory-hub/control"))
 end
 
+-- Factory Mk4: the tier-4 layout is registered with Factorissimo at runtime
+-- (layouts live in its storage, not in data.raw), so the control-stage half is
+-- mandatory whenever the data-stage half loaded.
+if settings.startup["etech-factory-mk4"].value
+  and script.active_mods["factorissimo-2-notnotmelon"] then
+  handler.add_lib(require("factory-mk4/control"))
+end
+
 if settings.startup["etech-resource-markers"].value then
   handler.add_lib(require("resource-markers"))
 end

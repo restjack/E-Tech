@@ -246,6 +246,96 @@ data:extend({
   -- The former factory-hub tuning settings (slots, stacks per item, active
   -- providers only, energy per item, range, nested reach) are fixed values
   -- since 0.17.0 - see factory-hub/data.lua and factory-hub/control.lua.
+  {
+    type = "bool-setting",
+    name = "etech-factory-roboport",
+    setting_type = "startup",
+    default_value = true,
+    order = "bl",
+  },
+  {
+    type = "bool-setting",
+    name = "etech-factory-mk4",
+    setting_type = "startup",
+    default_value = false,
+    order = "bm",
+  },
+
+  ----------------------------------------------------------------------------
+  -- Factorissimo interior roboport tuning (startup, r*)
+  -- Defaults reproduce the absorbed factorissimo-roboport-buff (radius 64,
+  -- 7/7 slots) and add the charging fix it never had. See misc-tweaks.lua.
+  ----------------------------------------------------------------------------
+  {
+    type = "int-setting",
+    name = "etech-factory-roboport-logistics-radius",
+    setting_type = "startup",
+    default_value = 64,
+    minimum_value = 2,
+    maximum_value = 512,
+    order = "ra",
+  },
+  {
+    type = "int-setting",
+    name = "etech-factory-roboport-robot-slots",
+    setting_type = "startup",
+    default_value = 7,
+    minimum_value = 0,
+    maximum_value = 100,
+    order = "rb",
+  },
+  {
+    type = "int-setting",
+    name = "etech-factory-roboport-material-slots",
+    setting_type = "startup",
+    default_value = 7,
+    minimum_value = 1,
+    maximum_value = 100,
+    order = "rc",
+  },
+  {
+    type = "int-setting",
+    name = "etech-factory-roboport-pads",
+    setting_type = "startup",
+    default_value = 16,
+    minimum_value = 0,
+    maximum_value = 512,
+    order = "rd",
+  },
+  {
+    type = "int-setting",
+    name = "etech-factory-roboport-kw",
+    setting_type = "startup",
+    default_value = 4000,
+    minimum_value = 0,
+    maximum_value = 100000,
+    order = "re",
+  },
+  {
+    type = "double-setting",
+    name = "etech-factory-roboport-pad-radius",
+    setting_type = "startup",
+    default_value = 0.75,
+    minimum_value = 0.25,
+    maximum_value = 8,
+    order = "rf",
+  },
+  {
+    type = "bool-setting",
+    name = "etech-factory-roboport-electric",
+    setting_type = "startup",
+    default_value = true,
+    order = "rg",
+  },
+  {
+    type = "int-setting",
+    name = "etech-factory-roboport-input-mw",
+    setting_type = "startup",
+    default_value = 100,
+    minimum_value = 1,
+    maximum_value = 10000,
+    order = "rh",
+  },
 
   ----------------------------------------------------------------------------
   -- Teleport features (startup, c*)

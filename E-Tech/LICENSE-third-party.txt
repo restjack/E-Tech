@@ -94,6 +94,16 @@ ported features below, which keep their original licenses.
     setting renamed etech-cpm-enabled, locale keys renamed etech-cpm-*, two
     unused settings dropped.
 
+11. Factorissimo interior roboport buff (the roboport strip in misc-tweaks.lua)
+    replaces the mod "Factorissimo Logistic Roboport" 1.1.0 by RandomBruh
+    (https://mods.factorio.com/mod/factorissimo-roboport-buff,
+    https://github.com/RandomUsername27/factorissimo-roboport-buff), released
+    under the Unlicense (public domain). Credited for the idea; no code was
+    reused - the three field assignments it makes are independently trivial,
+    and E-Tech's version writes in data-final-fixes instead of data-updates,
+    makes the logistics radius a setting, and adds the charging-pad and
+    charging-power fix the original does not have.
+
 MIT License
 
 Copyright (c) 2025 cindersash

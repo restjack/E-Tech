@@ -21,3 +21,9 @@ LOCAL-PATCHED-MODS.md
 
 # Server upload staging folders - big mod zip bundles, distributed via Nextcloud
 server-upload-*/
+
+# Local Factorio machine state — this folder is local bookkeeping only, and
+# these two change on every launch. The *.zip rule above already covers the
+# mods themselves.
+patched-mods/mod-settings.dat
+patched-mods/mod-list.json

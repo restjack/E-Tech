@@ -1,4 +1,190 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.20.2
+Date: 2026-07-30
+  Features:
+    - Factory Mk4 now exists on space platforms too, as Space factory Mk4.
+      Factorissimo builds its space-factory-1/2/3 from a hardcoded per-tier
+      list, so the fourth tier got none of it. It is gated behind the same
+      Factorissimo space architecture setting, unlocked by the same Space
+      architecture research (which now also requires Architecture 4, since the
+      recipe consumes a Mk4), and its ingredients are copied from whatever
+      Factorissimo gave Space factory 3 under the current mod set - so it works
+      under both Space Age and Space Exploration without guessing at either.
+    - The Mk4's interior walls and floor logo are teal instead of the Mk3's
+      yellow. The stock tiers are orange, blue and yellow; teal stays clear of
+      factory-2's blue. Inside a Mk4 no longer looks exactly like inside a Mk3.
+      The space variant's tiles and paint are amber, since all three stock
+      space tiers already share one blue-grey skin.
+    - The Mk4's factoriopedia entry gains a "floor tiles per connection" row -
+      450, against a Mk3's 112. The ports did not grow with the floor, and that
+      is much cheaper to learn from a tooltip than from a finished build.
+  Changes:
+    - The research is now called "Architecture 4", matching Factorissimo's own
+      "Architecture 2" and "Architecture 3", and is ordered to sit directly
+      after Architecture 3 and before Space architecture instead of landing
+      elsewhere in the tech tree.
+    - The Mk4's description now teaches the same controls every other tier
+      does - port markers, opening the floor in remote view, moving the
+      building from remote view - which it had been silently dropping.
+    - The technology icon reads "04" instead of "03". Repainted in place on
+      Factorissimo's isometric render, following the tilted face rather than
+      screen rows, so the architecture techs still look like a set.
+    - The "04" on the building is rebuilt from a real typeface. The facade font
+      is a heavy rounded grotesque - 136x151 with a ~42px stroke, measured off
+      the "0" - and the first hand-drawn attempt was far too thin. The crate
+      that sat under the digit is gone: it is drawn on top of the lettering in
+      the same colour at every brightness, so it cannot be masked away, and it
+      hid the 4's crossbar.
+    - Cerys radiative towers in a Mk4 go from 4 to 9. Four is right for a
+      60-wide floor; on four times the area it left the middle and the edges
+      cold.
+    - The hidden power relay has its own name instead of borrowing the
+      building's, so log and debug output is not misleading.
+  Bugfixes:
+    - The Mk4's research cost and recipe are now re-derived from the Mk3's in
+      data-final-fixes, after other mods have rewritten them. Factorissimo's own
+      Pyanodons compatibility rewrites the factory technologies in data-updates,
+      and overhauls can retire an item the recipe asks for; deriving late means
+      the Mk4 inherits whatever they settled on instead of a snapshot taken
+      before they ran. Ingredients that no longer exist are dropped with a log
+      line rather than failing the load.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.20.1
+Date: 2026-07-30
+  Bugfixes:
+    - Factory Mk4: the northern half of the floor had no electricity. Machines
+      built there sat at "No power" with nothing to trace, because the pole
+      that feeds a factory interior is hidden and draws no wire. Factorissimo
+      places that pole beside the DOOR, and factory-power-pole has
+      supply_area_distance 63 - fine up to a 60-wide floor, but from the door
+      of a 120-wide one it stops one tile past the middle. The engine caps
+      supply_area_distance at 64 for every electric pole prototype, so no pole
+      at the door can ever cover a Mk4.
+    - The visible pole and the interior roboport stay at the entrance where
+      they belong. Instead a hidden, uncollidable, unselectable relay pole is
+      built at the centre of the floor and script-wired to the door pole, so
+      the whole interior is supplied from one network. It is registered through
+      Factorissimo's own layout `upgrades` hook, which re-runs on build, on
+      every configuration change and on every research finish - so it repairs
+      itself on existing factories instead of needing a migration.
+    - The interior roboport needed no such treatment: its reach was already
+      raised to 128 in 0.20.0, which covers a 120-wide floor from the door.
+  Changes:
+    - Factory Mk4 now ships real artwork instead of a runtime sprite tint. The
+      tint was a multiply, so it could only darken - in game the Mk4 still read
+      as a brown Mk3, and no tint could do anything about the "03" painted on
+      the facade. The building is now steel blue with "04" on the front, with a
+      matching icon and technology icon. Generated from Factorissimo's own
+      factory-3 art by tools/make-mk4-art.py, reusing its shadow untouched,
+      the same way Factorissimo builds its space-factory variants.
+    - The Mk4 map colour is stronger, since map view does not draw the artwork
+      at all.
+
+---------------------------------------------------------------------------------------------------
+Version: 0.20.0
+Date: 2026-07-30
+  Features:
+    - Factory building Mk4 (etech-factory-mk4, off by default): a fourth
+      Factorissimo tier with a 120x120 interior - four times a Mk3's floor -
+      behind an exterior that is still 16x16, with the Mk3's 32 connection
+      ports unchanged and in the same positions. A Mk4 drops straight into a
+      spot already built for a Mk3, and reuses factory-power-input-16, so no
+      new exterior prototypes exist.
+    - No fork of Factorissimo is needed. Layouts live in Factorissimo's own
+      storage rather than in data.raw, and it exposes
+      remote.call("factorissimo", "add_layout", table); E-Tech registers the
+      tier there on on_init and on_configuration_changed, then verifies with
+      has_layout and reports to the log and to chat if it did not take. A
+      silently unregistered layout would break every placed Mk4, so it is
+      never allowed to fail quietly.
+    - Because the exterior is identical to a Mk3's, the Mk4 is tinted blue and
+      given its own map colour - every stock factory shares one map colour, so
+      without this the two tiers would be indistinguishable on the ground, on
+      the map and in inventory. Factorissimo does the same for its own
+      space-factory variants: same footprint, same shadow, different body.
+    - Quality unlocks the same extra ports at the same levels a Mk3 gets, for
+      46 at legendary, and the factoriopedia quality table is filled in to
+      match the stock tiers.
+    - Interior construction and logistics coverage is raised from 64 to 128
+      tiles when the Mk4 is enabled. Factorissimo builds the interior roboport
+      at the factory's DOOR, not its centre; at radius 64 that reaches only
+      two tiles past the middle of a 120-wide floor, leaving the whole northern
+      half of every Mk4 uncovered. Applies whether or not the interior roboport
+      buff is on, and the Krastorio 2 mode variants are recomputed from it.
+    - 120x120 is the largest interior Factorissimo can generate, so this is the
+      last tier on this exterior size. Its create_factory_position() marks only
+      the chunks within 64 tiles of an interior's centre as generated, and
+      add_hidden_tile_rect() covers the same box; a Mk4's walls sit at 61 and
+      its door corridor ends at 63, one tile inside that limit. The 512-tile
+      spacing between interiors would allow far more - the chunk loop is the
+      real ceiling.
+    - Known trade-off, by design: the ports did not grow with the floor, so 32
+      of them now serve four times the area. Expect to want more internal
+      bussing per port than a Mk3 needs. Mk4s are not available on space
+      platforms (Factorissimo builds its space-factory variants from a
+      hardcoded per-tier list).
+
+---------------------------------------------------------------------------------------------------
+Version: 0.19.7
+Date: 2026-07-30
+  Features:
+    - Factorissimo interior roboport: whole-floor logistics coverage, slots for
+      robots and repair packs, more charging pads, and an energy source that can
+      actually charge robots. Absorbs factorissimo-roboport-buff by RandomBruh
+      (public domain). Defaults are logistics radius 64, 7 robot + 7 material
+      slots and 16 charging pads at 4000 kW; every value is a startup setting.
+    - Robots could not charge inside factory buildings at all. Factorissimo runs
+      the interior roboport on a void energy source, and robot charging is paid
+      out of a roboport's stored energy - a void source stores none, so charging
+      never begins no matter how many charging pads the roboport has or how much
+      power each pad is given. Factorissimo's own hidden construction robots are
+      defined with no energy drain and never charge, so the limitation only
+      appears once player robots operate inside a factory.
+    - "Charge bots from your power grid" (etech-factory-roboport-electric, on by
+      default) replaces the void source with a real electric one, with a 200 MJ
+      buffer and a 100 MW draw limit. This is what makes charging work. Charging
+      inside a factory therefore draws from the same electric network as the rest
+      of the base - roughly 1-2 MW per factory with a busy robot fleet, scaling
+      with the number of robots in the air rather than with pad count. It uses the
+      same low priority as a vanilla roboport, so an under-supplied grid slows
+      charging instead of stopping machines. Turning the setting off restores
+      Factorissimo's void source; robots then stop charging, and a warning is
+      written to the log explaining why.
+    - When the void source is kept, energy_usage and recharge_minimum are lowered
+      from 50 kW / 40 MJ to 1 W / 1 W. A vanilla roboport satisfies a 40 MJ
+      threshold from its 100 MJ buffer; a void source has no buffer and never can.
+      This is a second, independent blocker on the same prototype.
+    - The roboport's icon now matches the vanilla roboport. Factorissimo gives it a
+      construction-chest icon, which goes unnoticed while the roboport is a hidden
+      entity but appears as a chest consuming tens of MW in the electric network
+      screen once it draws power.
+    - Krastorio 2's roboport mode variants are patched to match. K2 builds its
+      logistic-only and construction-only modes by deep-copying every roboport
+      prototype during data-updates, before this feature runs, so the factory
+      roboport's "-logistic-mode" and "-construction-mode" twins were copies of the
+      stock version: void energy source, 4 pads at 500 kW, logistics radius 3, no
+      robot slots. Switching a factory roboport's mode would have reverted all of
+      the above. The twins now inherit the patched energy source, charging and
+      slots, with K2's derived radius formulas recomputed from the new values.
+    - Both toggles default on, unlike every other E-Tech feature toggle: this
+      feature replaces a standalone mod rather than adding new content, and its
+      grid-power half is what makes charging work at all. Turning the main toggle
+      off restores Factorissimo's stock interior roboport, which has a logistics
+      radius of 2.
+    - REMOVE THE OLD MOD: delete factorissimo-roboport-buff from your mods folder.
+      Leaving it installed is harmless but pointless - E-Tech now covers everything it
+      did, and its two settings just sit there doing nothing. E-Tech logs a reminder
+      when it sees the mod still present.
+    - Everything is applied in data-final-fixes rather than data-updates, so mods
+      that modify the interior roboport later cannot overwrite the result.
+      Krastorio 2, Combat Mechanics Overhaul and Cerys are listed as optional
+      dependencies purely to pin load order.
+    - Only the visible interior roboport is modified. Factorissimo's hidden interior
+      roboport - the reservoir that keeps 200 free construction robots in each
+      factory network - is left alone: its robots have no energy drain and never
+      charge, and its single centre charging pad is intentional.
+---------------------------------------------------------------------------------------------------
 Version: 0.19.6
 Date: 2026-07-23
   Bugfixes:

@@ -67,6 +67,11 @@ if settings.startup["etech-factory-hub"].value
   require("factory-hub/data")
 end
 
+if settings.startup["etech-factory-mk4"].value
+  and mods["factorissimo-2-notnotmelon"] then
+  require("factory-mk4/data")
+end
+
 if settings.startup["etech-teleport-shortcut"].value then
   data:extend({
     {
