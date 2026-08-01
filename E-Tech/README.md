@@ -75,7 +75,9 @@ Every recipe restore is guarded by a fingerprint check: a recipe is only touched
 - [vanilla-recipes.lua](vanilla-recipes.lua) — the recipe data: recipe name → vanilla/K2 values + AAI fingerprint. Add/remove entries freely.
 - [data-final-fixes.lua](data-final-fixes.lua) — the engine that applies the restores.
 - [beacons.lua](beacons.lua), [misc-tweaks.lua](misc-tweaks.lua), [crash-ship.lua](crash-ship.lua) — the optional tweaks.
-- `build.ps1` — packages `E-Tech_<version>.zip` into your Factorio mods folder and archives a copy in `releases/`.
+- [recipe-guard.lua](recipe-guard.lua) — runs last in `data-final-fixes` and keeps E-Tech's own recipes and technologies loadable when an overhaul retires an item they were built from. Substitutes down documented fallback chains rather than dropping ingredients silently, and logs every change.
+- `build.ps1` — packages `E-Tech_<version>.zip` into your Factorio mods folder and archives a copy in `releases/`. Refuses to overwrite an already-archived release without `-Force`.
+- `../tools/verify.ps1` — Lua syntax, changelog format + version match, locale coverage, luacheck, `--dump-data`. `../tools/verify-matrix.ps1` loads the mod under vanilla / Space Age / AAI / AAI+Space Age / AAI+K2 / Factorissimo before a release.
 
 ### Module map
 
