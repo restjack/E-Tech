@@ -58,11 +58,23 @@ local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-ou
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 15    -- choose-elem filter slots in the outlet/inlet panels
 local RATE_WINDOW = 3600   -- ticks of pull history for the items/min stat
-local REQUESTER_TTL = 240  -- PULL_TICKS * 2: how long the outlet reuses its
-                           -- requester-demand scan and its network-cell
-                           -- geometry. Declared up here rather than next to
-                           -- its first user because ghost_wants is defined
-                           -- earlier in the file and needs it too.
+local REQUESTER_TTL = 240  -- PULL_TICKS * 2: how long an outlet reuses its
+                           -- requester-demand scan. Declared up here rather
+                           -- than next to its first user because ghost_wants
+                           -- is defined earlier in the file and needs it too.
+local CELL_TTL = 1080      -- PULL_TICKS * 9: how long an outlet reuses the
+                           -- roboport geometry of its network. Deliberately
+                           -- NOT the same constant as REQUESTER_TTL - sharing
+                           -- one meant both caches were written in the same
+                           -- pass and therefore always expired in the same
+                           -- pass, stacking their cost (profiled 0.21.1:
+                           -- net-wants max went 7.7 -> 14.9 ms doing that).
+                           -- Roboports are also built far more rarely than
+                           -- logistic requests change, so this can be long.
+                           -- 1080 is deliberately NOT a whole multiple of
+                           -- REQUESTER_TTL (4.5x): a multiple would put the
+                           -- two misses back on the same pass every cycle,
+                           -- which is the thing being fixed.
 local MAX_SIGNALS = 1000   -- constant combinator / logistic section limit
 local MAX_FACTORY_ROWS = 20
 local TOOLTIP_FACTORIES = 8 -- per-factory breakdown lines in an item tooltip
@@ -143,6 +155,11 @@ local function register_device(entity, copy_from)
         record.auto_request = copy_from.auto_request
         record.fluid_filter = copy_from.fluid_filter
     end
+    -- Spread this device's pull across the four slot ticks of a PULL_TICKS
+    -- cycle, deterministically from its unit_number. Two outlets built in the
+    -- same second otherwise pull on the same tick forever, and their caches
+    -- expire together too - see the scheduler in on_slot_tick.
+    record.next_pull = game.tick + (entity.unit_number % 4) * SLOT_TICKS
     data.hubs[entity.unit_number] = record
     -- devices are logistic-containers themselves (an inlet placed inside a
     -- factory is a valid requester target) — invalidate chest caches too
@@ -978,7 +995,7 @@ local function ghost_wants(record, network)
     local cells
     local cell_cache = record.cell_cache
     if cell_cache and cell_cache.network_id == network.network_id
-        and game.tick - cell_cache.tick < REQUESTER_TTL then
+        and game.tick - cell_cache.tick < CELL_TTL then
         cells = cell_cache.cells
     else
         cells = {}
@@ -2269,41 +2286,58 @@ local function on_slot_tick(event)
     if not factorissimo_available() then return end
     local data = hub_data()
     local phase = math.floor(event.tick / SLOT_TICKS) % 4
-    local prof = data.profiling and helpers.create_profiler()
-    local label
-    if phase == 3 then
-        -- The GUI phase touches only what the player has open, so it does not
-        -- need the device lists at all - collecting them here was four wasted
-        -- table allocations and a walk over every device (0.21.1).
-        refresh_open_guis()
-        label = "gui-refresh"
-    else
-        -- outlets first, then inlets, then sensors (one outlet per surface, so
-        -- there is no cross-outlet competition to order). collect_records also
-        -- sweeps records whose entity is gone, which is why it runs on all
-        -- three working phases rather than once per cycle.
-        local outlets, inlets, sensors, fluids = collect_records()
-        if phase == 0 then
-            for _, record in pairs(outlets) do pull_for_outlet(record) end
-            label = "pull-pass(outlets=" .. #outlets .. ")"
-        elseif phase == 1 then
-            for _, record in pairs(inlets) do distribute_for_inlet(record) end
-            for _, record in pairs(sensors) do update_sensor(record) end
-            for _, record in pairs(fluids) do
-                if record.kind == "fluid-outlet" then
-                    pass_for_fluid_outlet(record)
-                else
-                    pass_for_fluid_inlet(record)
-                end
-            end
-            label = "inlet-pass(inlets=" .. #inlets .. " sensors=" .. #sensors
-                .. " fluids=" .. #fluids .. ")"
-        else
-            maintenance_pass(outlets, inlets, sensors, fluids)
-            label = "maintenance"
+    local outlets, inlets, sensors, fluids = collect_records()
+
+    -- Outlets are scheduled PER DEVICE rather than all together on one phase.
+    -- Each still pulls once every PULL_TICKS; they just no longer do it on the
+    -- same tick as each other. Profiling a live base showed two outlets landing
+    -- together turning a 9 ms pass into a 28 ms one - and because their caches
+    -- were seeded at the same moment they also expired in lockstep, so the
+    -- expensive uncached scan of BOTH outlets stacked on that one tick.
+    --
+    -- next_pull is seeded from unit_number at registration, so the spread is
+    -- deterministic - identical on every client, unlike anything random.
+    local due = {}
+    for _, record in pairs(outlets) do
+        if event.tick >= (record.next_pull or 0) then
+            due[#due + 1] = record
+            record.next_pull = event.tick + PULL_TICKS
         end
     end
-    if prof then
+    if #due > 0 then
+        local pull_prof = data.profiling and helpers.create_profiler()
+        for _, record in pairs(due) do pull_for_outlet(record) end
+        if pull_prof then
+            pull_prof.stop()
+            helpers.write_file(PROFILE_FILE,
+                {"", event.tick, ",pull-pass(outlets=", #due, "),", pull_prof, "\n"}, true)
+        end
+    end
+
+    -- Phase 0 is now left free for outlet pulls; the other three keep their
+    -- slots. collect_records above also sweeps records whose entity is gone.
+    local prof = data.profiling and helpers.create_profiler()
+    local label
+    if phase == 1 then
+        for _, record in pairs(inlets) do distribute_for_inlet(record) end
+        for _, record in pairs(sensors) do update_sensor(record) end
+        for _, record in pairs(fluids) do
+            if record.kind == "fluid-outlet" then
+                pass_for_fluid_outlet(record)
+            else
+                pass_for_fluid_inlet(record)
+            end
+        end
+        label = "inlet-pass(inlets=" .. #inlets .. " sensors=" .. #sensors
+            .. " fluids=" .. #fluids .. ")"
+    elseif phase == 2 then
+        maintenance_pass(outlets, inlets, sensors, fluids)
+        label = "maintenance"
+    elseif phase == 3 then
+        refresh_open_guis()
+        label = "gui-refresh"
+    end
+    if label and prof then
         prof.stop()
         helpers.write_file(PROFILE_FILE,
             {"", event.tick, ",", label, ",", prof, "\n"}, true)
@@ -2389,6 +2423,11 @@ local function adopt_existing()
                     record.kind = KINDS[name]
                     record.filters = record.filters or { mode = 1, items = {} }
                     record.pins = record.pins or {}
+                    -- Devices from before 0.21.1 have no schedule slot yet.
+                    -- Seed the same way a fresh one would, so an existing save
+                    -- gets the stagger without needing anything rebuilt.
+                    record.next_pull = record.next_pull
+                        or (game.tick + (entity.unit_number % 4) * SLOT_TICKS)
                     -- (The 0.17.0 legacy-field cleanup that lived here was
                     -- dropped in 0.21.1, per its own two-minor-version
                     -- policy. Those fields are never read, so any save still

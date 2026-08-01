@@ -138,6 +138,18 @@ Date: 2026-07-31
     - Factory outlet panel: the item grid is only rebuilt when something it
       shows actually changed. Tearing it down and repopulating it every two
       seconds reached 13 ms with a large factory set, to redraw the same thing.
+    - Factory outlets no longer all run on the same tick. Each still pulls once
+      every two seconds; they are simply scheduled individually, spread across
+      the cycle from their own unit number. Two outlets landing together turned
+      a 9 ms pass into a 28 ms one - and because their caches had been created
+      at the same moment, both also did their expensive uncached scan on that
+      same tick. Existing saves pick the spread up automatically.
+    - The roboport-geometry cache and the requester-demand cache no longer share
+      a lifetime. Sharing one meant they were always written in the same pass
+      and so always expired in the same pass, stacking their cost instead of
+      interleaving it. Roboports change far more rarely than logistic requests,
+      so that cache is now much longer-lived, and deliberately not a whole
+      multiple of the other.
   Changes:
     - Dropped the 0.17.0 legacy-field cleanup for factory devices, per its own
       two-version policy. Those fields are never read, so saves still carrying
