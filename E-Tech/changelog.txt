@@ -1,4 +1,126 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.21.1
+Date: 2026-07-31
+  Bugfixes:
+    - FIXED A CRASH THAT SHIPPED IN 0.21.0: E-Tech failed to load at all, with
+      "attempt to index field 'tool'", for anyone running it alongside
+      Factorissimo without some other mod that happens to define a tool
+      prototype. Factorio 2.1 made science packs plain items, so data.raw.tool
+      no longer exists in an otherwise-unmodded game - and three places indexed
+      it directly. A developer running a full modpack never sees this, because
+      something in the pack always provides one. Turning agricultural science
+      spoilage off could hit the same crash. Found by the new mod-combination
+      matrix (see below) on its first run.
+    - Factory outlet: a second outlet can now be placed inside a different
+      factory on the same Factorissimo interior surface. Interior surfaces are
+      shared 8-wide grids of unrelated factories and an outlet only ever
+      reaches its own cell, but the one-per-surface check searched the whole
+      surface - so whoever placed an outlet first locked out every other
+      factory that happened to land on the same grid.
+    - Filtered void chest no longer destroys its contents when mined. It
+      inherited erase-on-mine from the plain void chest, which deletes
+      everything on purpose - but the filtered chest exists precisely so the
+      items you did not pick sit there safely, and mining it silently ate them.
+    - The in-game map settings editor no longer crashes in mod packs that
+      remove the enemy force. Applying changes was already guarded; the two
+      places that READ the evolution factor to fill the GUI were not, and those
+      run on load, on any mod-set change, and on every surface change - so the
+      crash happened before a player could touch anything.
+    - Applying map settings no longer forces the editor window open on every
+      player. Everyone's values still refresh, since the settings are global,
+      but a window that was closed stays closed.
+    - Changing the resource-marker minimum patch size now takes effect at once.
+      The setting is applied when a patch is re-tagged, so raising it left small
+      markers on the map and lowering it never revealed the hidden ones until
+      that patch happened to be re-scanned - which for a fully charted, fully
+      mined patch is never.
+    - Teleporters: changing a teleporter map setting now refreshes an open
+      destination list. Costs, cross-surface rules and the players section are
+      read while the list is built, so an open window kept showing old numbers.
+    - Teleporters: the search hotkey no longer registers a second CONTROL + F
+      binding alongside the game's own focus-search control.
+    - Teleporters: renaming no longer errors for a force that has never placed
+      a pad, and refreshing open windows no longer errors when a player has
+      been removed from the save.
+    - Void pipe now actually gets its intended 2500-unit buffer. It was still
+      setting the Factorio 1.1 height/base_area pair, which 2.0 replaced with
+      volume and silently ignores.
+    - Void pipe throughput statistics no longer accumulate for pipes that have
+      been removed; they were only cleared once the last void pipe in the world
+      went away.
+    - Beacons, cross-pastable furnaces and labs, and crashed-ship parts each get
+      their own copy of the tables E-Tech assigns them instead of sharing one
+      table across every prototype, so a later mod appending to one no longer
+      edits them all.
+    - Jetpack fuel HUD no longer divides by zero on a modded fuel with no fuel
+      value.
+    - Map settings editor: the asteroid and spoiling rate fields are populated
+      when the window is built rather than relying on the refresh that follows.
+    - The Factory Mk4's "Floor tiles per connection" factoriopedia row read
+      "Unknown key". It asked for a bare locale key while the string was
+      defined under [description], like every other row beside it.
+    - Colorful biochamber now checks that Space Age's biochamber sprite layers
+      are still where it expects before remapping them. It addressed four of
+      them by hardcoded index with no guard, so a reordering in any Space Age
+      update would have mis-tinted the machine or thrown outright. It now skips
+      the recolour and says so in the log instead.
+    - Factory Mk4 says so in the log when Factorissimo's interior power pole is
+      not where it expects. That field is private to Factorissimo, and if it is
+      ever renamed the northern half of every Mk4 loses power with nothing to
+      trace it by.
+  Compatibility:
+    - E-Tech's own recipes and technologies now survive overhaul mods that
+      retire the items they are built from. The factory hub, the teleporter pads
+      and the void chest hardcoded processing units, batteries, constant
+      combinators and stone furnaces, and hardcoded their technology
+      prerequisites - so a pack that removed any of them turned into a hard load
+      error with E-Tech's name on it. A new late pass substitutes down a
+      documented chain instead (processing unit to advanced circuit to
+      electronic circuit) and logs every substitution. Factory Mk4 already did
+      this for itself; the other three now do too.
+    - The map settings editor's four GUI styles are prefixed etech-. They used
+      generic names (pusher, deep_frame, ...) in the shared style table, guarded
+      with "define it only if nobody else did" - which meant that if another mod
+      defined its own `pusher` first, this GUI silently rendered with theirs.
+  Optimizations:
+    - Factory devices: building or mining a logistic chest anywhere in the world
+      used to invalidate every device's interior-chest cache, and any storage
+      tank anywhere invalidated every device's factory list. On a base with bots
+      continuously building that meant the caches were rebuilt every pass - the
+      exact cost they exist to avoid. Both now trigger only for chests actually
+      inside a factory and for real factory buildings.
+    - Factory outlet: chests holding nothing the outlet currently needs are
+      skipped after a single inventory read instead of walking every slot.
+    - The factory device GUI-refresh phase no longer rebuilds the device lists
+      it never uses.
+    - Resource marker rebuilds scan fewer chunks per tick. A rebuild takes
+      longer in the background and no longer sags UPS while it runs.
+    - Jetpack fuel HUD polls every 15 ticks instead of every 5. It cost a remote
+      call per pass even with nobody flying, plus another call per player and an
+      item count per fuel type when someone was.
+    - Teleporter destination list reads the four energy-cost settings once
+      instead of once per pad.
+  Changes:
+    - Dropped the 0.17.0 legacy-field cleanup for factory devices, per its own
+      two-version policy. Those fields are never read, so saves still carrying
+      them are unaffected.
+    - The map settings editor's toolbar shortcut name and description moved into
+      the locale file. They were the only user-facing strings in the mod that
+      could not be translated.
+    - The void pipe list moved from storage.pipes to storage.etech_void_pipes,
+      the naming every other module already used. Rebuilt automatically; the old
+      key is cleaned up.
+    - teleporters/script_util.lua no longer adds its helpers to the base game's
+      shared util table, and its dead functions are gone.
+    - Tooling: a locale linter (missing setting strings, references to keys that
+      do not exist, dead keys), a changelog-to-info.json version check, and
+      tools/verify-matrix.ps1, which loads E-Tech under vanilla, Space Age, AAI,
+      AAI+Space Age, AAI+K2 and Factorissimo in throwaway mod directories. Both
+      linters run in CI. The matrix is what the compatibility fix above should
+      have been caught by years earlier.
+    - build.ps1 refuses to overwrite an already-archived release unless given
+      -Force.
+---------------------------------------------------------------------------------------------------
 Version: 0.21.0
 Date: 2026-07-30
   Changes:

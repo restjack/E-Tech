@@ -51,6 +51,47 @@ end
 -- remap below repurposes them: primary = sludge pool, secondary = checking
 -- window, tertiary = main pool, quaternary = secondary pool.
 
+local vis = biochamber.graphics_set.working_visualisations or {}
+
+-- The remap below addresses Space Age's working_visualisations BY INDEX, and
+-- nothing in the API names them. Those indices are Space Age's to change, and
+-- another mod editing the biochamber before us could reorder them too - so
+-- verify the shape first and bail out cleanly rather than mis-tinting silently
+-- or throwing "attempt to index a nil value" (0.21.1). The header's claim of
+-- nil-safety only ever covered missing RECIPES, which is the less likely half.
+local EXPECTED_LAYERS = {
+  [1] = "biochamber-animation-dome.png",
+  [3] = "biochamber-glow.png",
+  [4] = "biochamber-glow-2.png",
+}
+
+local function layer_references(entry, needle)
+  if type(entry) ~= "table" then return false end
+  for _, v in pairs(entry) do
+    if type(v) == "table" then
+      if layer_references(v, needle) then return true end
+    elseif type(v) == "string" and v:find(needle, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+if #vis < 5 then
+  log("[E-Tech] colorful biochamber: expected at least 5 working visualisations, found "
+    .. #vis .. " - Space Age changed the biochamber's sprite layers. Recolor skipped;"
+    .. " the biochamber keeps its stock look.")
+  return
+end
+for index, needle in pairs(EXPECTED_LAYERS) do
+  if not layer_references(vis[index], needle) then
+    log("[E-Tech] colorful biochamber: working visualisation " .. index .. " is no longer "
+      .. needle .. " - Space Age (or another mod) reordered the biochamber's sprite"
+      .. " layers. Recolor skipped; the biochamber keeps its stock look.")
+    return
+  end
+end
+
 -- Lamp / default tint.
 biochamber.graphics_set.default_recipe_tint = {
   primary = {r = 0.75, g = 0.75, b = 1, a = 1},
@@ -58,7 +99,6 @@ biochamber.graphics_set.default_recipe_tint = {
   tertiary = {r = 1, g = 0.85, b = 0.75, a = 1},
   quaternary = {r = 1, g = 1, b = 0, a = 1},
 }
-local vis = biochamber.graphics_set.working_visualisations
 vis[5].apply_recipe_tint = "none"
 
 -- primary: now the sludge pool.

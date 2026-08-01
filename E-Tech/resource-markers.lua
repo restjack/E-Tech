@@ -331,7 +331,12 @@ local start_rescan = function()
   return #queue
 end
 
-local RESCAN_BATCH = 20
+-- Chunks scanned per pass. At on_nth_tick[2] this is the sustained extra load
+-- for the whole rebuild, so it is a stutter knob, not a throughput one: 20 was
+-- ten whole-chunk find_entities_filtered calls PER TICK, which on a big map is
+-- a minute-plus of visible UPS sag. 8 halves the worst-case spike and keeps the
+-- rebuild backgrounded, which is all it ever needed to be (0.21.1).
+local RESCAN_BATCH = 8
 
 -- Background worker for start_rescan: a batch of queued chunks per pass,
 -- done-message when the queue drains.
@@ -526,6 +531,32 @@ local on_chunk_deleted = function(event)
   end
 end
 
+-- etech-markers-min-size is applied inside retag(), so before 0.21.1 changing
+-- it did nothing until a patch's cell happened to be re-scanned - and for a
+-- fully charted, fully mined patch that is never. Raising the setting left
+-- small markers on the map; lowering it never revealed the hidden ones.
+-- Re-evaluate every patch the moment the setting changes instead.
+local on_runtime_mod_setting_changed = function(event)
+  if event.setting ~= "etech-markers-min-size" then return end
+  for force_name, fb in pairs (script_data.buckets) do
+    local force = game.forces[force_name]
+    if force and force.valid then
+      for surface_index, sb in pairs (fb) do
+        local surface = game.surfaces[surface_index]
+        if surface and surface.valid then
+          for resource_name, bucket in pairs (sb) do
+            -- retag may delete the current patch (count reached 0); removing
+            -- the key being visited is legal in Lua's pairs.
+            for patch_id in pairs (bucket.patches) do
+              retag(force, surface, resource_name, bucket, patch_id)
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
 local on_forces_merged = function(event)
   -- The engine transfers the source force's chart tags to the destination
   -- force on merge. Dropping only the bookkeeping would leave those tags
@@ -548,6 +579,7 @@ markers.events =
   [defines.events.on_surface_deleted] = on_surface_deleted,
   [defines.events.on_chunk_deleted] = on_chunk_deleted,
   [defines.events.on_forces_merged] = on_forces_merged,
+  [defines.events.on_runtime_mod_setting_changed] = on_runtime_mod_setting_changed,
 }
 
 markers.add_commands = function()

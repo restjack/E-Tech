@@ -81,6 +81,24 @@ local function set_visible(player, visible)
   player.set_shortcut_toggled(SHORTCUT, visible)
 end
 
+-- Push freshly applied settings into everyone's editor WITHOUT changing whose
+-- editor is open. The values are global, so refreshing every player is right;
+-- forcing the window open on every player was not - before 0.21.1 one admin
+-- clicking Apply popped the editor onto every client's screen, including
+-- players who had never opened it and players in the middle of something else.
+local function refresh_all_guis()
+  for _, plyr in pairs(game.players) do
+    if plyr.gui.screen["edit-map-settings-main-flow"] then
+      set_to_current_all(plyr)
+    else
+      -- never built (e.g. joined before the toggle was on): build it hidden
+      gui.regen(plyr)
+      set_to_current_all(plyr)
+      plyr.set_shortcut_toggled(SHORTCUT, false)
+    end
+  end
+end
+
 local function edit_map_settings(player)
   local config_table = gui.get_map_settings_container(player)
 
@@ -156,10 +174,7 @@ local function edit_map_settings(player)
   player.print({"msg.edit-map-settings-applied"})
 
   -- Update the values shown in everyones gui
-  for _, plyr in pairs(game.players) do
-    set_to_current_all(plyr)
-    set_visible(plyr, true)
-  end
+  refresh_all_guis()
 end
 
 local function edit_map_gen_settings(player)
@@ -196,10 +211,7 @@ local function edit_map_gen_settings(player)
   player.print({"msg.edit-map-settings-applied"})
 
     -- Update the values shown in everyones gui
-  for _, plyr in pairs(game.players) do
-    set_to_current_all(plyr)
-    set_visible(plyr, true)
-  end
+  refresh_all_guis()
 end
 
 local function on_lua_shortcut(event)

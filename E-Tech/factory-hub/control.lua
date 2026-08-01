@@ -149,15 +149,8 @@ end
 -- One factory outlet per surface (per force). A second placement is
 -- refunded on the spot: to the placing player's inventory, otherwise
 -- spilled at the build position (robot/script builds).
-local function another_outlet_exists(entity)
-    for _, found in pairs(entity.surface.find_entities_filtered {
-        name = OUTLET_NAME, force = entity.force,
-    }) do
-        if found.unit_number ~= entity.unit_number then return true end
-    end
-    return false
-end
-
+-- (another_outlet_exists needs factory_interior_area, so it is defined
+-- further down next to factory_usable and forward-declared below.)
 local function deny_second_outlet(entity, event)
     local surface = entity.surface
     local position = entity.position
@@ -175,10 +168,25 @@ local function deny_second_outlet(entity, event)
     end
 end
 
--- forward declarations: defined with the ghost index (on-demand section)
--- and the factory-cache section respectively
+-- Is this surface a Factorissimo interior? Only things built/mined INSIDE a
+-- factory can change what a device sees, so this gates the cache-invalidation
+-- bumps below. Before 0.21.1 every logistic container built anywhere on any
+-- surface bumped chest_gen, which on a bot base pasting blueprints meant a
+-- full interior re-scan for every device every maintenance pass - i.e. the
+-- chest cache never paid off during exactly the construction it was meant to
+-- survive.
+--
+-- Fails SAFE: factorissimo_call returns nil when the remote call errors, and
+-- nil counts as "interior" so we invalidate rather than serve a stale cache.
+local function surface_is_interior(surface)
+    return factorissimo_call("is_factorissimo_surface", surface.index) ~= false
+end
+
+-- forward declarations: defined with the ghost index (on-demand section),
+-- the factory-cache section, and next to factory_usable respectively
 local gindex_on_ghost_built
 local cached_factories
+local another_outlet_exists
 
 local function on_built(event)
     local entity = event.entity or event.destination
@@ -214,12 +222,14 @@ local function on_built(event)
         end
     elseif etype == "entity-ghost" or etype == "tile-ghost" then
         gindex_on_ghost_built(entity)
-    elseif etype == "storage-tank" then
-        -- possible Factorissimo building: invalidate every factory-list cache
+    elseif etype == "storage-tank" and is_factory_building(entity.name) then
+        -- a Factorissimo building: invalidate every factory-list cache.
+        -- Name-checked since 0.21.1 - every plain storage tank the player
+        -- placed anywhere used to force a ~40 ms factory rescan.
         local data = hub_data()
         data.factory_gen = (data.factory_gen or 0) + 1
-    elseif etype == "logistic-container" then
-        -- possible interior chest: invalidate every device's chest cache
+    elseif etype == "logistic-container" and surface_is_interior(entity.surface) then
+        -- an interior chest: invalidate every device's chest cache
         local data = hub_data()
         data.chest_gen = (data.chest_gen or 0) + 1
     end
@@ -240,6 +250,33 @@ local function factory_usable(factory)
         and factory.built ~= false
         and factory.building and factory.building.valid
         and factory.inside_surface and factory.inside_surface.valid
+end
+
+-- Is there already an outlet this one would duplicate? (assigns the forward
+-- declaration above on_built)
+--
+-- "One per surface" means one per SURFACE outside, but one per interior CELL
+-- inside a factory. Factorissimo interior surfaces are shared 8-wide grids of
+-- unrelated factories, and factories_for_hub already scopes a device's reach
+-- to its own cell - so before 0.21.1 the whole-surface search refused a second
+-- outlet that could never have seen the first one's chests. Two players (or
+-- two factories) whose interiors landed on the same grid meant only one of
+-- them could ever have an outlet.
+function another_outlet_exists(entity)
+    local surface = entity.surface
+    local filter = { name = OUTLET_NAME, force = entity.force }
+    if factorissimo_call("is_factorissimo_surface", surface.index) then
+        local parent = factorissimo_call(
+            "find_surrounding_factory_by_surface_index", surface.index, entity.position)
+        -- No surrounding factory: the device is on interior ground that
+        -- belongs to no cell, so it reaches nothing and duplicates nothing.
+        if not factory_usable(parent) then return false end
+        filter.area = factory_interior_area(parent)
+    end
+    for _, found in pairs(surface.find_entities_filtered(filter)) do
+        if found.unit_number ~= entity.unit_number then return true end
+    end
+    return false
 end
 
 -- Factories reachable from a list of candidate building entities, recursing
@@ -875,6 +912,17 @@ local function network_wants(outlet, record)
     return wants, network
 end
 
+-- Does this inventory hold anything currently needed? get_contents is ONE API
+-- call; the slot walk in pull_on_demand is one call per slot plus three field
+-- reads per filled stack. On a real base most interior chests hold nothing the
+-- outlet wants right now, so this skips nearly all of that work (0.21.1).
+local function holds_any(inv, need)
+    for _, item in pairs(inv.get_contents()) do
+        if need[item_key(item.name, item.quality)] then return true end
+    end
+    return false
+end
+
 -- On-demand: keep only wanted items in the outlet (return the rest to the
 -- factories), then materialize what the network can't already supply.
 local function pull_on_demand(record, hub_inv, chests, return_chests, set)
@@ -917,7 +965,7 @@ local function pull_on_demand(record, hub_inv, chests, return_chests, set)
         local chest = entry.chest
         if chest.valid then
             local inv = chest.get_inventory(defines.inventory.chest)
-            if inv then
+            if inv and holds_any(inv, need) then
                 for i = 1, #inv do
                     local stack = inv[i]
                     if stack.valid_for_read and item_allowed(record, stack.name, set) then
@@ -1259,10 +1307,12 @@ end
 local function on_mined(event)
     local entity = event.entity
     if not (entity and entity.valid) then return end
-    if entity.type == "storage-tank" then -- possible Factorissimo building
+    -- Same narrowing as on_built (0.21.1): only a real factory building or an
+    -- interior chest can change what a device sees.
+    if entity.type == "storage-tank" and is_factory_building(entity.name) then
         local data = hub_data()
         data.factory_gen = (data.factory_gen or 0) + 1
-    elseif entity.type == "logistic-container" then
+    elseif entity.type == "logistic-container" and surface_is_interior(entity.surface) then
         local data = hub_data()
         data.chest_gen = (data.chest_gen or 0) + 1
     end
@@ -1288,7 +1338,10 @@ end
 
 local function gps_tag(factory)
     local building = factory.building
-    return string.format("[gps=%d,%d,%s]",
+    -- %.0f, not %d: odd-sized prototypes legitimately sit on .5 coordinates.
+    -- Lua 5.2 truncates those for %d, but 5.3+ raises on a non-integral float,
+    -- so this was a live trap the moment Factorio moved runtimes (0.21.1).
+    return string.format("[gps=%.0f,%.0f,%s]",
         building.position.x, building.position.y, building.surface.name)
 end
 
@@ -1988,31 +2041,38 @@ local function on_slot_tick(event)
     local data = hub_data()
     local phase = math.floor(event.tick / SLOT_TICKS) % 4
     local prof = data.profiling and helpers.create_profiler()
-    -- outlets first, then inlets, then sensors (one outlet per surface, so
-    -- there is no cross-outlet competition to order)
-    local outlets, inlets, sensors, fluids = collect_records()
     local label
-    if phase == 0 then
-        for _, record in pairs(outlets) do pull_for_outlet(record) end
-        label = "pull-pass(outlets=" .. #outlets .. ")"
-    elseif phase == 1 then
-        for _, record in pairs(inlets) do distribute_for_inlet(record) end
-        for _, record in pairs(sensors) do update_sensor(record) end
-        for _, record in pairs(fluids) do
-            if record.kind == "fluid-outlet" then
-                pass_for_fluid_outlet(record)
-            else
-                pass_for_fluid_inlet(record)
-            end
-        end
-        label = "inlet-pass(inlets=" .. #inlets .. " sensors=" .. #sensors
-            .. " fluids=" .. #fluids .. ")"
-    elseif phase == 2 then
-        maintenance_pass(outlets, inlets, sensors, fluids)
-        label = "maintenance"
-    else
+    if phase == 3 then
+        -- The GUI phase touches only what the player has open, so it does not
+        -- need the device lists at all - collecting them here was four wasted
+        -- table allocations and a walk over every device (0.21.1).
         refresh_open_guis()
         label = "gui-refresh"
+    else
+        -- outlets first, then inlets, then sensors (one outlet per surface, so
+        -- there is no cross-outlet competition to order). collect_records also
+        -- sweeps records whose entity is gone, which is why it runs on all
+        -- three working phases rather than once per cycle.
+        local outlets, inlets, sensors, fluids = collect_records()
+        if phase == 0 then
+            for _, record in pairs(outlets) do pull_for_outlet(record) end
+            label = "pull-pass(outlets=" .. #outlets .. ")"
+        elseif phase == 1 then
+            for _, record in pairs(inlets) do distribute_for_inlet(record) end
+            for _, record in pairs(sensors) do update_sensor(record) end
+            for _, record in pairs(fluids) do
+                if record.kind == "fluid-outlet" then
+                    pass_for_fluid_outlet(record)
+                else
+                    pass_for_fluid_inlet(record)
+                end
+            end
+            label = "inlet-pass(inlets=" .. #inlets .. " sensors=" .. #sensors
+                .. " fluids=" .. #fluids .. ")"
+        else
+            maintenance_pass(outlets, inlets, sensors, fluids)
+            label = "maintenance"
+        end
     end
     if prof then
         prof.stop()
@@ -2100,17 +2160,10 @@ local function adopt_existing()
                     record.kind = KINDS[name]
                     record.filters = record.filters or { mode = 1, items = {} }
                     record.pins = record.pins or {}
-                    -- Legacy-field cleanup, one line per retired field.
-                    -- Policy: keep each line for two minor versions after
-                    -- the field is retired, then delete it (saves older
-                    -- than that must pass through an intermediate version
-                    -- anyway). All five below retired in 0.17.0 — drop
-                    -- this whole block in 0.21.x.
-                    record.companion = nil
-                    record.priority = nil
-                    record.cap_override = nil
-                    record.on_demand = nil
-                    record.circuit_enable = nil
+                    -- (The 0.17.0 legacy-field cleanup that lived here was
+                    -- dropped in 0.21.1, per its own two-minor-version
+                    -- policy. Those fields are never read, so any save still
+                    -- carrying them is unaffected.)
                 end
             end
         end

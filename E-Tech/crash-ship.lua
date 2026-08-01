@@ -20,9 +20,11 @@ local debug_log = settings.startup["etech-debug-log"].value
 local new_items = {}
 local touched = 0
 
-for _, prototypes in pairs(data.raw) do
-  if type(prototypes) == "table" then
-    for name, proto in pairs(prototypes) do
+-- `group`, not `prototypes`: the latter shadowed the control-stage global of
+-- that name, which made this loop read as if it were runtime code (0.21.1).
+for _, group in pairs(data.raw) do
+  if type(group) == "table" then
+    for name, proto in pairs(group) do
       -- Only real entity prototypes have a collision/selection box; that also
       -- keeps us from matching an item or recipe of the same name.
       if type(name) == "string"
@@ -67,7 +69,9 @@ for _, prototypes in pairs(data.raw) do
           -- the prototype name when the entity has no locale entry.
           localised_name = {"etech-crash-part-name", {"?", {"entity-name." .. name}, name}},
           icon = icon,
-          icons = icons,
+          -- deepcopy: sharing the entity's own icons table with the new item
+          -- means any later edit to one silently rewrites the other (0.21.1)
+          icons = icons and table.deepcopy(icons) or nil,
           icon_size = proto.icon_size or FALLBACK_ICON_SIZE,
           subgroup = "other",
           order = "z[crash-ship]-" .. name,

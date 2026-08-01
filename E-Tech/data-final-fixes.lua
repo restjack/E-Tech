@@ -307,3 +307,10 @@ end
 if settings.startup["etech-factory-mk4"].value and mods["factorissimo-2-notnotmelon"] then
   require("factory-mk4/data-final-fixes")
 end
+
+-- ---------------------------------------------------------------------------
+-- 8. Safety net for E-Tech's own recipes and technologies (LAST)
+--    Substitutes or drops anything a later overhaul retired. Runs last on
+--    purpose: everything above may still be adding recipes.
+-- ---------------------------------------------------------------------------
+require("recipe-guard").run()

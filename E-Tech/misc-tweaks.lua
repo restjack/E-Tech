@@ -101,7 +101,11 @@ end
 -- Setting = "does it spoil". When off, strip the spoil fields.
 -- ---------------------------------------------------------------------------
 if not settings.startup["etech-ag-science-spoils"].value then
-  local item = data.raw.tool["agricultural-science-pack"]
+  -- data.raw.tool is nil unless some mod still defines a tool prototype -
+  -- Factorio 2.1 made science packs plain items - so it cannot be indexed
+  -- directly. This crashed the load for anyone who turned agricultural science
+  -- spoilage off without such a mod installed (0.21.1).
+  local item = (data.raw.tool and data.raw.tool["agricultural-science-pack"])
              or data.raw.item["agricultural-science-pack"]
   if item and (item.spoil_ticks or item.spoil_result) then
     item.spoil_ticks = nil
@@ -168,7 +172,10 @@ if settings.startup["etech-copy-paste-modules"].value then
           table.insert(entity_names, entity.name)
         end
         for _, entity in pairs(raw_entities) do
-          entity.additional_pastable_entities = entity_names
+          -- Per-prototype copy: sharing one array across every furnace (or lab,
+          -- or beacon) means a later mod appending to one appends to all
+          -- (0.21.1).
+          entity.additional_pastable_entities = table.deepcopy(entity_names)
         end
       end
     end

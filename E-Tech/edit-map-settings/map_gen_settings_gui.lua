@@ -9,13 +9,13 @@ map_gen_gui.create = function(parent)
   local frame1 = parent.add{
     type = "frame",
     direction = "vertical",
-    style = "frame_in_deep_frame",
+    style = "etech-frame_in_deep_frame",
     name = ENTIRE_PREFIX .. "gui-frame-1"
   }
   local frame2 = parent.add{
     type = "frame",
     direction = "vertical",
-    style = "frame_in_deep_frame",
+    style = "etech-frame_in_deep_frame",
     name = ENTIRE_PREFIX .. "gui-frame-2"
   }
 

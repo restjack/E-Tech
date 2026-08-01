@@ -1,0 +1,49 @@
+# Formatting conventions for E-Tech.
+#
+# The repo is not uniform and deliberately is not being mass-reindented:
+# rewriting ~12 000 lines of working Lua for whitespace would bury every real
+# change in the diff and buy nothing. Instead this file records what each area
+# actually uses, so an editor matches its surroundings rather than fighting
+# them. New top-level files use 2 spaces.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.lua]
+indent_style = space
+indent_size = 2
+
+# Written at 4 spaces from the start; left alone.
+[E-Tech/factory-hub/*.lua]
+indent_size = 4
+
+[E-Tech/voidchest/*.lua]
+indent_size = 4
+
+# Ported from "Copy Paste Modules" by kajacx (MIT). Kept close to upstream so
+# changes there stay easy to diff against, tabs and camelCase included.
+[E-Tech/copy-paste-modules.lua]
+indent_style = tab
+
+# Factorio's changelog parser is whitespace-significant: exactly 99 dashes,
+# 2/4/6-space indents, no tabs, no trailing whitespace. Never let an editor
+# reformat it - tools/lint-changelog.py enforces the rules.
+[E-Tech/changelog.txt]
+indent_style = space
+trim_trailing_whitespace = true
+
+# Locale values are literal text; a trailing space can be intentional.
+[*.cfg]
+trim_trailing_whitespace = false
+
+[*.{ps1,py,json,yml,md}]
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4

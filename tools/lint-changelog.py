@@ -10,10 +10,14 @@ Rules enforced (https://lua-api.factorio.com/latest/auxiliary/changelog-format.h
   - continuation lines: exactly 6 spaces + text
   - no tabs, no trailing whitespace
 
+Also cross-checks the newest entry's version against info.json (only when the
+changelog sits next to one).
+
 Usage: python tools/lint-changelog.py [path-to-changelog]
 Exit code 0 = clean, 1 = problems found.
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -57,6 +61,22 @@ def main() -> int:
             pass
         else:
             problems.append(f"{i}: unrecognized line shape: {line[:60]!r}")
+
+    # The newest changelog entry must match info.json. Shipping a build whose
+    # changelog has no entry for its own version is the easiest release mistake
+    # to make and the easiest to catch. Only checked when linting the mod's own
+    # changelog, not an arbitrary file passed on the command line.
+    info_path = path.parent / "info.json"
+    if info_path.exists():
+        info_version = json.loads(info_path.read_text(encoding="utf-8"))["version"]
+        top = next((l[len("Version: "):].strip()
+                    for l in lines if l.startswith("Version: ")), None)
+        if top is None:
+            problems.append("no Version: line found at all")
+        elif top != info_version:
+            problems.append(
+                f"newest changelog entry is {top} but info.json says {info_version}"
+                " - bump one of them before building")
 
     if problems:
         print(f"{path}: {len(problems)} problem(s)")

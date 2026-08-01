@@ -15,7 +15,10 @@ local debug_log = settings.startup["etech-debug-log"].value
 
 local count = 0
 for name, beacon in pairs(data.raw["beacon"] or {}) do
-  beacon.allowed_effects = ALL_EFFECTS
+  -- deepcopy, not a shared reference: one later mod doing
+  -- table.insert(beacon.allowed_effects, ...) would otherwise mutate every
+  -- beacon in the game at once (0.21.1).
+  beacon.allowed_effects = table.deepcopy(ALL_EFFECTS)
   beacon.allowed_module_categories = nil
   count = count + 1
   if debug_log then log("[E-Tech] opened all modules on beacon: " .. name) end

@@ -29,7 +29,12 @@ if base_tech and base_tech.unit then
   -- Push it one science tier up where that pack exists. The ingredient list is
   -- either the {name, amount} array form or the {name=, amount=} table form
   -- depending on who last touched it, so match whatever is already there.
-  if data.raw.tool["utility-science-pack"] and unit.ingredients then
+  -- data.raw.tool may not exist at all - science packs are plain items since
+  -- Factorio 2.1, so `tool` only appears when another mod defines one. See the
+  -- same guard in factory-mk4/data.lua (0.21.1).
+  local has_utility = (data.raw.tool and data.raw.tool["utility-science-pack"]) ~= nil
+                   or data.raw.item["utility-science-pack"] ~= nil
+  if has_utility and unit.ingredients then
     local present = false
     for _, ingredient in pairs(unit.ingredients) do
       if (ingredient[1] or ingredient.name) == "utility-science-pack" then present = true end

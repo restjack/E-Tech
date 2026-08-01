@@ -1,21 +1,27 @@
 -- edit-map-settings/data.lua
 -- Data stage for the map-settings editor port: the toolbar shortcut that
 -- opens it, plus the four GUI styles the original Edit Map Settings mod
--- defined. The styles keep their original (global) names, guarded so nothing
--- breaks if another mod defines the same helper styles.
+-- defined.
+--
+-- The styles are etech- prefixed since 0.21.1. The original used bare generic
+-- names (pusher, deep_frame, frame_in_deep_frame, b_inner_frame_no_border) in
+-- the shared default style table, guarded with "define it only if nobody else
+-- did". That guard protects the OTHER mod, not us: if some other mod defined
+-- its own `pusher` first, this GUI silently rendered with whatever that mod
+-- meant by it. Prefixed names cannot collide either way.
 
 local styles = data.raw["gui-style"]["default"]
 
-if not styles["pusher"] then
-  styles["pusher"] =
+if not styles["etech-pusher"] then
+  styles["etech-pusher"] =
   {
     type = "horizontal_flow_style",
     horizontally_stretchable = "on"
   }
 end
 
-if not styles["deep_frame"] then
-  styles["deep_frame"] =
+if not styles["etech-deep_frame"] then
+  styles["etech-deep_frame"] =
   {
     type = "frame_style",
     parent = "inside_deep_frame",
@@ -27,8 +33,8 @@ if not styles["deep_frame"] then
   }
 end
 
-if not styles["frame_in_deep_frame"] then
-  styles["frame_in_deep_frame"] =
+if not styles["etech-frame_in_deep_frame"] then
+  styles["etech-frame_in_deep_frame"] =
   {
     type = "frame_style",
     parent = "frame",
@@ -48,8 +54,8 @@ end
 -- 2.0 removed 'b_inner_frame' so this now defines its 'base' properties
 -- instead of inheriting from 'b_inner_frame'.
 -- It always changed the shadow.
-if not styles["b_inner_frame_no_border"] then
-  styles["b_inner_frame_no_border"] =
+if not styles["etech-b_inner_frame_no_border"] then
+  styles["etech-b_inner_frame_no_border"] =
   {
     type = "frame_style",
     graphical_set =
@@ -87,7 +93,9 @@ data:extend({
     icon_size = 64,
     small_icon = "__base__/graphics/icons/radar.png",
     small_icon_size = 64,
-    localised_name = {"", "Edit map settings"},
-    localised_description = {"", "Open the map settings editor: pollution, evolution, enemy expansion, peaceful/no-enemies mode, spoilage rate, and per-surface map generation settings. Applying changes requires admin."},
+    -- Locale keys, not inline English (0.21.1). These were the only two
+    -- user-facing strings in the mod that could not be translated.
+    localised_name = {"etech-map-settings-shortcut-name"},
+    localised_description = {"etech-map-settings-shortcut-description"},
   },
 })

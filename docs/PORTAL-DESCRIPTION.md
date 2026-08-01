@@ -1,3 +1,11 @@
+> **SUPERSEDED — do not paste this to the mod portal.**
+> Current portal copy lives in [`PORTAL-PAGE.md`](PORTAL-PAGE.md) (and the FAQ in
+> [`PORTAL-FAQ.md`](PORTAL-FAQ.md)). This file is a pre-0.17 snapshot: it still
+> shows most features as off by default, and still describes the outlet's buffer
+> mode, per-item caps, priority, range limit and per-item energy cost — all
+> removed in 0.17.0. Its em-dashes are also mojibake. Kept only as history;
+> marked 2026-07-31 during the code audit.
+
 # E-Tech: Vanilla Recipes for AAI Industry + QoL Toggles
 
 Likes [AAI Industry](https://mods.factorio.com/mod/aai-industry)'s new machines, dislikes its recipe rewrites? This mod restores **vanilla recipes** while keeping **everything AAI adds** â€” plus a handful of optional quality-of-life toggles.

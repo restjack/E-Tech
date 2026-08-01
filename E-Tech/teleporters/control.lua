@@ -259,10 +259,21 @@ end
 -- player is standing on, or nil for a wireless-remote jump — then the
 -- player's own surface/position anchor the distance and cross-surface
 -- terms, and the remote multiplier applies.
-local get_teleport_cost = function(source, destination, player)
-  local per_use = settings.global["etech-teleporter-energy-mj"].value
-  local per_100 = settings.global["etech-teleporter-energy-distance-mj"].value
-  local cost = per_use
+-- The four runtime-global settings the cost formula needs. Read once and
+-- passed in by callers that price many pads in a row (make_teleporter_gui
+-- priced every pad in the list and re-read all four each time).
+local read_cost_settings = function()
+  return {
+    per_use = settings.global["etech-teleporter-energy-mj"].value,
+    per_100 = settings.global["etech-teleporter-energy-distance-mj"].value,
+    remote_multiplier = settings.global["etech-teleporter-remote-multiplier"].value,
+    cross_multiplier = settings.global["etech-teleporter-cross-surface-multiplier"].value,
+  }
+end
+
+local get_teleport_cost = function(source, destination, player, cfg)
+  cfg = cfg or read_cost_settings()
+  local cost = cfg.per_use
   local from_surface, from_position
   if source and source.valid then
     from_surface = source.surface
@@ -270,13 +281,13 @@ local get_teleport_cost = function(source, destination, player)
   elseif player and player.valid then
     from_surface = player.surface
     from_position = player.position
-    cost = cost * settings.global["etech-teleporter-remote-multiplier"].value
+    cost = cost * cfg.remote_multiplier
   end
   if from_surface then
     if from_surface ~= destination.surface then
-      cost = cost * settings.global["etech-teleporter-cross-surface-multiplier"].value
-    elseif per_100 > 0 then
-      cost = cost + per_100 * (util.distance(from_position, destination.position) / 100)
+      cost = cost * cfg.cross_multiplier
+    elseif cfg.per_100 > 0 then
+      cost = cost + cfg.per_100 * (util.distance(from_position, destination.position) / 100)
     end
   end
   return cost * 1000000
@@ -590,6 +601,7 @@ local make_teleporter_gui = function(player, source)
   end
 
   local chart = player.force.chart
+  local cost_cfg = read_cost_settings()
   for name, teleporter in pairs(sorted_network) do
     local teleporter_entity = teleporter.teleporter
     if not (teleporter_entity.valid) then
@@ -616,7 +628,7 @@ local make_teleporter_gui = function(player, source)
         chart(pad_surface, area)
         teleporter.charted_tick = game.tick
       end
-      local cost = get_teleport_cost(source, teleporter_entity, player)
+      local cost = get_teleport_cost(source, teleporter_entity, player, cost_cfg)
       -- Searchable text: pad name + raw surface name + string surface label
       -- (alias / platform name). Localised planet names can't be searched -
       -- the raw name ("nauvis") covers that case.
@@ -705,7 +717,9 @@ local refresh_teleporter_frames = function()
   local players = game.players
   for player_index, source in pairs (script_data.player_linked_teleporter) do
     local player = players[player_index]
-    local frame = get_teleporter_frame(player)
+    -- player can be gone (removed from the save) while a stale link entry
+    -- remains; get_teleporter_frame would index nil (0.21.1)
+    local frame = player and player.valid and get_teleporter_frame(player)
     if frame then
       make_teleporter_gui(player, source)
     end
@@ -773,7 +787,8 @@ end
 
 local is_name_available = function(force, name)
   local network = script_data.networks[force.name]
-  return not network[name]
+  -- A force with no pads yet has no network table at all; every name is free.
+  return not (network and network[name])
 end
 
 local rename_teleporter = function(force, old_name, new_name)
@@ -1524,6 +1539,16 @@ local migrate_from_original = function(command)
   out({"etech-tp-migrate-done", pads, items})
 end
 
+-- Energy cost, the cross-surface rules, the players section, preview size and
+-- the platform filter are all read while the destination list is being BUILT,
+-- so an open window kept showing the old numbers until some unrelated event
+-- forced a rebuild. Rebuild on the spot instead (0.21.1).
+local on_runtime_mod_setting_changed = function(event)
+  local setting = event.setting
+  if not (setting and setting:find("^etech%-teleporter%-")) then return end
+  refresh_teleporter_frames()
+end
+
 local teleporters = {}
 
 teleporters.add_commands = function()
@@ -1569,6 +1594,7 @@ teleporters.events =
 
   [defines.events.on_trigger_created_entity] = on_trigger_created_entity,
   [defines.events.on_player_setup_blueprint] = on_player_setup_blueprint,
+  [defines.events.on_runtime_mod_setting_changed] = on_runtime_mod_setting_changed,
 }
 
 teleporters.on_nth_tick =

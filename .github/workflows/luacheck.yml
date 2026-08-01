@@ -1,14 +1,16 @@
-name: luacheck
+name: lint
 
 on:
   push:
     paths:
-      - "E-Tech/**/*.lua"
+      - "E-Tech/**"
+      - "tools/lint-*.py"
       - ".luacheckrc"
       - ".github/workflows/luacheck.yml"
   pull_request:
     paths:
-      - "E-Tech/**/*.lua"
+      - "E-Tech/**"
+      - "tools/lint-*.py"
       - ".luacheckrc"
 
 jobs:
@@ -20,3 +22,18 @@ jobs:
         uses: lunarmodules/luacheck@v1
         with:
           args: E-Tech --config .luacheckrc
+
+  # Factorio prints the raw key in the GUI instead of failing to load when a
+  # locale entry is missing, so a typo or a renamed setting ships silently.
+  # This catches it, and cross-checks the changelog against info.json.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Locale coverage
+        run: python tools/lint-locale.py
+      - name: Changelog format and version
+        run: python tools/lint-changelog.py

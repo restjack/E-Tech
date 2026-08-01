@@ -1,7 +1,12 @@
 # build.ps1 - repackage E-Tech into the Factorio mods folder as name_version.zip
 # with forward-slash entry paths (Factorio requires them cross-platform).
-# Run from anywhere:  powershell -File build.ps1
+# Run from anywhere:  powershell -File build.ps1 [-Force]
+#
+# -Force allows overwriting an already-archived release of the same version.
+# Without it, rebuilding without bumping refuses rather than replacing the
+# archived copy of what was actually shipped.
 
+param([switch]$Force)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -43,5 +48,13 @@ Write-Host "Built $zip"
 # versions can be revisited (source folder only holds the latest code).
 $releases = Join-Path $src "releases"
 New-Item -ItemType Directory -Force $releases | Out-Null
-Copy-Item $zip (Join-Path $releases "$root.zip") -Force
-Write-Host "Archived to releases\$root.zip"
+$archived = Join-Path $releases "$root.zip"
+if ((Test-Path $archived) -and -not $Force) {
+    # The archive is the record of what was actually shipped as this version.
+    # Silently replacing it means the folder no longer says what it claims to.
+    Write-Host "releases\$root.zip already exists - NOT overwritten."
+    Write-Host "Bump the version in info.json (and add a changelog entry), or re-run with -Force."
+} else {
+    Copy-Item $zip $archived -Force
+    Write-Host "Archived to releases\$root.zip"
+}

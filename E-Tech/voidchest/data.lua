@@ -18,9 +18,6 @@ local voidTint = {
 local function tintPictures(pictures, tint)
     for _, picture in pairs(pictures) do
         picture.tint = tint;
-        if picture.hr_version then
-            picture.hr_version.tint = tint;
-        end
     end
 end
 
@@ -31,8 +28,10 @@ void_pipe.type = "infinity-pipe"
 void_pipe.name = "void-pipe"
 void_pipe.minable.result = "void-pipe"
 void_pipe.gui_mode = "none"
-void_pipe.fluid_box.height = 1
-void_pipe.fluid_box.base_area = 2500
+-- 2.0 replaced the 1.1-era height/base_area pair with a single `volume`. The
+-- old fields were silently ignored, so the pipe had been running on vanilla's
+-- buffer since the port (fixed 0.21.1). 1 x 2500 was the original intent.
+void_pipe.fluid_box.volume = 2500
 void_pipe.pictures = table.deepcopy(data.raw["pipe"]["pipe"].pictures)
 tintPictures(void_pipe.pictures, voidTint)
 
@@ -88,6 +87,11 @@ if settings.startup["etech-void-filtered"].value then
     void_chest_filtered.minable.result = "void-chest-filtered"
     void_chest_filtered.order = "a[items]-c[void-chest-b]"
     void_chest_filtered.gui_mode = "all"
+    -- The plain void chest erases on mine because everything in it is doomed
+    -- anyway. The filtered one is the opposite: its whole point is that items
+    -- you did NOT pick just sit there safely - so mining it must hand them
+    -- back, not delete them (fixed 0.21.1; inherited from the deepcopy above).
+    void_chest_filtered.erase_contents_when_mined = false
     void_chest_filtered.picture.layers[1].tint = filteredTint
 
     local void_chest_filtered_item = table.deepcopy(void_chest_item)

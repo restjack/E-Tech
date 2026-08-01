@@ -79,7 +79,7 @@ gui.make_map_settings = function(parent, surface)
     frame.add{
       type = "flow",
       direction = "horizontal",
-      style = "pusher"
+      style = "etech-pusher"
     }
     frame.add{
       type = "sprite-button",
@@ -100,7 +100,7 @@ gui.make_map_settings = function(parent, surface)
   local table_holder = inner_frame.add{
     type = "frame",
     name = "edit-map-settings-map-settings-table-holder",
-    style = "b_inner_frame_no_border"
+    style = "etech-b_inner_frame_no_border"
   }
 
   local config_table = table_holder.add{
@@ -168,10 +168,12 @@ gui.make_general_map_settings = function(parent, surface)
     caption = util.add_info_icon_to_string({"gui-map-generator.asteroids"}),
     tooltip = {"gui-map-generator.asteroids-spawning-rate-description"}
   }
+  -- `text`, not `state`: textfields have no state property, so the original
+  -- line initialised nothing and only looked like it did (fixed 0.21.1).
   config_more_option_general_table.add{
     type = "textfield",
     name = "edit-map-settings-config-more-general-asteroids-spawning-rate-textfield",
-    state = game.map_settings.asteroids.spawning_rate,
+    text = tostring(game.map_settings.asteroids.spawning_rate),
   }.style.maximal_width = 40
 
   -- spoiling-rate
@@ -181,10 +183,11 @@ gui.make_general_map_settings = function(parent, surface)
     caption = util.add_info_icon_to_string({"gui-map-generator.spoiling-rate"}),
     tooltip = {"gui-map-generator.spoiling-rate-description"}
   }
+  -- Displayed inverted, matching general_set_to_current / general_read.
   config_more_option_general_table.add{
     type = "textfield",
     name = "edit-map-settings-config-more-general-spoiling-rate-textfield",
-    state = game.difficulty_settings.spoil_time_modifier,
+    text = tostring(1 / game.difficulty_settings.spoil_time_modifier),
   }.style.maximal_width = 40
 
   config_more_option_general_table.children[1].style.horizontally_stretchable = true
@@ -211,7 +214,7 @@ gui.make_start_button = function(parent, map_gen)
   start_button_flow.add{
     type = "flow",
     direction = "horizontal",
-    style = "pusher"
+    style = "etech-pusher"
   }
   start_button_flow.add{
     type = "button",
@@ -226,7 +229,7 @@ gui.make_map_gen_settings = function(parent)
   local inner_frame = parent.add{
     type = "frame",
     direction = "vertical",
-    style = "deep_frame"
+    style = "etech-deep_frame"
   }
 
   do -- subheader
@@ -284,7 +287,7 @@ gui.make_map_gen_settings = function(parent)
     tool_button_frame.add{
       type = "flow",
       direction = "horizontal",
-      style = "pusher"
+      style = "etech-pusher"
     }
     tool_button_frame.add{
       type = "sprite-button",

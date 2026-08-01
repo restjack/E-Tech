@@ -18,13 +18,14 @@ local function pipe_stats()
 end
 
 local function processPipes()
-    local pipes = storage.pipes
+    local pipes = storage.etech_void_pipes
     if pipes == nil then return end
     local stats = pipe_stats()
     -- compact-in-place: the old table.remove-inside-pairs skipped the pipe
     -- after any removed one for that pass
     local n = #pipes
     local write = 0
+    local live = {}
     for i = 1, n do
         local pipe = pipes[i]
         if pipe.valid then
@@ -32,15 +33,25 @@ local function processPipes()
             for _, amount in pairs(pipe.get_fluid_contents()) do
                 voided = voided + amount
             end
-            stats[pipe.unit_number] = voided
+            local unit_number = pipe.unit_number
+            stats[unit_number] = voided
+            live[unit_number] = true
             pipe.clear_fluid_inside()
             write = write + 1
             if write ~= i then pipes[write] = pipe end
         end
     end
+    -- Drop stats for pipes that just fell out of the list. Before 0.21.1 they
+    -- were only cleared when the LAST pipe in the world went away, so a save
+    -- that repeatedly built and mined void pipes accumulated them forever.
+    if write < n then
+        for unit_number in pairs(stats) do
+            if not live[unit_number] then stats[unit_number] = nil end
+        end
+    end
     for i = n, write + 1, -1 do pipes[i] = nil end
     if write == 0 then
-        storage.pipes = nil
+        storage.etech_void_pipes = nil
         storage.etech_void_pipe_stats = nil
     end
 end
@@ -57,10 +68,10 @@ local function createEntity(entity)
         entity.remove_unfiltered_items = false
     end
     if entity.name == "void-pipe" then
-        if storage.pipes == nil then
-            storage.pipes = {}
+        if storage.etech_void_pipes == nil then
+            storage.etech_void_pipes = {}
         end
-        table.insert(storage.pipes, entity)
+        table.insert(storage.etech_void_pipes, entity)
     end
 end
 
@@ -106,16 +117,28 @@ end
 -- rebuild the pipe list. Runs on init and on any mod-set change, which also
 -- covers migrating a save from the original Easy Void mod to this port.
 local function init_voids()
-    storage.pipes = nil
+    storage.etech_void_pipes = nil
     storage.etech_void_pipe_stats = nil
+    -- 0.21.1: the pipe list was the one storage key not namespaced under
+    -- etech_*. Renamed to storage.etech_void_pipes; no migration is needed
+    -- because this function rebuilds the list from the world anyway, but the
+    -- old key is dropped so it does not linger in existing saves.
+    storage.pipes = nil
+    -- Players removed from the save keep an entry in the hint set otherwise.
+    local hinted = storage.etech_void_hinted
+    if hinted then
+        for player_index in pairs(hinted) do
+            if not game.get_player(player_index) then hinted[player_index] = nil end
+        end
+    end
     for _, surface in pairs(game.surfaces) do
         for _, chest in pairs(surface.find_entities_filtered{name = "void-chest"}) do
             chest.infinity_container_filters = {}
             chest.remove_unfiltered_items = true
         end
         for _, pipe in pairs(surface.find_entities_filtered{name = "void-pipe"}) do
-            if storage.pipes == nil then storage.pipes = {} end
-            table.insert(storage.pipes, pipe)
+            if storage.etech_void_pipes == nil then storage.etech_void_pipes = {} end
+            table.insert(storage.etech_void_pipes, pipe)
         end
     end
 end

@@ -73,8 +73,24 @@ local function build_power_relay(factory)
   -- Wire it to the door pole. Factorissimo's own interior pole is created
   -- lazily, so this can legitimately find nothing on an early call - the next
   -- pass picks it up.
+  --
+  -- `_inside_power_pole` is a PRIVATE field of Factorissimo's factory table
+  -- (leading underscore and all), and there is no public accessor for it. If a
+  -- future Factorissimo renames it this silently returns forever and the far
+  -- half of every Mk4 loses power with nothing in the log to explain it - so
+  -- say it once (0.21.1). Once per session is enough: this runs on every
+  -- research finish.
   local pole = factory._inside_power_pole
-  if not (pole and pole.valid) then return end
+  if not (pole and pole.valid) then
+    if factory.built and not storage.etech_mk4_warned_no_pole then
+      storage.etech_mk4_warned_no_pole = true
+      log("[E-Tech] Factory Mk4: Factorissimo's interior power pole"
+        .. " (factory._inside_power_pole) was not available for factory "
+        .. tostring(factory.id) .. ". If Mk4 floors are losing power in their"
+        .. " northern half, Factorissimo may have renamed that field.")
+    end
+    return
+  end
 
   local a = relay.get_wire_connector(defines.wire_connector_id.pole_copper, true)
   local b = pole.get_wire_connector(defines.wire_connector_id.pole_copper, true)

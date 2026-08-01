@@ -129,7 +129,8 @@ local update_window = function(player, state)
 
   gui.icon.sprite = "item/" .. state.item_name
   gui.count.caption = tostring(player.get_item_count(state.item_name))
-  gui.bar.value = state.remaining_energy / proto.fuel_value
+  -- A modded fuel with fuel_value 0 would hand the progressbar a NaN.
+  gui.bar.value = (proto.fuel_value > 0) and (state.remaining_energy / proto.fuel_value) or 0
   if state.estimated_consumption and state.estimated_consumption > 0 then
     gui.time.caption = {"etech-jui-remaining", render_time(total / state.estimated_consumption)}
   end
@@ -228,9 +229,14 @@ jetpack_ui.events =
   [defines.events.on_player_removed] = on_player_removed,
 }
 
+-- Every 15 ticks, not 5 (0.21.1). Each pass costs a remote call even with
+-- nobody airborne, plus a second remote call and one get_item_count per known
+-- fuel per player when someone is - which on a full server was ~24 remote
+-- calls a second. A fuel bar and a minutes-remaining estimate look identical
+-- at 4 Hz.
 jetpack_ui.on_nth_tick =
 {
-  [5] = sync,
+  [15] = sync,
 }
 
 jetpack_ui.on_init = function()

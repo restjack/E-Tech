@@ -21,6 +21,14 @@
 local BASE = "factory-3"
 local NAME = "factory-4"
 
+-- Science packs are `item` in Factorio 2.1 and were `tool` before it; other
+-- mods may still register either. data.raw.tool is nil when nothing defines
+-- one, so it can never be indexed directly.
+local function science_pack_exists(name)
+  return (data.raw.tool and data.raw.tool[name]) ~= nil
+      or data.raw.item[name] ~= nil
+end
+
 local base_entity = data.raw["storage-tank"][BASE]
 if not base_entity then
   log("E-Tech: " .. BASE .. " not found - Factorissimo may have renamed its tiers. Mk4 skipped.")
@@ -314,7 +322,14 @@ if t3 and t3.unit then
   -- Push it one science tier up. The ingredient list may be in either the
   -- {name, amount} array form or the {name=, amount=} table form depending on
   -- who last touched it; match whatever is already there.
-  if data.raw.tool["utility-science-pack"] and unit.ingredients then
+  --
+  -- data.raw.tool may not EXIST: Factorio 2.1 made science packs plain items,
+  -- so `tool` is only present when some other mod still defines one. Indexing
+  -- it unconditionally crashed the load for anyone running E-Tech with
+  -- Factorissimo and nothing else that happens to define a tool - which is
+  -- most people, and which no dev machine with a full modpack would ever see
+  -- (found by tools/verify-matrix.ps1, fixed 0.21.1).
+  if science_pack_exists("utility-science-pack") and unit.ingredients then
     local already = false
     for _, ingredient in pairs(unit.ingredients) do
       if (ingredient[1] or ingredient.name) == "utility-science-pack" then already = true end
@@ -390,7 +405,10 @@ entity.custom_tooltip_fields = {
   -- did NOT grow with the floor - 32 of them serve four times the area - and
   -- that is much cheaper to learn from a tooltip than from a finished build.
   {
-    name = {"etech-mk4-tiles-per-connection"},
+    -- "description." prefix, matching the quality_row entries around it - the
+    -- key is defined under [description] in locale/en/factory-mk4.cfg, so the
+    -- bare form here rendered as "Unknown key" (fixed 0.21.1).
+    name = {"description.etech-mk4-tiles-per-connection"},
     value = tostring(math.floor(120 * 120 / 32)),
   },
   quality_row("fluid-transfer-speed", fluid_speed_at),

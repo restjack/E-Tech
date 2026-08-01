@@ -168,8 +168,10 @@ local hotkey =
   type = "custom-input",
   name = names.hotkeys.focus_search,
   linked_game_control = "focus-search",
-  -- 2.1 rejects "Control" — modifier must be spelled CONTROL
-  key_sequence = "CONTROL + F"
+  -- Linked to a game control, so the sequence MUST be empty: supplying one
+  -- creates a second independent binding that shows up separately in the
+  -- controls menu and fights the game's own focus-search key (fixed 0.21.1).
+  key_sequence = ""
 }
 
 -- Keyboard alternative to the toolbar remote shortcut.
