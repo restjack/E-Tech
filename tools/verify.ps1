@@ -43,9 +43,24 @@ python (Join-Path $PSScriptRoot "lint-locale.py")
 if ($LASTEXITCODE -ne 0) { $fail++ }
 
 Write-Host "== 4/5 luacheck =="
-$luacheck = Get-Command luacheck -ErrorAction SilentlyContinue
-if ($luacheck) {
-    & $luacheck.Source $mod --config (Join-Path $repo ".luacheckrc")
+# Prefer whatever is on PATH. Failing that, fall back to a luarocks install
+# under the user profile - which is what `winget install DEVCOM.Lua` plus
+# `luarocks install luacheck` leaves behind, PATH untouched. The rock's entry
+# point is an extensionless Lua script, so it is run through lua.exe with the
+# luarocks tree on LUA_PATH; nothing is added to the environment permanently.
+$luacheckCmd = Get-Command luacheck -ErrorAction SilentlyContinue
+$luaExe = Join-Path $env:LOCALAPPDATA "Programs\Lua\bin\lua.exe"
+$rocks = Join-Path $env:APPDATA "luarocks"
+$luacheckScript = Join-Path $rocks "bin\luacheck"
+$config = Join-Path $repo ".luacheckrc"
+
+if ($luacheckCmd) {
+    & $luacheckCmd.Source $mod --config $config
+    if ($LASTEXITCODE -ne 0) { $fail++ }
+} elseif ((Test-Path $luaExe) -and (Test-Path $luacheckScript)) {
+    $env:LUA_PATH = "$rocks\share\lua\5.4\?.lua;$rocks\share\lua\5.4\?\init.lua;;"
+    $env:LUA_CPATH = "$rocks\lib\lua\5.4\?.dll;;"
+    & $luaExe $luacheckScript $mod --config $config
     if ($LASTEXITCODE -ne 0) { $fail++ }
 } else {
     Write-Host "luacheck not installed locally - skipped (CI runs it on push)"

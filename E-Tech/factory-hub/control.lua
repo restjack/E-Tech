@@ -1257,10 +1257,11 @@ local function reachable_tanks(record)
     return tanks
 end
 
+-- First (and, for these devices, only) fluid in an entity, or nil.
+-- `next` says that outright; the old for-loop-with-an-unconditional-return
+-- said it by accident, which is also what luacheck reported.
 local function device_fluid(entity)
-    for name, amount in pairs(entity.get_fluid_contents()) do
-        return name, amount
-    end
+    return next(entity.get_fluid_contents())
 end
 
 -- The pull filter lives in record.fluid_filter (set via the small relative
