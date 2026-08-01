@@ -120,6 +120,24 @@ Date: 2026-07-31
       on the spot, once per force. The cell is queued instead and repaired in
       the background, so an outpost being actively mined stops driving a burst
       of chunk scans. Marker totals lag by a few seconds.
+    - Factory devices: a Factorissimo building being placed or mined no longer
+      makes every device rebuild its factory list and its interior-chest cache
+      in the same tick. Profiling a live base showed that stampede costing
+      66-76 ms per maintenance pass, once every two seconds, for as long as the
+      player kept building. Rebuilds are now paced, and the pull pass tolerates
+      a list that is a pass or two old - safe, because every entry is
+      re-validated at the moment it is used.
+    - Factory outlet: the module-request scan is cut into six strips, one per
+      maintenance pass, instead of one sweep of the whole construction area.
+      That sweep profiled at 32-36 ms landing on a single tick roughly once a
+      minute - the most predictable stutter the mod produced. Same total work,
+      spread out; readers still only ever see a complete picture.
+    - Factory outlet: the list of roboports the outlet can reach is cached
+      alongside the requester scan. Rebuilding it per pass turned out to be the
+      bulk of the ghost-demand cost, not the matching that follows it.
+    - Factory outlet panel: the item grid is only rebuilt when something it
+      shows actually changed. Tearing it down and repopulating it every two
+      seconds reached 13 ms with a large factory set, to redraw the same thing.
   Changes:
     - Dropped the 0.17.0 legacy-field cleanup for factory devices, per its own
       two-version policy. Those fields are never read, so saves still carrying

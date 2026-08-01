@@ -58,6 +58,11 @@ local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-ou
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 15    -- choose-elem filter slots in the outlet/inlet panels
 local RATE_WINDOW = 3600   -- ticks of pull history for the items/min stat
+local REQUESTER_TTL = 240  -- PULL_TICKS * 2: how long the outlet reuses its
+                           -- requester-demand scan and its network-cell
+                           -- geometry. Declared up here rather than next to
+                           -- its first user because ghost_wants is defined
+                           -- earlier in the file and needs it too.
 local MAX_SIGNALS = 1000   -- constant combinator / logistic section limit
 local MAX_FACTORY_ROWS = 20
 local TOOLTIP_FACTORIES = 8 -- per-factory breakdown lines in an item tooltip
@@ -330,16 +335,43 @@ local function factories_for_hub(hub)
     return out
 end
 
-function cached_factories(record) -- assigns the forward declaration
+-- may_rebuild = false: use whatever list we have, however stale, rather than
+-- rebuilding here. The hot paths pass false and let maintenance_pass do the
+-- rebuilding at a paced rate.
+--
+-- WHY (measured 0.21.1): a factory_gen bump invalidates EVERY device at once.
+-- With every caller rebuilding on demand, one Factorissimo building placed or
+-- mined meant every device ran a whole-surface factory scan plus a full
+-- interior-chest rebuild in the same tick - profiled at 66-76 ms per
+-- maintenance pass, once every 2 s, for as long as the player kept building.
+-- Budgeting maintenance alone does not fix that; it just relocates the spike
+-- into the pull pass, because that is the next thing to ask for the list. The
+-- staleness is safe: reachable_chests re-checks chest.valid and
+-- factory_usable on every single use, so a stale list can only ever contain
+-- entries that get filtered, never wrong ones.
+--
+-- A device with NO list at all always builds one - there is nothing to be
+-- stale with, and refusing would make a freshly placed device do nothing.
+function cached_factories(record, may_rebuild) -- assigns the forward declaration
     local tick = game.tick
     local gen = hub_data().factory_gen or 0
-    if not record.factories or record.factory_gen ~= gen
-        or tick - (record.scanned_tick or 0) >= RESCAN_TICKS then
+    local stale = record.factory_gen ~= gen
+        or tick - (record.scanned_tick or 0) >= RESCAN_TICKS
+    if not record.factories or (stale and may_rebuild ~= false) then
         record.factories = factories_for_hub(record.entity)
         record.scanned_tick = tick
         record.factory_gen = gen
     end
     return record.factories
+end
+
+-- Would ensure_chest_cache rebuild right now? Asked by maintenance_pass so it
+-- can spend its budget on the devices that actually need it.
+local function chest_cache_stale(record)
+    local cache = record.chest_cache
+    if not cache then return true end
+    return cache.gen ~= (hub_data().chest_gen or 0)
+        or cache.scanned_tick ~= record.scanned_tick
 end
 
 -- Interior-chest cache. Profiling showed the per-pass
@@ -353,16 +385,21 @@ end
 -- fail the per-use valid check and get swept out on the next rebuild.
 -- The prototype logistic_mode is frozen at build time so filtering by mode
 -- costs no API calls.
-local function ensure_chest_cache(record)
+local function ensure_chest_cache(record, may_rebuild)
     local data = hub_data()
     local gen = data.chest_gen or 0
     local cache = record.chest_cache
-    if cache and cache.gen == gen and cache.scanned_tick == record.scanned_tick then
+    -- may_rebuild = false: serve whatever we have. Same reasoning as
+    -- cached_factories - every entry is re-validated on use, so a stale cache
+    -- can only under-report, never mislead. Only maintenance_pass rebuilds,
+    -- and it paces itself.
+    if cache and (may_rebuild == false
+        or (cache.gen == gen and cache.scanned_tick == record.scanned_tick)) then
         return cache
     end
     local entries = {}
     local force = record.entity.force
-    for _, factory in pairs(cached_factories(record)) do
+    for _, factory in pairs(cached_factories(record, may_rebuild)) do
         if factory_usable(factory) then
             local found = factory.inside_surface.find_entities_filtered {
                 area = factory_interior_area(factory),
@@ -414,7 +451,9 @@ end
 -- factory in each entry for the GUI's per-factory breakdown.
 local function reachable_chests(record, accept_mode)
     local out = {}
-    for _, entry in ipairs(ensure_chest_cache(record).entries) do
+    -- never rebuilds: the pull pass, the sensor and the GUI all read through
+    -- here, and none of them should be the one paying for a cache miss
+    for _, entry in ipairs(ensure_chest_cache(record, false).entries) do
         if entry.chest.valid and factory_usable(entry.factory)
             and accept_mode(entry.mode) then
             out[#out + 1] = { chest = entry.chest, factory = entry.factory, mode = entry.mode }
@@ -840,39 +879,80 @@ end
 -- build event we can hook, so they keep a slow, area-limited periodic scan.
 -- prewarm: refresh PULL_TICKS early (called from the maintenance phase) so
 -- the ~23 ms rescan never lands on the same tick as a pull pass.
+-- Sliced since 0.21.1. The whole-bbox sweep profiled at 32-36 ms, landing in
+-- one tick roughly once a minute, forever - the single most predictable hitch
+-- the module produced. Same total work, cut into vertical strips, one strip
+-- per maintenance pass, accumulated into a shadow table that is swapped in only
+-- when the sweep completes. Readers always see the last COMPLETE picture, never
+-- a half-built one.
+--
+-- A proxy sitting exactly on a strip boundary is counted in both strips, since
+-- find_entities_filtered areas are inclusive. That over-reports its demand
+-- slightly; the outlet's give-back loop returns the excess on the next pass,
+-- which is the same way the ghost index already handles boundary chunks.
+local PROXY_SLICES = 6
+
 local function surface_proxies(surface, force, prewarm)
     local data = hub_data()
     data.proxies = data.proxies or {}
     local key = gindex_key(surface, force)
     local entry = data.proxies[key]
-    local ttl = prewarm and (PROXY_TICKS - PULL_TICKS) or PROXY_TICKS
-    if not entry or game.tick - entry.tick >= ttl then
-        local prof = data.profiling and helpers.create_profiler()
-        local chunks = {}
-        local bbox = construction_bbox(surface, force)
-        if bbox then
-            local floor = math.floor
-            for _, proxy in pairs(surface.find_entities_filtered {
-                area = bbox, type = "item-request-proxy", force = force,
-            }) do
-                local pos = proxy.position
-                local cx, cy = floor(pos.x / 32), floor(pos.y / 32)
-                local ck = cx .. ":" .. cy
-                local b = chunks[ck]
-                if not b then
-                    b = { x = cx * 32 + 16, y = cy * 32 + 16, items = {} }
-                    chunks[ck] = b
-                end
-                add_insert_plans(b.items, proxy.insert_plan)
-            end
-        end
-        entry = { tick = game.tick, chunks = chunks }
+    if not entry then
+        -- Backdated so the first sweep starts on the next prewarm, but not far
+        -- enough back for the stale-entry pruning in maintenance_pass to eat it.
+        entry = { tick = game.tick - PROXY_TICKS, chunks = {} }
         data.proxies[key] = entry
-        if prof then
-            prof.stop()
-            helpers.write_file(PROFILE_FILE,
-                {"", game.tick, ",proxy-scan,", prof, "\n"}, true)
+    end
+    -- Readers (ghost_wants) never scan - they take whatever is current.
+    -- Scanning happens only on the maintenance phase's prewarm call.
+    if not prewarm then return entry end
+
+    local building = entry.building
+    if not building and game.tick - entry.tick >= PROXY_TICKS - PULL_TICKS then
+        local bbox = construction_bbox(surface, force)
+        if not bbox then
+            -- no construction coverage here at all: nothing to scan
+            entry.tick, entry.chunks = game.tick, {}
+            return entry
         end
+        building = { bbox = bbox, slice = 0, chunks = {} }
+        entry.building = building
+    end
+    if not building then return entry end
+
+    local prof = data.profiling and helpers.create_profiler()
+    local x1, y1 = building.bbox[1][1], building.bbox[1][2]
+    local x2, y2 = building.bbox[2][1], building.bbox[2][2]
+    local step = (x2 - x1) / PROXY_SLICES
+    local sx1 = x1 + step * building.slice
+    -- last strip runs to the true edge, so rounding can never leave a gap
+    local sx2 = (building.slice == PROXY_SLICES - 1) and x2 or (sx1 + step)
+
+    local floor = math.floor
+    for _, proxy in pairs(surface.find_entities_filtered {
+        area = {{sx1, y1}, {sx2, y2}}, type = "item-request-proxy", force = force,
+    }) do
+        local pos = proxy.position
+        local cx, cy = floor(pos.x / 32), floor(pos.y / 32)
+        local ck = cx .. ":" .. cy
+        local b = building.chunks[ck]
+        if not b then
+            b = { x = cx * 32 + 16, y = cy * 32 + 16, items = {} }
+            building.chunks[ck] = b
+        end
+        add_insert_plans(b.items, proxy.insert_plan)
+    end
+
+    building.slice = building.slice + 1
+    if building.slice >= PROXY_SLICES then
+        entry.chunks = building.chunks
+        entry.tick = game.tick
+        entry.building = nil
+    end
+    if prof then
+        prof.stop()
+        helpers.write_file(PROFILE_FILE,
+            {"", game.tick, ",proxy-slice(", building.slice, "/", PROXY_SLICES, "),", prof, "\n"}, true)
     end
     return entry
 end
@@ -890,13 +970,26 @@ local function ghost_wants(record, network)
     if next(idx.chunks) == nil and next(proxies.chunks) == nil then
         return wants
     end
-    local cells = {}
-    for _, cell in pairs(network.cells) do
-        local r = cell.construction_radius
-        if r and r > 0 and cell.owner and cell.owner.valid then
-            local p = cell.owner.position
-            cells[#cells + 1] = { x = p.x, y = p.y, r = r + 16 }
+    -- The cell list is every roboport in the network, rebuilt from scratch on
+    -- every call before 0.21.1 - which profiling showed to be the bulk of this
+    -- function's ~1.5 ms, not the merge below. Roboports are built rarely, so
+    -- cache the geometry (NOT the demand) for a couple of passes. Ghost demand
+    -- itself still recomputes every pass; only where bots can reach is reused.
+    local cells
+    local cell_cache = record.cell_cache
+    if cell_cache and cell_cache.network_id == network.network_id
+        and game.tick - cell_cache.tick < REQUESTER_TTL then
+        cells = cell_cache.cells
+    else
+        cells = {}
+        for _, cell in pairs(network.cells) do
+            local r = cell.construction_radius
+            if r and r > 0 and cell.owner and cell.owner.valid then
+                local p = cell.owner.position
+                cells[#cells + 1] = { x = p.x, y = p.y, r = r + 16 }
+            end
         end
+        record.cell_cache = { tick = game.tick, network_id = network.network_id, cells = cells }
     end
     if #cells == 0 then return wants end
     local function merge(chunks)
@@ -943,7 +1036,7 @@ end
 --     noticing a new chest request one pass late costs nothing real.
 --
 -- Ghost demand is deliberately NOT cached - see network_wants below.
-local REQUESTER_TTL = PULL_TICKS * 2 -- 4 s
+-- (REQUESTER_TTL lives with the other constants at the top of the file.)
 
 local function requester_wants(outlet, network, record)
     local tick = game.tick
@@ -1615,7 +1708,6 @@ local function refresh_grid(player, record)
 
     local search = inner["etech-hub-search"].text:lower()
     local scroll = inner.scroll
-    scroll.clear()
 
     -- totals per item+quality with per-factory breakdown
     local reachable = reachable_chests(record, outlet_source_mode(record))
@@ -1656,6 +1748,8 @@ local function refresh_grid(player, record)
         else
             msg = {"gui-etech-hub.panel-empty"}
         end
+        record.grid_snapshot = nil
+        scroll.clear()
         scroll.add {type = "label", caption = msg}
         return
     end
@@ -1665,6 +1759,27 @@ local function refresh_grid(player, record)
         return a.name < b.name
     end)
 
+    -- Dirty check, same trick the sensor uses. Tearing down and rebuilding
+    -- every button every 2 s profiled at up to 13 ms once a big factory set was
+    -- in play, and most refreshes show exactly what the last one did. Only the
+    -- rate label above (already updated) changes every pass.
+    --
+    -- The signature covers what a BUTTON shows - sprite, count, pin state - and
+    -- the search term. It does not cover which factory holds what, so a stack
+    -- moving between two factories without changing the total leaves the
+    -- hover tooltip's breakdown up to one refresh stale. Cheap trade for not
+    -- rebuilding the grid.
+    local sig = {}
+    for _, t in ipairs(list) do
+        sig[#sig + 1] = t.name .. "|" .. t.quality .. "=" .. t.count .. (t.pinned and "*" or "")
+    end
+    local snapshot = search .. "\0" .. table.concat(sig, ";")
+    if record.grid_snapshot == snapshot and scroll.grid and scroll.grid.valid then
+        return
+    end
+    record.grid_snapshot = snapshot
+
+    scroll.clear()
     local grid = scroll.add {type = "table", name = "grid", column_count = 8}
     for _, t in ipairs(list) do
         local lines = {"", t.name}
@@ -2086,20 +2201,29 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
     -- rotation up to 4 passes of headroom before any device would fall back
     -- to an inline rescan during its pull. Gen-bump refreshes (a factory
     -- building was placed/removed - rare, player-visible) stay immediate.
+    -- ONE budget covering both reasons to rescan. Until 0.21.1 a gen bump was
+    -- exempt from the budget, so a single Factorissimo building placed or
+    -- mined made every device rescan in the same tick: profiled at 66-76 ms
+    -- per maintenance pass, once every 2 s, for as long as the player kept
+    -- building. Devices that miss their turn keep a stale factory_gen and are
+    -- simply first in line next pass - the hot paths tolerate a stale list
+    -- (see cached_factories), so nothing has to happen this instant.
     local rescan_budget = 1
+    local chest_budget = 2
     for _, group in pairs({ outlets, inlets, sensors, fluids or {} }) do
         for _, record in pairs(group) do
             local expired = tick - (record.scanned_tick or 0) >= RESCAN_TICKS - PULL_TICKS * 4
-            if record.factory_gen ~= gen or (expired and rescan_budget > 0) then
-                if record.factory_gen == gen then rescan_budget = rescan_budget - 1 end
+            if (record.factory_gen ~= gen or expired) and rescan_budget > 0 then
+                rescan_budget = rescan_budget - 1
                 record.factories = factories_for_hub(record.entity)
                 record.scanned_tick = tick
                 record.factory_gen = gen
             end
             if record.kind == "fluid-outlet" or record.kind == "fluid-inlet" then
                 reachable_tanks(record)
-            else
-                ensure_chest_cache(record)
+            elseif chest_cache_stale(record) and chest_budget > 0 then
+                chest_budget = chest_budget - 1
+                ensure_chest_cache(record, true)
             end
         end
     end
@@ -2110,7 +2234,9 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
     -- surface deleted) so storage doesn't accumulate dead surface entries
     if data.proxies then
         for key, entry in pairs(data.proxies) do
-            if tick - entry.tick >= PROXY_TICKS * 2 then
+            -- never drop one mid-sweep: entry.tick is the last COMPLETED
+            -- sweep, so a slow in-progress scan would otherwise look stale
+            if not entry.building and tick - entry.tick >= PROXY_TICKS * 2 then
                 data.proxies[key] = nil
             end
         end
