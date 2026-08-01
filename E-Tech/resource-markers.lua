@@ -33,6 +33,9 @@ local script_data =
   -- rescan_queue: array of {force_name, surface_index, cx, cy} chunks still
   -- to scan for a running background rebuild (see start_rescan).
   rescan_queue = nil,
+  -- dirty[force|surface|cx|cy|resource] = true: cells a depletion event
+  -- invalidated, drained at a fixed rate by process_dirty_cells.
+  dirty = nil,
 }
 
 -- True while we create/destroy our own tags so on_chart_tag_removed can
@@ -461,18 +464,65 @@ local on_chunk_charted = function(event)
   scan_chunk(event.force, surface, event.position.x, event.position.y, event.area)
 end
 
+-- Depletion fires once per ore TILE that empties, which on an active outpost is
+-- many times a second. Each event used to run a full find_entities_filtered
+-- over the entity's whole 32x32 chunk, once per force with players - and the
+-- RESCAN_TICKS freshness guard could never suppress it, because the amount had
+-- by definition just changed. That was the single hottest thing this module
+-- did on a mining base.
+--
+-- Now the event only marks the cell dirty (pure Lua, and duplicates collapse
+-- because it is a set). process_dirty_cells drains it a few cells at a time.
+-- Totals therefore lag reality by seconds, which for a number printed on a map
+-- marker nobody is staring at is free (0.21.1).
 local on_resource_depleted = function(event)
   local entity = event.entity
   if not (entity and entity.valid) then return end
-  local surface = entity.surface
+  local surface_index = entity.surface.index
   local cx = math.floor(entity.position.x / 32)
   local cy = math.floor(entity.position.y / 32)
-  local area = {{cx * 32, cy * 32}, {cx * 32 + 32, cy * 32 + 32}}
-  for _, force in pairs (game.forces) do
-    if #force.players > 0 and force.is_chunk_charted(surface, {x = cx, y = cy}) then
-      scan_chunk(force, surface, cx, cy, area, entity.name)
+  local name = entity.name
+  local dirty = script_data.dirty
+  if not dirty then
+    dirty = {}
+    script_data.dirty = dirty
+  end
+  -- The is-it-charted test is deferred to drain time: it is an API call, and
+  -- doing it here would put it back on the hot path we are trying to leave.
+  for force_name, force in pairs (game.forces) do
+    if #force.players > 0 then
+      dirty[force_name .. "|" .. surface_index .. "|" .. cx .. "|" .. cy .. "|" .. name] = true
     end
   end
+end
+
+-- Cells drained per pass. Deliberately small: this is background repair of a
+-- cosmetic number, and it competes with the rebuild queue for tick budget.
+local DIRTY_BATCH = 4
+
+local process_dirty_cells = function()
+  local dirty = script_data.dirty
+  if not (dirty and next(dirty)) then return end
+  local done = 0
+  for key in pairs (dirty) do
+    dirty[key] = nil
+    local force_name, surface_index, cx, cy, name =
+      key:match("^(.-)|(%d+)|(-?%d+)|(-?%d+)|(.*)$")
+    if force_name then
+      local force = game.forces[force_name]
+      local surface = game.surfaces[tonumber(surface_index)]
+      if force and force.valid and surface and surface.valid and #force.players > 0 then
+        cx, cy = tonumber(cx), tonumber(cy)
+        if force.is_chunk_charted(surface, {x = cx, y = cy}) then
+          local area = {{cx * 32, cy * 32}, {cx * 32 + 32, cy * 32 + 32}}
+          scan_chunk(force, surface, cx, cy, area, name)
+        end
+      end
+    end
+    done = done + 1
+    if done >= DIRTY_BATCH then break end
+  end
+  if not next(dirty) then script_data.dirty = nil end
 end
 
 local on_chart_tag_removed = function(event)
@@ -599,6 +649,7 @@ local LEGACY_MARKER_MODS =
 markers.on_nth_tick =
 {
   [2] = process_rescan_queue,
+  [31] = process_dirty_cells,
   [907] = process_pending,
 }
 
@@ -629,6 +680,8 @@ markers.on_configuration_changed = function(data)
   end
   script_data = storage.etech_markers
   script_data.pending = script_data.pending or {}
+  -- 0.21.1: depletion now queues cells here instead of rescanning inline.
+  -- Left nil when empty; nothing to migrate.
 
   -- a known marker mod was just removed: sweep the tags it left behind
   local mod_changes = data and data.mod_changes

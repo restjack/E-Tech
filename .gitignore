@@ -4,6 +4,14 @@ E-Tech/releases/*.zip
 # Third-party patched mod zips — local bookkeeping only, never published
 patched-mods/*.zip
 
+# Superseded third-party zips kept as a local archive. Same reasoning as
+# patched-mods/: nothing here is E-Tech's code, nothing here ships with the
+# mod, and a public repo has no business redistributing other people's mods
+# just because we happened to replace them. absorbed-mods/ is the exception
+# and stays tracked — those are the originals of mods whose code was merged
+# INTO E-Tech, so they are the licence paper trail.
+mods-replaced/*.zip
+
 # OS / editor noise
 Thumbs.db
 Desktop.ini

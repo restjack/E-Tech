@@ -8,12 +8,29 @@
 --
 -- Credits to JDOGG, Optera, kendfrey, Rseding91 for their original void mods.
 
-local voidTint = {
-    r = settings.startup["etech-void-tint-r"].value,
-    g = settings.startup["etech-void-tint-g"].value,
-    b = settings.startup["etech-void-tint-b"].value,
-    a = 1
-}
+-- Colour comes from one hex string since 0.21.1 (was three 0-1 sliders).
+-- Accepts "BF00FF", "#BF00FF" or "bf00ff"; anything else falls back to the
+-- default and says so in the log rather than shipping a black chest.
+local DEFAULT_VOID_TINT = "BF00FF"
+
+local function parse_hex_tint(text)
+    local hex = tostring(text or ""):gsub("^#", ""):gsub("%s", "")
+    if #hex ~= 6 or hex:find("[^0-9A-Fa-f]") then return nil end
+    return {
+        r = tonumber(hex:sub(1, 2), 16) / 255,
+        g = tonumber(hex:sub(3, 4), 16) / 255,
+        b = tonumber(hex:sub(5, 6), 16) / 255,
+        a = 1,
+    }
+end
+
+local configured = settings.startup["etech-void-tint"].value
+local voidTint = parse_hex_tint(configured)
+if not voidTint then
+    log("[E-Tech] void tint " .. tostring(configured)
+        .. " is not a 6-digit hex colour - using " .. DEFAULT_VOID_TINT)
+    voidTint = parse_hex_tint(DEFAULT_VOID_TINT)
+end
 
 local function tintPictures(pictures, tint)
     for _, picture in pairs(pictures) do

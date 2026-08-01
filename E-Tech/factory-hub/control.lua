@@ -517,64 +517,106 @@ local function storage_filter_name(chest)
     return name
 end
 
-local function return_passes(name, quality)
-    return {
-        function(entry)
-            return entry.chest.get_item_count({name = name, quality = quality}) > 0
-        end,
-        function(entry)
-            return entry.mode == "storage" and storage_filter_name(entry.chest) == name
-        end,
-        function(entry)
-            if entry.mode ~= "storage" or storage_filter_name(entry.chest) ~= nil then
-                return false
+-- Snapshot the candidate return chests ONCE: inventory handle, logistic mode,
+-- storage filter, contents and emptiness. Everything the preference order needs
+-- is then plain Lua.
+--
+-- The old shape re-derived four predicate closures and swept every chest four
+-- times FOR EVERY ITEM TYPE being returned, calling get_item_count per chest
+-- per sweep. Handing 20 item types back across 90 chests was roughly 7 200 API
+-- calls on a single tick. Snapshotting moves that to one pass over the chests,
+-- full stop (0.21.1).
+--
+-- The snapshot goes stale as we insert into it, and that is fine: `counts` is
+-- only consulted for the item being placed, and a chest that stops being empty
+-- because we just filled it merely moves between two adjacent buckets that are
+-- both "unfiltered storage".
+local function return_snapshot(chests)
+    local snapshot = {}
+    for _, entry in pairs(chests) do
+        local chest = entry.chest
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                local counts = {}
+                for _, item in pairs(inv.get_contents()) do
+                    counts[item_key(item.name, item.quality)] = item.count
+                end
+                snapshot[#snapshot + 1] = {
+                    chest = chest,
+                    inv = inv,
+                    mode = entry.mode,
+                    counts = counts,
+                    -- storage_filter is only meaningful on storage chests
+                    filter = (entry.mode == "storage") and storage_filter_name(chest) or nil,
+                    empty = inv.is_empty(),
+                }
             end
-            local inv = entry.chest.get_inventory(defines.inventory.chest)
-            return inv and inv.is_empty()
-        end,
-        function(entry)
-            return entry.mode == "storage" and storage_filter_name(entry.chest) == nil
-        end,
-    }
+        end
+    end
+    return snapshot
 end
 
--- Insert a whole LuaItemStack into chests in return-preference order,
--- preserving spoilage/quality/ammo (mining return). Mutates the source
--- stack down to whatever couldn't be placed.
-local function insert_stack_into_chests(chests, stack)
-    if not stack.valid_for_read then return end
-    for _, accept in ipairs(return_passes(stack.name, stack.quality.name)) do
-        for _, entry in pairs(chests) do
-            if not stack.valid_for_read then return end
-            local chest = entry.chest
-            if chest.valid and accept(entry) then
-                local inv = chest.get_inventory(defines.inventory.chest)
-                if inv then
-                    local inserted = inv.insert(stack)
-                    if inserted > 0 then
-                        stack.count = stack.count - inserted -- reaching 0 clears the stack
+-- The four acceptable homes for a returned item, best first:
+--   1. a chest that already holds it (its origin chest wins naturally)
+--   2. a storage chest filtered for exactly it
+--   3. an empty unfiltered storage chest
+--   4. any unfiltered storage chest with space
+-- An empty PROVIDER chest is deliberately absent - that is a machine output a
+-- consumer momentarily drained, and dumping a foreign item there is the
+-- contamination 0.19.6 fixed.
+local function return_buckets(snapshot, name, quality)
+    local key = item_key(name, quality)
+    local holds, filtered, empty_storage, any_storage = {}, {}, {}, {}
+    for _, entry in ipairs(snapshot) do
+        if entry.chest.valid then
+            if (entry.counts[key] or 0) > 0 then
+                holds[#holds + 1] = entry
+            elseif entry.mode == "storage" then
+                if entry.filter == name then
+                    filtered[#filtered + 1] = entry
+                elseif entry.filter == nil then
+                    if entry.empty then
+                        empty_storage[#empty_storage + 1] = entry
+                    else
+                        any_storage[#any_storage + 1] = entry
                     end
+                end
+            end
+        end
+    end
+    return {holds, filtered, empty_storage, any_storage}
+end
+
+-- Insert a whole LuaItemStack in return-preference order, preserving
+-- spoilage/quality/ammo (mining return). Mutates the source stack down to
+-- whatever couldn't be placed.
+local function insert_stack_into_chests(snapshot, stack)
+    if not stack.valid_for_read then return end
+    for _, bucket in ipairs(return_buckets(snapshot, stack.name, stack.quality.name)) do
+        for _, entry in ipairs(bucket) do
+            if not stack.valid_for_read then return end
+            if entry.chest.valid then
+                local inserted = entry.inv.insert(stack)
+                if inserted > 0 then
+                    stack.count = stack.count - inserted -- reaching 0 clears the stack
                 end
             end
         end
     end
 end
 
--- Insert `count` of a plain item spec into chests in return-preference
--- order (overflow/on-demand return; spec-based, so spoil timers restart).
--- Returns number inserted.
-local function insert_spec_into_chests(chests, name, quality, count)
+-- Insert `count` of a plain item spec in return-preference order
+-- (overflow/on-demand return; spec-based, so spoil timers restart).
+-- Returns the number inserted.
+local function insert_spec_into_chests(snapshot, name, quality, count)
     local total = 0
-    for _, accept in ipairs(return_passes(name, quality)) do
-        for _, entry in pairs(chests) do
+    for _, bucket in ipairs(return_buckets(snapshot, name, quality)) do
+        for _, entry in ipairs(bucket) do
             local remaining = count - total
             if remaining <= 0 then return total end
-            local chest = entry.chest
-            if chest.valid and accept(entry) then
-                local inv = chest.get_inventory(defines.inventory.chest)
-                if inv then
-                    total = total + inv.insert({name = name, count = remaining, quality = quality})
-                end
+            if entry.chest.valid then
+                total = total + entry.inv.insert({name = name, count = remaining, quality = quality})
             end
         end
     end
@@ -878,24 +920,66 @@ end
 -- how much requesters (chests, players, spidertrons) still want beyond
 -- what they hold, plus construction ghosts in the network's build range.
 -- Returns nil when the outlet isn't in a network.
-local function network_wants(outlet, record)
-    local network = outlet.logistic_network
-    if not network then return nil end
+-- Requester-side demand: chests, players, spidertrons. Split out and cached
+-- since 0.21.1, because this is the one part of a pull pass whose cost scales
+-- with the size of the PLAYER'S LOGISTIC NETWORK rather than with anything the
+-- outlet is doing. It walks every requester point in the network, and it used
+-- to call get_item_count once per filter - on a megabase with a few thousand
+-- requesters averaging three filters each, that is thousands of API calls
+-- landing on one tick, every pass, forever, even for an outlet with a single
+-- reachable chest.
+--
+-- Three changes, in order of how much they can surprise you:
+--   * points with no sections are skipped before their filters are touched.
+--     Exact: same answer, less work.
+--   * get_item_count is memoized per owner+item+quality for the duration of
+--     one scan, so a chest asking for the same item in several sections is
+--     queried once instead of once per filter. Also exact - nothing mutates
+--     inventories mid-scan, so the repeated calls always returned the same
+--     number anyway.
+--   * the whole result is reused for REQUESTER_TTL ticks. This one is NOT
+--     exact: it trades up to REQUESTER_TTL of staleness in chest and player
+--     demand. Bots take longer than that to cross a base, so an outlet
+--     noticing a new chest request one pass late costs nothing real.
+--
+-- Ghost demand is deliberately NOT cached - see network_wants below.
+local REQUESTER_TTL = PULL_TICKS * 2 -- 4 s
+
+local function requester_wants(outlet, network, record)
+    local tick = game.tick
+    local cache = record.requester_cache
+    -- network_id guards the case where the outlet is rewired into a different
+    -- network mid-TTL, which would otherwise serve another network's demand.
+    if cache and cache.network_id == network.network_id
+        and tick - cache.tick < REQUESTER_TTL then
+        return cache.wants
+    end
+
     local wants = {}
+    local have_cache = {}
     for _, point in pairs(network.requester_points) do
         local owner = point.owner
         if owner.valid and owner ~= outlet then
-            for _, section in pairs(point.sections) do
-                if section.active then
-                    for _, filter in pairs(section.filters) do
-                        local v = filter.value
-                        if v and v.name and (v.type == nil or v.type == "item") then
-                            local quality = v.quality or "normal"
-                            local have = owner.get_item_count({name = v.name, quality = quality})
-                            local deficit = (filter.min or 0) - have
-                            if deficit > 0 then
-                                local key = item_key(v.name, quality)
-                                wants[key] = (wants[key] or 0) + deficit
+            local sections = point.sections
+            if sections and #sections > 0 then
+                local owner_key = (owner.unit_number or 0) .. "|"
+                for _, section in pairs(sections) do
+                    if section.active then
+                        for _, filter in pairs(section.filters) do
+                            local v = filter.value
+                            if v and v.name and (v.type == nil or v.type == "item") then
+                                local quality = v.quality or "normal"
+                                local ck = owner_key .. v.name .. "|" .. quality
+                                local have = have_cache[ck]
+                                if have == nil then
+                                    have = owner.get_item_count({name = v.name, quality = quality})
+                                    have_cache[ck] = have
+                                end
+                                local deficit = (filter.min or 0) - have
+                                if deficit > 0 then
+                                    local key = item_key(v.name, quality)
+                                    wants[key] = (wants[key] or 0) + deficit
+                                end
                             end
                         end
                     end
@@ -903,9 +987,25 @@ local function network_wants(outlet, record)
             end
         end
     end
-    -- construction ghosts count as demand too (the whole point of the
-    -- outlet: anything inside the factories is usable outside, ghosts
-    -- included)
+
+    record.requester_cache = { tick = tick, network_id = network.network_id, wants = wants }
+    return wants
+end
+
+local function network_wants(outlet, record)
+    local network = outlet.logistic_network
+    if not network then return nil end
+    -- Copy, never alias: the cached requester table is reused across passes and
+    -- ghost demand is added on top of this one.
+    local wants = {}
+    for key, count in pairs(requester_wants(outlet, network, record)) do
+        wants[key] = count
+    end
+    -- Construction ghosts count as demand too (the whole point of the outlet:
+    -- anything inside the factories is usable outside, ghosts included). This
+    -- half is recomputed every pass and never cached - it is pure Lua math over
+    -- the event-driven chunk index, it costs almost nothing, and it is the part
+    -- that has to react the moment a blueprint lands.
     for key, count in pairs(ghost_wants(record, network)) do
         wants[key] = (wants[key] or 0) + count
     end
@@ -925,7 +1025,7 @@ end
 
 -- On-demand: keep only wanted items in the outlet (return the rest to the
 -- factories), then materialize what the network can't already supply.
-local function pull_on_demand(record, hub_inv, chests, return_chests, set)
+local function pull_on_demand(record, hub_inv, chests, return_snap, set)
     local prof = hub_data().profiling and helpers.create_profiler()
     local wants, network = network_wants(record.entity, record)
     if prof then
@@ -942,7 +1042,7 @@ local function pull_on_demand(record, hub_inv, chests, return_chests, set)
         local excess = count - wanted
         if excess > 0 then
             local name, quality = split_key(key)
-            local inserted = insert_spec_into_chests(return_chests, name, quality, excess)
+            local inserted = insert_spec_into_chests(return_snap, name, quality, excess)
             if inserted > 0 then
                 hub_inv.remove({name = name, count = inserted, quality = quality})
             end
@@ -1011,8 +1111,10 @@ local function pull_for_outlet(record)
     end
 
     local set = filter_set(record)
+    -- Snapshot the give-back candidates once for the whole pass, however many
+    -- item types end up going back.
     note_moved(record, pull_on_demand(record, hub_inv, chests,
-        reachable_chests(record, return_mode), set))
+        return_snapshot(reachable_chests(record, return_mode)), set))
 end
 
 -- Inlet: distribute into interior requester/buffer chests ---------------------
@@ -1323,13 +1425,13 @@ local function on_mined(event)
 
     local record = hub_data().hubs[entity.unit_number]
         or { entity = entity, kind = kind, filters = { mode = 1, items = {} }, pins = {} }
-    local chests = reachable_chests(record, return_mode)
-    if #chests == 0 then return end
+    local snapshot = return_snapshot(reachable_chests(record, return_mode))
+    if #snapshot == 0 then return end
     for i = 1, #buffer do
         local stack = buffer[i]
         -- skip the device item itself (and any of them it was buffering)
         if stack.valid_for_read and not KINDS[stack.name] then
-            insert_stack_into_chests(chests, stack)
+            insert_stack_into_chests(snapshot, stack)
         end
     end
 end

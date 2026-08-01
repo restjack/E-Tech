@@ -109,32 +109,17 @@ data:extend({
     default_value = true,
     order = "bb",
   },
+  -- 0.21.1: was three separate 0-1 sliders (etech-void-tint-r/g/b) - three
+  -- rows in the settings list for one colour. One hex string instead; the old
+  -- settings are simply forgotten, and a save that had them keeps working
+  -- because startup settings only affect prototypes, not world state.
   {
-    type = "double-setting",
-    name = "etech-void-tint-r",
+    type = "string-setting",
+    name = "etech-void-tint",
     setting_type = "startup",
-    minimum_value = 0,
-    maximum_value = 1,
-    default_value = 0.75,
+    default_value = "BF00FF",
+    allow_blank = false,
     order = "bb1",
-  },
-  {
-    type = "double-setting",
-    name = "etech-void-tint-g",
-    setting_type = "startup",
-    minimum_value = 0,
-    maximum_value = 1,
-    default_value = 0,
-    order = "bb2",
-  },
-  {
-    type = "double-setting",
-    name = "etech-void-tint-b",
-    setting_type = "startup",
-    minimum_value = 0,
-    maximum_value = 1,
-    default_value = 1,
-    order = "bb3",
   },
   {
     type = "bool-setting",

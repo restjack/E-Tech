@@ -38,7 +38,13 @@ teleporter.action =
   }
 }
 teleporter.force_die_on_attack = false
-teleporter.trigger_force = "all"
+-- "same", not "all" (0.21.1). The pad is a land-mine clone, so its trigger
+-- fires for whatever walks over it - and firing starts the pad's 5 second
+-- timeout. With "all", a biter wandering across a pad made it unusable for
+-- five seconds with nothing in the UI to explain why. The destination GUI was
+-- always force-scoped anyway (networks are keyed by force), so restricting the
+-- trigger to the owning force changes nothing a player could already do.
+teleporter.trigger_force = "same"
 teleporter.order = name
 teleporter.picture_safe =
 {

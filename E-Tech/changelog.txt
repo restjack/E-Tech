@@ -68,6 +68,11 @@ Date: 2026-07-31
       not where it expects. That field is private to Factorissimo, and if it is
       ever renamed the northern half of every Mk4 loses power with nothing to
       trace it by.
+    - Biters walking over a teleporter pad no longer disable it. The pad is a
+      land mine underneath, and its trigger fired for anything that stepped on
+      it - starting the pad's five second cooldown, with nothing in the UI to
+      explain why it had gone dead. It now triggers only for its own force,
+      which is what the destination list always assumed anyway.
   Compatibility:
     - E-Tech's own recipes and technologies now survive overhaul mods that
       retire the items they are built from. The factory hub, the teleporter pads
@@ -100,6 +105,21 @@ Date: 2026-07-31
       item count per fuel type when someone was.
     - Teleporter destination list reads the four energy-cost settings once
       instead of once per pad.
+    - Factory outlet: the requester-demand scan is split out and cached for two
+      passes. It walks every requester point in the outlet's logistic network,
+      so its cost scaled with the size of your base rather than with anything
+      the outlet was doing - thousands of API calls on a single tick on a large
+      network, even for an outlet with one reachable chest. Repeated lookups of
+      the same item on the same chest are now asked once. Construction-ghost
+      demand is NOT cached and still updates every pass, so blueprints are
+      served as immediately as before.
+    - Factory outlet: the give-back path snapshots its candidate chests once per
+      pass instead of re-querying every chest four times for every item type
+      being returned.
+    - Resource markers: mining an ore tile out no longer rescans its whole chunk
+      on the spot, once per force. The cell is queued instead and repaired in
+      the background, so an outpost being actively mined stops driving a burst
+      of chunk scans. Marker totals lag by a few seconds.
   Changes:
     - Dropped the 0.17.0 legacy-field cleanup for factory devices, per its own
       two-version policy. Those fields are never read, so saves still carrying
@@ -120,6 +140,9 @@ Date: 2026-07-31
       have been caught by years earlier.
     - build.ps1 refuses to overwrite an already-archived release unless given
       -Force.
+    - The void chest/pipe colour is one hex setting ("BF00FF") instead of three
+      separate red/green/blue sliders. If you had customised the old ones, set
+      the colour again.
 ---------------------------------------------------------------------------------------------------
 Version: 0.21.0
 Date: 2026-07-30
