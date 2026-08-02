@@ -53,9 +53,63 @@ local script_data =
   -- Per-player search filter text, so the typed search survives the full
   -- GUI rebuild that every pad built/mined/rename event triggers.
   search_text = {},
+  -- Per-player "starred + recent only" toggle for the destination list.
+  pinned_only = {},
+  -- Per-player home pad (unit_number) for the recall hotkey, and the tick of
+  -- their last recall, for its cooldown.
+  home = {},
+  recall_tick = {},
+  -- Per-player express-jump suppression: the pad they were just expressed to
+  -- plus where they stood on arrival, so an A->B->A pair of express pads is a
+  -- doorway rather than an infinite bounce.
+  express_block = {},
+  -- Pad armed as an express SOURCE while linking from the wireless remote,
+  -- where there is no pad underfoot to be the source (per player).
+  express_pending = {},
+  -- Per-player: hide the six-line click-hint tooltip on pad buttons.
+  hide_tooltips = {},
+  -- Per-player list grouping: nil/1 = by surface (default), 2 = flat.
+  group_mode = {},
+  -- Per-player collapsed sections, keyed by section key.
+  collapsed = {},
 }
 
 local RETURN_SLOTS = 3
+
+-- Every sub-table script_data is expected to have. on_configuration_changed
+-- backfills these, but it does NOT run when a save is reloaded with a rebuild
+-- of the SAME mod version - and during development that is the normal case.
+-- A save that had been opened with an earlier 0.22.0 build therefore came back
+-- without the tables that build did not have, and the first GUI open crashed
+-- on "attempt to index field 'express_pending' (a nil value)".
+--
+-- So the tables are ensured on every event instead of trusting a migration to
+-- have run. It is a handful of nil checks per event; the alternative is a
+-- crash that only shows up on someone else's save.
+local SCRIPT_DATA_TABLES = {
+  "networks", "rename_frames", "button_actions", "teleporter_map",
+  "teleporter_frames", "player_linked_teleporter", "to_be_removed", "tag_map",
+  "search_boxes", "recent", "surface_aliases", "surface_filter",
+  "surface_rename_frames", "remote_open", "returns", "favorites", "sort_mode",
+  "frame_locations", "search_text", "pinned_only", "home", "recall_tick",
+  "express_block", "express_pending", "hide_tooltips", "group_mode",
+  "collapsed",
+}
+
+local ensure_script_data = function()
+  for _, key in ipairs(SCRIPT_DATA_TABLES) do
+    if script_data[key] == nil then script_data[key] = {} end
+  end
+end
+
+-- Wraps an event handler so the tables above exist before it runs. Applied to
+-- every entry in teleporters.events / on_nth_tick at the bottom of the file.
+local guarded = function(handler)
+  return function(event)
+    ensure_script_data()
+    return handler(event)
+  end
+end
 
 -- The teleport sound the player themselves hears. The world flash's own
 -- sound plays at the destination BEFORE the player arrives, so it's
@@ -66,8 +120,19 @@ local play_teleport_sound = common.play_sound
 -- alias, carried in the button's tags) contains `search`. The "no
 -- teleporters" label has no tags and an empty name, so it only survives an
 -- empty search — acceptable.
-local apply_search_filter = function(parent, search)
+local apply_search_filter
+apply_search_filter = function(parent, search)
   if not (parent and parent.valid) then return end
+  -- The list is a scroll pane of section headers and per-section tables since
+  -- 0.22.0, so the filter walks down to the tables and only judges THEIR
+  -- children. Headers are recursed past without being touched: their labels
+  -- carry no search tags and hiding them on a miss would strand the pads.
+  if parent.type ~= "table" then
+    for _, child in pairs (parent.children) do
+      apply_search_filter(child, search)
+    end
+    return
+  end
   search = search:lower()
   for _, child in pairs (parent.children) do
     local hay = (child.tags and child.tags.etech_search) or child.name
@@ -156,13 +221,60 @@ end
 
 -- Favorites/recents are keyed by player.index since 0.19.0 (player.name
 -- broke on player rename; on_configuration_changed migrates old keys).
+-- favorites[unit_number] = RANK (a number, lower sorts first) since 0.22.0.
+-- It used to be `true`, which made every starred pad equal and left their
+-- order to the pad name - so the one you actually travel to most could sit
+-- below five others. Old boolean entries are migrated on config change.
 local get_favorites = function(player)
   local favorites = script_data.favorites[player.index]
   if not favorites then
     favorites = {}
     script_data.favorites[player.index] = favorites
   end
+  -- Boolean entries from before ranks existed are converted HERE rather than
+  -- only in on_configuration_changed, because that does not run when a save is
+  -- reloaded with a rebuild of the same version. Ranks follow unit_number,
+  -- which is the order those pads were displayed in anyway.
+  local booleans = {}
+  for unit_number, value in pairs (favorites) do
+    if value == true then booleans[#booleans + 1] = unit_number end
+  end
+  if #booleans > 0 then
+    table.sort(booleans)
+    for index, unit_number in ipairs(booleans) do
+      favorites[unit_number] = index
+    end
+  end
   return favorites
+end
+
+local favorite_rank_bounds = function(favorites)
+  local min, max
+  for _, rank in pairs (favorites) do
+    if type(rank) == "number" then
+      if not min or rank < min then min = rank end
+      if not max or rank > max then max = rank end
+    end
+  end
+  return min, max
+end
+
+-- A newly starred pad goes to the BACK of the starred ones; shift+left-click
+-- promotes one to the front. No renumbering pass: ranks are just numbers with
+-- gaps, and only their order matters.
+local star_favorite = function(favorites, unit_number)
+  local _, max = favorite_rank_bounds(favorites)
+  favorites[unit_number] = (max or 0) + 1
+end
+
+local promote_favorite = function(favorites, unit_number)
+  local min = favorite_rank_bounds(favorites)
+  favorites[unit_number] = (min or 1) - 1
+end
+
+local demote_favorite = function(favorites, unit_number)
+  local _, max = favorite_rank_bounds(favorites)
+  favorites[unit_number] = (max or 0) + 1
 end
 
 local add_recent = function(player, teleporter)
@@ -172,7 +284,11 @@ local add_recent = function(player, teleporter)
     script_data.recent[player.index] = recent
   end
   recent[teleporter.unit_number] = game.tick
-  if table_size(recent) >= 9 then
+  -- How many pads count as "recent" is a map setting since 0.22.0; it used to
+  -- be a hardcoded 8, which on a base with a dozen regularly used pads meant
+  -- the one you wanted had already fallen off.
+  local cap = settings.global["etech-teleporter-recent-slots"].value
+  while table_size(recent) > cap do
     local min = math.huge
     local index
     for k, tick in pairs (recent) do
@@ -181,7 +297,39 @@ local add_recent = function(player, teleporter)
         index = k
       end
     end
-    if index then recent[index] = nil end
+    if not index then break end
+    recent[index] = nil
+  end
+end
+
+-- Traffic bookkeeping: how often a pad has been travelled to, and by whom
+-- last. Shown in the pad's tooltip - a list of thirty pads says nothing about
+-- which ones your base actually uses.
+local note_pad_use = function(player, teleporter_data, entity)
+  if not (teleporter_data and entity and entity.valid) then return end
+  teleporter_data.uses = (teleporter_data.uses or 0) + 1
+  teleporter_data.last_user = player.name
+  teleporter_data.last_used_tick = game.tick
+end
+
+-- Mark the pad the player is LEAVING as recently used, when they were
+-- standing on one. unlink_teleporter only records the pad the GUI was opened
+-- from, so a remote jump - which has no linked source pad even when you are
+-- standing on one - never recorded where you left. The trip home then sorted
+-- like a pad you had never used (0.22.0).
+local add_recent_pad_at = function(player, surface, position, except)
+  if not (surface and surface.valid) then return end
+  local found = surface.find_entities_filtered{
+    name = teleporter_name,
+    position = position,
+    radius = 1.5,
+    limit = 2,
+  }
+  for _, pad in pairs (found) do
+    if pad.valid and pad ~= except then
+      add_recent(player, pad)
+      return
+    end
   end
 end
 
@@ -247,6 +395,18 @@ local get_energy_interface = function(teleporter_data, entity)
   }
   if eei then
     eei.destructible = false
+    -- Quality on the pad buys buffer: +50% per level over the prototype's
+    -- 200 MJ, so a legendary pad holds 700 MJ and rides out a brownout that
+    -- would strand a normal one. electric_buffer_size is writable per entity,
+    -- so no extra prototypes are needed.
+    local quality = entity.quality
+    local level = quality and quality.level or 0
+    if level > 0 then
+      local source = eei.prototype.electric_energy_source_prototype
+      if source then
+        eei.electric_buffer_size = source.buffer_capacity * (1 + 0.5 * level)
+      end
+    end
     teleporter_data.energy_interface = eei
   end
   return eei
@@ -290,13 +450,124 @@ local get_teleport_cost = function(source, destination, player, cfg)
       cost = cost + cfg.per_100 * (util.distance(from_position, destination.position) / 100)
     end
   end
+  -- Quality on the DESTINATION pad discounts the jump: -10% per level, so a
+  -- legendary pad (level 5) costs half. Matches E-Tech's other quality rule
+  -- (quality adds module slots) - a better pad should be worth crafting.
+  -- Quality-less games report level 0, so this is a no-op without the mod.
+  local quality = destination.quality
+  local level = quality and quality.level or 0
+  if level > 0 then
+    cost = cost * math.max(0.5, 1 - 0.1 * level)
+  end
   return cost * 1000000
+end
+
+-- Personal teleporter: an armor module that pays part of the pad's bill out
+-- of its own buffer. It never enables a jump you could not otherwise make -
+-- it makes the ones you do make cheaper for the network, which is what a
+-- personal power source should do.
+local PERSONAL_MODULE = "etech-personal-teleporter"
+
+local personal_module = function(player)
+  if not (player and player.valid) then return nil end
+  local character = player.character
+  local grid = character and character.valid and character.grid
+  if not grid then return nil end
+  return grid.find(PERSONAL_MODULE)
+end
+
+-- How much of `cost` the module covers: up to half, capped by what it holds.
+-- Pure - the drain happens in pay_personal_share once the jump is actually
+-- going ahead - so the destination list can price every pad without spending
+-- anything.
+local personal_share = function(player, cost)
+  if cost <= 0 then return 0 end
+  local module = personal_module(player)
+  if not module then return 0 end
+  return math.min(module.energy, cost * 0.5)
+end
+
+local pay_personal_share = function(player, share)
+  if share <= 0 then return end
+  local module = personal_module(player)
+  if module then module.energy = math.max(0, module.energy - share) end
 end
 
 -- Display name for a surface: player-set alias first, then the platform's
 -- ship name ("Icarus", not "platform-1"), then the planet prototype's
 -- localised name ("Nauvis", not "nauvis"), then the engine's localised
 -- name, then the raw name.
+-- Caption markers for the pad list. Every one is checked against the loaded
+-- sprites: "[img=quantity-time]" - inherited from the 1.1-era mod and used
+-- for the recently-used clock - has NOT existed since 2.0, and an invalid
+-- sprite path does not error, it draws a placeholder glyph. That placeholder
+-- sat in the list looking like a deliberate symbol until someone asked why
+-- the recent icon was missing (0.22.0). Anything unavailable falls back to
+-- text rather than to a mystery circle.
+local marker_cache
+local marker = function(sprite, fallback)
+  if not marker_cache then marker_cache = {} end
+  local cached = marker_cache[sprite]
+  if cached == nil then
+    cached = helpers.is_valid_sprite_path(sprite) and ("[img=" .. sprite .. "]") or fallback
+    marker_cache[sprite] = cached
+  end
+  return cached
+end
+
+-- No recent marker: the list already sorts by recency, and a clock on half
+-- the tiles said nothing the order did not.
+local home_marker = function() return marker("utility/spawn_flag", "H") end
+local express_marker = function() return marker("utility/go_to_arrow", "=>") end
+
+-- Is this one of Factorissimo's interior surfaces? Those are named
+-- "factory-floor-N" and carry dozens of unrelated factories, so "Nauvis" is
+-- the wrong answer and the raw name is no answer at all.
+local factorissimo_interior = function(surface)
+  if not remote.interfaces["factorissimo"] then return false end
+  local ok, result = pcall(remote.call, "factorissimo", "is_factorissimo_surface", surface)
+  return ok and result == true
+end
+
+-- Just the icon for a surface ("" when the game has none): a planet's own
+-- starmap icon, the space-platform foundation for a ship, a factory building
+-- for a Factorissimo interior floor. Every destination line in the window
+-- carries one, because a name alone ("Return 2", "Teleporter 1259086") does
+-- not tell you which world you are looking at.
+local surface_icon = function(surface)
+  if not (surface and surface.valid) then return "" end
+  if factorissimo_interior(surface) then
+    return prototypes.entity["factory-1"] and "[img=entity/factory-1]" or ""
+  end
+  if surface.platform then
+    return prototypes.item["space-platform-foundation"]
+      and "[img=item/space-platform-foundation]" or ""
+  end
+  local planet = surface.planet
+  if planet and prototypes.space_location and prototypes.space_location[planet.name] then
+    return "[img=space-location/" .. planet.name .. "]"
+  end
+  return ""
+end
+
+-- Icon + name, for the camera tiles (Return, Body, players) whose previews
+-- are otherwise three interchangeable grey squares.
+local surface_marker = function(surface)
+  if not (surface and surface.valid) then return nil end
+  local icon = surface_icon(surface)
+  if icon ~= "" then icon = icon .. " " end
+  if factorissimo_interior(surface) then
+    return {"", icon, {"etech-tp-inside-factory"}}
+  end
+  if surface.platform then
+    return {"", icon, surface.platform.name}
+  end
+  if surface.planet then
+    return {"", icon, surface.planet.prototype.localised_name}
+  end
+  return {"", icon, surface.localised_name or surface.name}
+end
+
 local get_surface_label = function(surface)
   local alias = script_data.surface_aliases[surface.index]
   if alias and alias ~= "" then return alias end
@@ -364,6 +635,9 @@ local make_teleporter_gui = function(player, source)
 
   local force = source and source.force or player.force
   local network = script_data.networks[force.name] or {}
+  -- The record of the pad being stood on, when there is one: it owns the
+  -- express link, so the list marks its target and CONTROL-click retargets it.
+  local source_record = source and script_data.teleporter_map[source.unit_number] or nil
   -- The surface jumps are measured from (pad surface, or the player's own
   -- for remote use).
   local here_surface = source and source.surface or player.surface
@@ -412,9 +686,37 @@ local make_teleporter_gui = function(player, source)
   local saved_search = script_data.search_text[player.index] or ""
   local search_box = title_flow.add{type = "textfield", visible = saved_search ~= "", text = saved_search}
   local search_button = title_flow.add{type = "sprite-button", style = "frame_action_button", sprite = "utility/search", tooltip = {"gui.search-with-focus", {"etech-tp-search"}}}
+  -- The pad tooltip lists six click actions, which is what you want once and
+  -- clutter forever after. This hides them (per player, remembered).
+  local tooltips_hidden = script_data.hide_tooltips[player.index] or false
+  local tooltip_button = title_flow.add{type = "sprite-button", style = "frame_action_button",
+    sprite = "utility/questionmark",
+    tooltip = tooltips_hidden and {"etech-tp-tooltips-show"} or {"etech-tp-tooltips-hide"}}
+  tooltip_button.toggled = not tooltips_hidden
+  util.register_gui(script_data.button_actions, tooltip_button, {type = "toggle_tooltips"})
+  local settings_button = title_flow.add{type = "sprite-button", style = "frame_action_button",
+    sprite = "utility/preset", tooltip = {"etech-tp-consent-settings-tooltip"}}
+  util.register_gui(script_data.button_actions, settings_button, {type = "consent_settings"})
   script_data.search_boxes[player.index] = search_box
   local recent = script_data.recent[player.index] or {}
   local favorites = get_favorites(player)
+  -- Rank -> 1..N display positions for the star badges. Ranks carry gaps by
+  -- design (starring appends, promoting prepends), so the badge number comes
+  -- from their ORDER, not from the rank itself.
+  local favorite_positions = {}
+  do
+    local ordered = {}
+    for unit_number, rank in pairs (favorites) do
+      ordered[#ordered + 1] = { unit_number = unit_number, rank = tonumber(rank) or 0 }
+    end
+    table.sort(ordered, function(a, b)
+      if a.rank ~= b.rank then return a.rank < b.rank end
+      return a.unit_number < b.unit_number
+    end)
+    for position, entry in ipairs(ordered) do
+      favorite_positions[entry.unit_number] = position
+    end
+  end
 
   local sorted = {}
   local i = 1
@@ -459,6 +761,24 @@ local make_teleporter_gui = function(player, source)
     tooltip = {"etech-tp-sort-tooltip"}}
   util.register_gui(script_data.button_actions, sort_dropdown, {type = "sort_mode"})
 
+  -- "Starred + recent only": the short list of pads you actually use, for
+  -- bases where the full list is dozens of pads long.
+  local pinned_only = script_data.pinned_only[player.index] or false
+  local pinned_check = filter_flow.add{type = "checkbox",
+    state = pinned_only,
+    caption = {"etech-tp-pinned-only"},
+    tooltip = {"etech-tp-pinned-only-tooltip"}}
+  util.register_gui(script_data.button_actions, pinned_check, {type = "pinned_only"})
+
+  -- Group by surface, or one flat list. Defaults to grouped; the flat list is
+  -- one click away for anyone who reads the whole window at a glance.
+  local grouped = script_data.group_mode[player.index] ~= 2
+  local group_dropdown = filter_flow.add{type = "drop-down",
+    items = {{"etech-tp-group-surface"}, {"etech-tp-group-none"}},
+    selected_index = grouped and 1 or 2,
+    tooltip = {"etech-tp-group-tooltip"}}
+  util.register_gui(script_data.button_actions, group_dropdown, {type = "group_mode"})
+
   if cross_surface and #surface_indices > 1 then
     local items = {{"etech-tp-all-surfaces"}}
     local index_map = {false}
@@ -489,9 +809,14 @@ local make_teleporter_gui = function(player, source)
     return special_flow
   end
 
-  local add_preview_button = function(parent, view_spec, caption, tooltip, action)
+  local add_preview_button = function(parent, view_spec, caption, tooltip, action, subcaption)
     local button = parent.add{type = "button"}
-    button.style.height = special_size + 32 + 8
+    -- Buttons CLIP their children, so the height has to account for every row
+    -- that goes inside: view + caption, plus the surface line when there is
+    -- one. Without the extra 22 the surface line was added, laid out below the
+    -- button's edge, and simply never drawn - which looked exactly like the
+    -- code not running.
+    button.style.height = special_size + 32 + 8 + (subcaption and 22 or 0)
     button.style.width = special_size + 8
     button.style.left_padding = 0
     button.style.right_padding = 0
@@ -508,19 +833,48 @@ local make_teleporter_gui = function(player, source)
     label.style.font = "default-dialog-button"
     label.style.font_color = {}
     label.style.maximal_width = special_size
+    -- Which surface this preview is of. Three Return tiles all look like the
+    -- same patch of grey without it.
+    if subcaption then
+      local sub = inner_flow.add{type = "label", caption = subcaption}
+      sub.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+      sub.style.maximal_width = special_size
+      sub.style.single_line = false
+    end
     util.register_gui(script_data.button_actions, button, action)
   end
 
   local rets = get_valid_returns(player)
+  local return_grace = settings.global["etech-teleporter-return-grace-min"].value
   for i, ret in ipairs(rets) do
     local caption = (#rets > 1) and {"", {"etech-tp-return"}, " " .. i} or {"etech-tp-return"}
+    -- The slot expires silently; say when. Grace 0 means it never does.
+    local tooltip = {"", {"etech-tp-return-tooltip", get_surface_label(game.surfaces[ret.surface_index])}}
+    if return_grace > 0 then
+      local left = math.max(0, (ret.tick + return_grace * 60 * 60) - game.tick)
+      tooltip[#tooltip + 1] = "\n"
+      tooltip[#tooltip + 1] = {"etech-tp-return-expires", string.format("%.0f", left / 3600)}
+    end
     -- Pass the entry itself, not its index — the list can shift between GUI
     -- build and click (slots expiring / other slots consumed).
     add_preview_button(get_special_flow(),
       {type = "camera", position = ret.position, surface_index = ret.surface_index, zoom = 0.2},
       caption,
-      {"etech-tp-return-tooltip", get_surface_label(game.surfaces[ret.surface_index])},
-      {type = "return_button", ret = ret})
+      tooltip,
+      {type = "return_button", ret = ret},
+      surface_marker(game.surfaces[ret.surface_index]))
+  end
+
+  -- Your body, when the feature is on and the death is recent enough. Sits
+  -- next to the return slots: same shape (free, one-shot, camera preview).
+  local death = common.get_death_slot(player)
+  if death then
+    add_preview_button(get_special_flow(),
+      {type = "camera", position = death.position, surface_index = death.surface_index, zoom = 0.2},
+      {"etech-tp-body"},
+      {"etech-tp-body-tooltip", get_surface_label(game.surfaces[death.surface_index]), common.death_age_minutes(death)},
+      {type = "body_button"},
+      surface_marker(game.surfaces[death.surface_index]))
   end
 
   if settings.global["etech-teleporter-players-section"].value then
@@ -532,23 +886,30 @@ local make_teleporter_gui = function(player, source)
           {type = "minimap", surface_index = other_surface.index, zoom = 1, force = force.name, position = other_position},
           other.name,
           {"etech-tp-player-tooltip", other.name, get_surface_label(other_surface)},
-          {type = "player_button", target_index = other.index})
+          {type = "player_button", target_index = other.index},
+          surface_marker(other_surface))
       end
     end
   end
 
-  local inner = frame.add{type = "frame", style = "inside_deep_frame"}
-  local scroll = inner.add{type = "scroll-pane", direction = "vertical"}
+  -- The pad list: one scroll pane holding a section header + pad table per
+  -- surface group (or a single unlabelled group when grouping is off).
+  local scroll = frame.add{type = "scroll-pane", direction = "vertical"}
   scroll.style.maximal_height = (player.display_resolution.height / player.display_scale) * 0.8
+  local list_root = scroll
   -- At least one column — a large preview size on a small window would
   -- otherwise round to zero and error on the table add.
   local column_count = math.max(1, math.floor(((player.display_resolution.width / player.display_scale) * 0.6) / preview_size))
-  local holding_table = scroll.add{type = "table", column_count = column_count}
-  util.register_gui(script_data.button_actions, search_box, {type = "search_text_changed", parent = holding_table})
-  util.register_gui(script_data.button_actions, search_button, {type = "search_button", box = search_box, parent = holding_table})
-  holding_table.style.horizontal_spacing = 2
-  holding_table.style.vertical_spacing = 2
-  local any = false
+  -- The window used to take its width from the one table inside the scroll
+  -- pane. With the pads split across per-section tables it took it from the
+  -- title bar instead, and the whole list ended up three columns wide behind a
+  -- horizontal scrollbar (0.22.0). State the width the columns need, and
+  -- refuse to scroll sideways: this list scrolls down, never across.
+  scroll.style.minimal_width = column_count * (preview_size + 14) + 24
+  scroll.horizontal_scroll_policy = "never"
+  local section_tables = {}
+  util.register_gui(script_data.button_actions, search_box, {type = "search_text_changed", parent = scroll})
+  util.register_gui(script_data.button_actions, search_button, {type = "search_button", box = search_box, parent = scroll})
 
   -- Anchor for distances: the pad the player stands on, or the player.
   local anchor_position = source and source.position or player.position
@@ -568,6 +929,12 @@ local make_teleporter_gui = function(player, source)
       return fav_a
     end
     if fav_a then
+      -- Starred pads sort by their own rank (shift+left-click reorders),
+      -- falling back to the name when two share one - which only old
+      -- boolean-era saves can produce.
+      local rank_a = tonumber(favorites[a.unit_number]) or 0
+      local rank_b = tonumber(favorites[b.unit_number]) or 0
+      if rank_a ~= rank_b then return rank_a < rank_b end
       return a.name:lower() < b.name:lower()
     end
 
@@ -595,20 +962,46 @@ local make_teleporter_gui = function(player, source)
     return a.name:lower() < b.name:lower()
   end)
 
-  local sorted_network = {}
-  for k, sorted_script_data in pairs (sorted) do
-    sorted_network[sorted_script_data.name] = sorted_script_data.teleporter
+  -- unit_number -> display name, so an express link can be shown as the
+  -- DESTINATION'S NAME rather than a number nobody can place.
+  local name_by_unit = {}
+  for pad_name, teleporter_data in pairs (network) do
+    local entity = teleporter_data.teleporter
+    if entity and entity.valid then
+      name_by_unit[entity.unit_number] = pad_name
+    end
   end
+  local armed_express = script_data.express_pending[player.index]
 
   local chart = player.force.chart
   local cost_cfg = read_cost_settings()
-  for name, teleporter in pairs(sorted_network) do
+
+  -- Which section a pad belongs in. Grouping is by KIND of surface, not by
+  -- surface name: a planet earns its own section, every space platform shares
+  -- one, and Factorissimo interiors share another. Four ships would otherwise
+  -- be four one-row sections, and a fifth would add a fifth.
+  local section_of = function(pad_surface)
+    if pad_surface.platform then
+      return "platforms", {"etech-tp-section-platforms"}, 3
+    end
+    if factorissimo_interior(pad_surface) then
+      return "floors", {"etech-tp-section-floors"}, 4
+    end
+    -- The surface underfoot leads; every other planet follows it, in name
+    -- order, so the list does not reshuffle as you travel.
+    local rank = (pad_surface == here_surface) and 1 or 2
+    return "surface:" .. pad_surface.index, get_surface_label(pad_surface), rank
+  end
+
+  local sections, section_order = {}, {}
+  for _, entry in ipairs(sorted) do
+    local teleporter = entry.teleporter
     local teleporter_entity = teleporter.teleporter
-    if not (teleporter_entity.valid) then
+    if not (teleporter_entity and teleporter_entity.valid) then
       clear_teleporter_data(teleporter)
     elseif teleporter_entity == source then
-      title.caption = name
-      util.register_gui(script_data.button_actions, rename_button, {type = "rename_button", caption = name})
+      title.caption = entry.name
+      util.register_gui(script_data.button_actions, rename_button, {type = "rename_button", caption = entry.name})
     else
       local pad_surface = teleporter_entity.surface
       local show
@@ -619,7 +1012,37 @@ local make_teleporter_gui = function(player, source)
       else
         show = not (hide_platforms and pad_surface.platform)
       end
+      if show and pinned_only then
+        show = favorites[teleporter_entity.unit_number] and true or false
+      end
       if show then
+        local key, label, rank = section_of(pad_surface)
+        if not grouped then
+          key, label, rank = "all", nil, 1
+        end
+        local section = sections[key]
+        if not section then
+          section = { key = key, label = label, rank = rank, icon = surface_icon(pad_surface), entries = {} }
+          sections[key] = section
+          section_order[#section_order + 1] = section
+        end
+        section.entries[#section.entries + 1] = entry
+      end
+    end
+  end
+
+  table.sort(section_order, function(a, b)
+    if a.rank ~= b.rank then return a.rank < b.rank end
+    return a.key < b.key
+  end)
+
+  -- One pad tile. Everything below was the body of the old flat loop; it is a
+  -- function now because sections call it per group.
+  local build_pad_tile = function(holding_table, entry)
+      local name = entry.name
+      local teleporter = entry.teleporter
+      local teleporter_entity = teleporter.teleporter
+      local pad_surface = teleporter_entity.surface
       local position = teleporter_entity.position
       -- Charting the preview area per pad per rebuild was measurable with
       -- many pads - once a minute per pad is plenty for minimap previews.
@@ -639,10 +1062,12 @@ local make_teleporter_gui = function(player, source)
       end
       local button = holding_table.add{type = "button", name = "_"..name, tags = {etech_search = searchable}}
       -- Buttons clip their children to the button's own size, so the height
-      -- must account for every label row: name + distance/surface line,
-      -- plus the button's own vertical padding (zeroed below, headroom kept).
-      -- The energy cost lives in the tooltip, not a label.
-      button.style.height = preview_size + 64
+      -- must account for every label row: markers, name, the grey meta line
+      -- and the express/cooling lines, plus the button's own vertical padding
+      -- (zeroed below, headroom kept). The energy cost lives in the tooltip,
+      -- not a label. Getting this wrong does not error - the row is simply
+      -- laid out past the button's edge and never drawn.
+      button.style.height = preview_size + 86
       button.style.width = preview_size + 8
       button.style.top_padding = 2
       button.style.bottom_padding = 2
@@ -665,51 +1090,172 @@ local make_teleporter_gui = function(player, source)
       map.style.width = preview_size
       map.style.horizontally_stretchable = true
       map.style.vertically_stretchable = true
-      local caption = name
-      if recent[teleporter_entity.unit_number] then
-        caption = "[img=quantity-time] "..name
-      end
+      -- Markers get their own row under the preview instead of riding in
+      -- front of the name: the star rank, the home flag and the express arrow
+      -- used to eat a third of the caption, which is why a pad called "Rocket
+      -- Launch Site" showed up as "Rocket Launch Site...". Tiles with nothing
+      -- to mark do not get the row at all.
+      local marks = {}
       if favorites[teleporter_entity.unit_number] then
-        caption = "★ "..caption
+        -- Number the stars by their place in the starred order, so the list
+        -- says WHICH favorite this is rather than just that it is one.
+        marks[#marks + 1] = "★" .. (favorite_positions[teleporter_entity.unit_number] or "")
       end
-      button.tooltip = {"etech-tp-favorite-tooltip"}
-      local label = inner_flow.add{type = "label", caption = caption}
+      if script_data.home[player.index] == teleporter_entity.unit_number then
+        marks[#marks + 1] = home_marker()
+      end
+      if source_record and source_record.express == teleporter_entity.unit_number then
+        marks[#marks + 1] = express_marker()
+      end
+      if #marks > 0 then
+        local mark_label = inner_flow.add{type = "label", caption = table.concat(marks, " ")}
+        mark_label.style.font_color = {r = 1, g = 0.9, b = 0.75}
+        mark_label.style.maximal_width = preview_size
+      end
+      local label = inner_flow.add{type = "label", caption = name}
       label.style.horizontally_stretchable = true
       label.style.font = "default-dialog-button"
       label.style.font_color = {}
       label.style.horizontally_stretchable = true
       label.style.maximal_width = preview_size
-      if pad_surface ~= here_surface then
-        local surface_label = inner_flow.add{type = "label", caption = get_surface_label(pad_surface)}
-        surface_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
-        surface_label.style.maximal_width = preview_size
-      else
+      -- One grey line under the name. Grouped, the section header already
+      -- said which surface this is, so the tile spends the line on something
+      -- the header cannot say: distance here, the pad's own surface name in
+      -- the shared Platforms / Factory floors sections, or when it was last
+      -- used for a pad on another world. Ungrouped, there is no header left to
+      -- carry the surface, so it goes back on the tile.
+      local shared_section = pad_surface.platform ~= nil or factorissimo_interior(pad_surface)
+      local sub_caption
+      if pad_surface == here_surface then
         local dist = util.distance(anchor_position, position)
-        local distance_label = inner_flow.add{type = "label", caption = {"etech-tp-distance", string.format("%.0f", dist)}}
-        distance_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
-        distance_label.style.maximal_width = preview_size
+        sub_caption = {"etech-tp-distance", string.format("%.0f", dist)}
+      elseif shared_section or not grouped then
+        local icon = surface_icon(pad_surface)
+        if icon ~= "" then icon = icon .. " " end
+        sub_caption = {"", icon, get_surface_label(pad_surface)}
+      elseif teleporter.last_used_tick then
+        sub_caption = {"etech-tp-last-used",
+          string.format("%.0f", (game.tick - teleporter.last_used_tick) / 3600)}
       end
-      if cost > 0 then
+      if sub_caption then
+        local sub_label = inner_flow.add{type = "label", caption = sub_caption}
+        sub_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+        sub_label.style.maximal_width = preview_size
+      end
+      -- Express state, spelled out on the pad that does the sending: where it
+      -- sends you (green), or that it is armed and waiting for a destination
+      -- (yellow). Without this the only sign a pad was an express pad was
+      -- being thrown across the map by standing on it.
+      if teleporter.express and name_by_unit[teleporter.express] then
+        local express_label = inner_flow.add{type = "label",
+          caption = {"etech-tp-express-to", name_by_unit[teleporter.express]}}
+        express_label.style.font_color = {r = 0.4, g = 1, b = 0.4}
+        express_label.style.maximal_width = preview_size
+      elseif armed_express == teleporter_entity.unit_number then
+        local armed_label = inner_flow.add{type = "label", caption = {"etech-tp-express-armed-label"}}
+        armed_label.style.font_color = {r = 1, g = 0.9, b = 0.3}
+        armed_label.style.maximal_width = preview_size
+      end
+      -- A pad still inside its trigger timeout can be teleported TO; what it
+      -- won't do is open its own window when you step on it. That silence is
+      -- what looked like a broken pad, so say it out loud.
+      local cooling = teleporter_entity.timeout or 0
+      if cooling > 0 then
+        local cooling_label = inner_flow.add{type = "label",
+          caption = {"etech-tp-cooling", string.format("%.0f", cooling / 60)}}
+        cooling_label.style.font_color = {r = 0.9, g = 0.8, b = 0.4}
+        cooling_label.style.maximal_width = preview_size
+      end
+      -- Tooltip: the click hints, then how much traffic this pad sees, then
+      -- the energy line.
+      local tooltip = {"", {"etech-tp-favorite-tooltip"}}
+      if (teleporter.uses or 0) > 0 then
+        tooltip[#tooltip + 1] = "\n"
+        tooltip[#tooltip + 1] = {"etech-tp-traffic", teleporter.uses,
+          teleporter.last_user or "?", string.format("%.0f", (game.tick - (teleporter.last_used_tick or game.tick)) / 3600)}
+      end
+      local pad_cost = cost - personal_share(player, cost)
+      if pad_cost > 0 then
         local eei = get_energy_interface(teleporter, teleporter_entity)
         local stored = (eei and eei.valid and eei.energy) or 0
-        local energy_line = {"etech-tp-energy-label", string.format("%.0f", cost / 1000000), string.format("%.0f", stored / 1000000)}
-        if stored < cost then
+        local energy_line = {"etech-tp-energy-label", string.format("%.0f", pad_cost / 1000000), string.format("%.0f", stored / 1000000)}
+        if stored < pad_cost then
           button.enabled = false
-          button.tooltip = {"", {"etech-tp-not-enough-energy"}, "\n", energy_line}
+          tooltip = {"", {"etech-tp-not-enough-energy"}, "\n", energy_line}
         else
-          button.tooltip = {"", {"etech-tp-favorite-tooltip"}, "\n", energy_line}
+          tooltip[#tooltip + 1] = "\n"
+          tooltip[#tooltip + 1] = energy_line
         end
       end
+      -- With tooltips hidden the click hints go, but a pad that cannot afford
+      -- the jump still has to say why it is greyed out.
+      if tooltips_hidden then
+        button.tooltip = button.enabled and nil or {"etech-tp-not-enough-energy"}
+      else
+        button.tooltip = tooltip
+      end
       util.register_gui(script_data.button_actions, button, {type = "teleport_button", param = teleporter})
-      any = true
+  end
+
+  -- Sections: a collapsible header, then the pads under it. The header is the
+  -- only place the surface is named while grouping is on.
+  local collapsed = script_data.collapsed[player.index] or {}
+  local any = false
+  for _, section in ipairs(section_order) do
+    any = true
+    local body
+    if section.label then
+      local is_collapsed = collapsed[section.key] and true or false
+      local header = list_root.add{type = "frame", style = "subheader_frame"}
+      header.style.horizontally_stretchable = true
+      header.style.top_margin = 4
+      local caret = header.add{type = "sprite-button",
+        style = "frame_action_button",
+        sprite = is_collapsed and "utility/expand" or "utility/collapse",
+        tooltip = {"etech-tp-section-toggle"}}
+      util.register_gui(script_data.button_actions, caret,
+        {type = "toggle_section", section = section.key})
+      if section.icon ~= "" then
+        header.add{type = "label", caption = section.icon}
+      end
+      local header_label = header.add{type = "label", style = "subheader_caption_label", caption = section.label}
+      header_label.style.left_padding = 2
+      local count = header.add{type = "label", caption = tostring(#section.entries)}
+      count.style.font_color = {r = 0.6, g = 0.6, b = 0.6}
+      count.style.left_padding = 6
+      if is_collapsed then
+        -- Collapsed sections keep their header and drop their pads entirely,
+        -- rather than hiding a built body: fewer elements, faster rebuild.
+        goto continue
       end
     end
+    body = list_root.add{type = "frame", style = "inside_deep_frame"}
+    body.style.horizontally_stretchable = true
+    local holding_table = body.add{type = "table", column_count = column_count}
+    holding_table.style.horizontal_spacing = 2
+    holding_table.style.vertical_spacing = 2
+    -- The section frame stretches to the window width so headers and bodies
+    -- line up; the TABLE inside it must not, or its columns share out the
+    -- leftover width and the pads drift apart with gaps between them.
+    holding_table.style.horizontally_stretchable = false
+    holding_table.style.horizontally_squashable = false
+    section_tables[#section_tables + 1] = holding_table
+    for _, entry in ipairs(section.entries) do
+      build_pad_tile(holding_table, entry)
+    end
+    ::continue::
   end
+
   if not any then
-    holding_table.add{type = "label", caption = {"etech-tp-no-teleporters"}}
+    -- Distinguish "you have no other pads" from "your own filter hid them".
+    local empty = list_root.add{type = "frame", style = "inside_deep_frame"}
+    empty.add{type = "label",
+      caption = pinned_only and {"etech-tp-no-pinned"} or {"etech-tp-no-teleporters"}}
   end
   if saved_search ~= "" then
-    apply_search_filter(holding_table, saved_search)
+    for _, holding_table in ipairs(section_tables) do
+      apply_search_filter(holding_table, saved_search)
+    end
   end
 end
 
@@ -866,7 +1412,11 @@ local apply_pad_rename = function(event, param)
   rename_teleporter(player.force, old_name, new_name)
 end
 
-local gui_actions =
+-- Forward-declared, then assigned: handlers inside the table reach other
+-- handlers through it (Enter-to-teleport reuses teleport_button), and a local
+-- is not in scope inside its own initializer.
+local gui_actions
+gui_actions =
 {
   rename_button = function(event, param)
     make_rename_frame(game.get_player(event.player_index), param.caption)
@@ -892,8 +1442,72 @@ local gui_actions =
     local player = game.players[event.player_index]
     if not (player and player.valid) then return end
 
-    -- Right-click stars/unstars the pad; shift+right-click renames it.
+    -- ALT-click marks this pad as home (the recall hotkey's destination);
+    -- CONTROL-click makes it the express target of the pad you are standing
+    -- on. Both toggle, and neither teleports.
+    if event.name == defines.events.on_gui_click and event.alt then
+      local unit_number = destination.unit_number
+      script_data.home[player.index] = (script_data.home[player.index] ~= unit_number) and unit_number or nil
+      check_player_linked_teleporter(player)
+      return
+    end
+    -- CONTROL-click links pads. Standing on a pad, one click is enough: that
+    -- pad is the source. From the remote there is no source, so the first
+    -- click ARMS a pad and the second picks its destination - and clicking
+    -- the armed pad again clears both the arming and any link it had.
+    if event.name == defines.events.on_gui_click and event.control then
+      local unit_number = destination.unit_number
+      local source_pad = script_data.player_linked_teleporter[player.index]
+      local source_record = source_pad and source_pad.valid and script_data.teleporter_map[source_pad.unit_number]
+      if not source_record then
+        local armed = script_data.express_pending[player.index]
+        if not armed then
+          script_data.express_pending[player.index] = unit_number
+          player.print({"etech-tp-express-armed"})
+          check_player_linked_teleporter(player)
+          return
+        end
+        script_data.express_pending[player.index] = nil
+        local armed_record = script_data.teleporter_map[armed]
+        if not (armed_record and armed_record.teleporter and armed_record.teleporter.valid) then
+          player.print({"etech-tp-express-source-gone"})
+          check_player_linked_teleporter(player)
+          return
+        end
+        if armed == unit_number then
+          armed_record.express = nil
+          player.print({"etech-tp-express-cleared"})
+        else
+          armed_record.express = unit_number
+          player.print({"etech-tp-express-set"})
+        end
+        check_player_linked_teleporter(player)
+        return
+      end
+      source_record.express = (source_record.express ~= unit_number) and unit_number or nil
+      player.print(source_record.express and {"etech-tp-express-set"} or {"etech-tp-express-cleared"})
+      check_player_linked_teleporter(player)
+      return
+    end
+
+    -- Right-click stars/unstars the pad; shift+right-click renames it;
+    -- control+right-click sends a starred pad to the BACK of the starred ones.
+    -- Together with shift+left-click (to the front) that is enough to arrange
+    -- a handful of favorites - and it has to be gestures, because Factorio has
+    -- no GUI drag events at all and buttons nested inside a button do not
+    -- reliably take clicks of their own.
     if event.name == defines.events.on_gui_click and event.button == defines.mouse_button_type.right then
+      if event.control then
+        local favorites = get_favorites(player)
+        local unit_number = destination.unit_number
+        if not favorites[unit_number] then
+          player.print({"etech-tp-promote-needs-star"})
+          return
+        end
+        demote_favorite(favorites, unit_number)
+        check_player_linked_teleporter(player)
+        return
+      end
       if event.shift then
         local network = script_data.networks[player.force.name] or {}
         for name, teleporter_data in pairs(network) do
@@ -906,7 +1520,27 @@ local gui_actions =
       end
       local favorites = get_favorites(player)
       local unit_number = destination.unit_number
-      favorites[unit_number] = not favorites[unit_number] or nil
+      if favorites[unit_number] then
+        favorites[unit_number] = nil
+      else
+        star_favorite(favorites, unit_number)
+      end
+      check_player_linked_teleporter(player)
+      return
+    end
+
+    -- Shift + LEFT-click promotes an already-starred pad to the front of the
+    -- starred ones. Repeated on two pads it orders the whole set, which is
+    -- all the ordering a list this size needs.
+    if event.name == defines.events.on_gui_click and event.shift
+      and event.button == defines.mouse_button_type.left then
+      local favorites = get_favorites(player)
+      local unit_number = destination.unit_number
+      if not favorites[unit_number] then
+        player.print({"etech-tp-promote-needs-star"})
+        return
+      end
+      promote_favorite(favorites, unit_number)
       check_player_linked_teleporter(player)
       return
     end
@@ -920,11 +1554,13 @@ local gui_actions =
       end
     end
     local cost = get_teleport_cost(source, destination, player)
+    local share = personal_share(player, cost)
+    local pad_cost = cost - share
     local eei
-    if cost > 0 then
+    if pad_cost > 0 then
       eei = get_energy_interface(teleport_param, destination)
       local stored = (eei and eei.valid and eei.energy) or 0
-      if stored < cost then
+      if stored < pad_cost then
         player.print({"etech-tp-not-enough-energy"})
         return
       end
@@ -944,14 +1580,17 @@ local gui_actions =
       player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
       return
     end
-    if cost > 0 and eei and eei.valid then
-      eei.energy = eei.energy - cost
+    if pad_cost > 0 and eei and eei.valid then
+      eei.energy = eei.energy - pad_cost
     end
+    pay_personal_share(player, share)
     create_flash(destination_surface, destination_position)
     create_flash(from_surface, from_position)
     play_teleport_sound(player)
     unlink_teleporter(player)
     add_recent(player, destination)
+    add_recent_pad_at(player, from_surface, from_position, destination)
+    note_pad_use(player, teleport_param, destination)
 
     if remote and settings.global["etech-teleporter-return-enabled"].value then
       push_return(player, from_surface.index, from_position)
@@ -989,8 +1628,34 @@ local gui_actions =
     create_flash(from_surface, from_position)
     create_flash(surface, result)
     play_teleport_sound(player)
+    add_recent_pad_at(player, from_surface, from_position)
     table.remove(rets, index)
     script_data.returns[player.index] = (#rets > 0) and rets or nil
+    unlink_teleporter(player)
+  end,
+  body_button = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    local slot = common.get_death_slot(player)
+    if not slot then
+      player.print({"etech-tp-body-expired"})
+      check_player_linked_teleporter(player)
+      return
+    end
+    local surface = game.surfaces[slot.surface_index]
+    local from_surface = player.surface
+    local from_position = player.position
+    local ok, result = common.teleport_player(player, surface, slot.position)
+    if not ok then
+      player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+      return
+    end
+    create_flash(from_surface, from_position)
+    create_flash(surface, result)
+    play_teleport_sound(player)
+    common.clear_death_slot(player)
+    add_recent_pad_at(player, from_surface, from_position)
     unlink_teleporter(player)
   end,
   player_button = function(event, param)
@@ -1003,19 +1668,34 @@ local gui_actions =
       check_player_linked_teleporter(player)
       return
     end
-    local surface = target.physical_surface or target.surface
-    local position = target.physical_position or target.position
-    local from_surface = player.surface
-    local from_position = player.position
-    local ok, result = common.teleport_player(player, surface, position)
-    if not ok then
-      player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    -- The target decides (unless consent is off or they already answered
+    -- "always" for this player). A pending ask closes the window: the jump
+    -- happens from their answer, minutes later if they are slow.
+    local verdict = common.request_teleport(player, target)
+    if verdict == "busy" then
+      player.print({"etech-tp-consent-busy", target.name})
       return
     end
-    create_flash(from_surface, from_position)
-    create_flash(surface, result)
-    play_teleport_sound(player)
+    if verdict == "denied" then
+      player.print({"etech-tp-consent-refused", target.name})
+      check_player_linked_teleporter(player)
+      return
+    end
+    if verdict == "pending" then
+      player.print({"etech-tp-consent-asked", target.name})
+      unlink_teleporter(player)
+      return
+    end
+    local from_surface = player.surface
+    local from_position = player.position
+    if not common.do_player_teleport(player, target) then return end
+    add_recent_pad_at(player, from_surface, from_position)
     unlink_teleporter(player)
+  end,
+  consent_settings = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if player then common.open_consent_settings(player) end
   end,
 
   surface_filter = function(event, param)
@@ -1033,6 +1713,39 @@ local gui_actions =
     script_data.sort_mode[player.index] = event.element.selected_index
     check_player_linked_teleporter(player)
   end,
+  group_mode = function(event, param)
+    if event.name ~= defines.events.on_gui_selection_state_changed then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    script_data.group_mode[player.index] = event.element.selected_index
+    check_player_linked_teleporter(player)
+  end,
+  toggle_section = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    local collapsed = script_data.collapsed[player.index]
+    if not collapsed then
+      collapsed = {}
+      script_data.collapsed[player.index] = collapsed
+    end
+    collapsed[param.section] = not collapsed[param.section] or nil
+    check_player_linked_teleporter(player)
+  end,
+  toggle_tooltips = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    script_data.hide_tooltips[player.index] = not script_data.hide_tooltips[player.index] or nil
+    check_player_linked_teleporter(player)
+  end,
+  pinned_only = function(event, param)
+    if event.name ~= defines.events.on_gui_checked_state_changed then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    script_data.pinned_only[player.index] = event.element.state or nil
+    check_player_linked_teleporter(player)
+  end,
   rename_surface_button = function(event, param)
     make_surface_rename_frame(game.get_player(event.player_index))
   end,
@@ -1047,6 +1760,27 @@ local gui_actions =
 
   search_text_changed = function(event, param)
     local box = event.element
+    -- Enter teleports to the first pad still showing: type three letters,
+    -- press Enter, gone. Goes through the button's own registered action, so
+    -- energy cost, cross-surface rules and recents behave exactly as if it
+    -- had been clicked.
+    if event.name == defines.events.on_gui_confirmed then
+      local actions = script_data.button_actions[event.player_index] or {}
+      for _, child in pairs (param.parent.children) do
+        local action = actions[child.index]
+        if child.visible and child.enabled and action and action.type == "teleport_button" then
+          gui_actions.teleport_button({
+            name = defines.events.on_gui_click,
+            player_index = event.player_index,
+            element = child,
+            button = defines.mouse_button_type.left,
+            shift = false,
+          }, action)
+          return
+        end
+      end
+      return
+    end
     script_data.search_text[event.player_index] = (box.text ~= "") and box.text or nil
     apply_search_filter(param.parent, box.text)
   end,
@@ -1130,10 +1864,73 @@ local on_teleporter_removed = function(entity)
   for _, recent in pairs (script_data.recent) do
     recent[entity.unit_number] = nil
   end
+  -- A mined pad must not stay someone's home or another pad's express target.
+  for player_index, home in pairs (script_data.home) do
+    if home == entity.unit_number then script_data.home[player_index] = nil end
+  end
+  for _, teleporter_data in pairs (script_data.teleporter_map) do
+    if teleporter_data.express == entity.unit_number then teleporter_data.express = nil end
+  end
 
   script_data.to_be_removed[entity.unit_number] = true
   refresh_teleporter_frames()
   script_data.to_be_removed[entity.unit_number] = nil
+end
+
+-- Move `player` from the pad they are standing on straight to its express
+-- target, charging it like any other pad-to-pad jump. Returns false when the
+-- link can't be used right now (gone, unaffordable, refused), so the caller
+-- falls back to opening the normal window.
+local run_express = function(player, source, source_record)
+  local target_record = script_data.teleporter_map[source_record.express]
+  local destination = target_record and target_record.teleporter
+  if not (destination and destination.valid) then
+    source_record.express = nil
+    return false
+  end
+  if destination.surface ~= source.surface
+    and not settings.global["etech-teleporter-cross-surface"].value then
+    return false
+  end
+  local cost = get_teleport_cost(source, destination, player)
+  local share = personal_share(player, cost)
+  local pad_cost = cost - share
+  local eei
+  if pad_cost > 0 then
+    eei = get_energy_interface(target_record, destination)
+    local stored = (eei and eei.valid and eei.energy) or 0
+    if stored < pad_cost then
+      player.print({"etech-tp-not-enough-energy"})
+      return false
+    end
+  end
+  local from_surface = source.surface
+  local from_position = source.position
+  local ok, result = common.teleport_player(player, destination.surface, destination.position, {exact = true})
+  if not ok then
+    player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    return false
+  end
+  if pad_cost > 0 and eei and eei.valid then
+    eei.energy = eei.energy - pad_cost
+  end
+  pay_personal_share(player, share)
+  destination.timeout = destination.prototype.timeout
+  source.timeout = source.prototype.timeout
+  create_flash(destination.surface, destination.position)
+  create_flash(from_surface, from_position)
+  play_teleport_sound(player)
+  add_recent(player, destination)
+  add_recent(player, source)
+  note_pad_use(player, target_record, destination)
+  -- Remember where they landed: until they step off, this pad's own express
+  -- link stays inert, so a pair of pads pointing at each other is a doorway
+  -- and not a loop.
+  script_data.express_block[player.index] = {
+    unit_number = destination.unit_number,
+    position = destination.position,
+  }
+  return true
 end
 
 local teleporter_triggered = function(entity, character)
@@ -1141,6 +1938,26 @@ local teleporter_triggered = function(entity, character)
   if character.type ~= "character" then return end
   local player = character.player
   if not player then return end
+
+  -- Express pads: stepping on one sends you straight to its target, no
+  -- window. Standing on the pad you just arrived at does nothing (see
+  -- express_block); walking off and back on works normally, and the remote
+  -- hotkey still opens the full list from where you stand.
+  local record = script_data.teleporter_map[entity.unit_number]
+  local block = script_data.express_block[player.index]
+  if block then
+    local same_pad = block.unit_number == entity.unit_number
+      and util.distance(block.position, player.position) <= 2
+    if not same_pad then
+      script_data.express_block[player.index] = nil
+      block = nil
+    end
+  end
+  if record and record.express and not block
+    and settings.global["etech-teleporter-express"].value then
+    if run_express(player, entity, record) then return end
+  end
+
   player.teleport(entity.position)
   entity.disabled_by_script = true
   entity.timeout = entity.prototype.timeout
@@ -1333,6 +2150,167 @@ end
 
 local on_remote_hotkey = function(event)
   open_remote(game.get_player(event.player_index))
+end
+
+-- Emergency recall: back to the pad you marked home (ALT-click in the list),
+-- from anywhere, at a premium and on a cooldown. Deliberately more expensive
+-- than walking to a pad and jumping - it is the "get me out of here" button,
+-- not the cheap way home.
+local on_recall_hotkey = function(event)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  if not settings.global["etech-teleporter-remote"].value then
+    player.print({"etech-tp-remote-disabled"})
+    return
+  end
+  local tech = player.force.technologies[teleporter_name]
+  if tech and not tech.researched then
+    player.print({"etech-tp-remote-not-researched"})
+    return
+  end
+  local home_record = script_data.teleporter_map[script_data.home[player.index] or 0]
+  local home = home_record and home_record.teleporter
+  if not (home and home.valid) then
+    script_data.home[player.index] = nil
+    player.print({"etech-tp-recall-no-home"})
+    return
+  end
+  local cooldown = settings.global["etech-teleporter-recall-cooldown-min"].value * 60 * 60
+  local last = script_data.recall_tick[player.index]
+  if cooldown > 0 and last and game.tick - last < cooldown then
+    player.print({"etech-tp-recall-cooldown", string.format("%.0f", (cooldown - (game.tick - last)) / 60)})
+    return
+  end
+  local cost = get_teleport_cost(nil, home, player) * settings.global["etech-teleporter-recall-multiplier"].value
+  local share = personal_share(player, cost)
+  local pad_cost = cost - share
+  local eei
+  if pad_cost > 0 then
+    eei = get_energy_interface(home_record, home)
+    local stored = (eei and eei.valid and eei.energy) or 0
+    if stored < pad_cost then
+      player.print({"etech-tp-not-enough-energy"})
+      return
+    end
+  end
+  local from_surface = player.surface
+  local from_position = player.position
+  local ok, result = common.teleport_player(player, home.surface, home.position, {exact = true})
+  if not ok then
+    player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    return
+  end
+  if pad_cost > 0 and eei and eei.valid then
+    eei.energy = eei.energy - pad_cost
+  end
+  pay_personal_share(player, share)
+  script_data.recall_tick[player.index] = game.tick
+  home.timeout = home.prototype.timeout
+  create_flash(home.surface, home.position)
+  create_flash(from_surface, from_position)
+  play_teleport_sound(player)
+  add_recent(player, home)
+  add_recent_pad_at(player, from_surface, from_position, home)
+  note_pad_use(player, home_record, home)
+  if settings.global["etech-teleporter-return-enabled"].value then
+    push_return(player, from_surface.index, from_position)
+  end
+end
+
+-- Respawn straight at the home pad instead of the force's spawn point. Free:
+-- you have just lost everything you were carrying, and charging a pad for it
+-- would only mean dying twice.
+local on_player_respawned = function(event)
+  if not settings.global["etech-teleporter-respawn-home"].value then return end
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  local home_record = script_data.teleporter_map[script_data.home[player.index] or 0]
+  local home = home_record and home_record.teleporter
+  if not (home and home.valid) then return end
+  local ok = common.teleport_player(player, home.surface, home.position, {exact = true})
+  if ok then
+    create_flash(home.surface, home.position)
+    play_teleport_sound(player)
+    player.print({"etech-tp-respawn-home"})
+  end
+end
+
+-- Jump straight to the pad used most recently, no window. Same gates as the
+-- remote (it IS a remote jump), same energy cost, and the pad you leave
+-- becomes the new most-recent one - so the hotkey alternates between two
+-- pads, which is what going back and forth actually looks like.
+local on_jump_back_hotkey = function(event)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  if not settings.global["etech-teleporter-remote"].value then
+    player.print({"etech-tp-remote-disabled"})
+    return
+  end
+  local tech = player.force.technologies[teleporter_name]
+  if tech and not tech.researched then
+    player.print({"etech-tp-remote-not-researched"})
+    return
+  end
+  local recent = script_data.recent[player.index]
+  if not recent then
+    player.print({"etech-tp-jump-back-none"})
+    return
+  end
+  -- Newest recent entry that still exists, is on a reachable surface, and
+  -- isn't the pad we are standing on.
+  local here = player.physical_surface or player.surface
+  local cross_surface = settings.global["etech-teleporter-cross-surface"].value
+  local network = script_data.networks[player.force.name] or {}
+  local best, best_tick, best_data
+  for _, teleporter_data in pairs (network) do
+    local entity = teleporter_data.teleporter
+    if entity and entity.valid then
+      local tick = recent[entity.unit_number]
+      local reachable = cross_surface or entity.surface == here
+      local elsewhere = util.distance(entity.position, player.physical_position or player.position) > 2
+        or entity.surface ~= here
+      if tick and reachable and elsewhere and (not best_tick or tick > best_tick) then
+        best, best_tick, best_data = entity, tick, teleporter_data
+      end
+    end
+  end
+  if not best then
+    player.print({"etech-tp-jump-back-none"})
+    return
+  end
+  local cost = get_teleport_cost(nil, best, player)
+  local share = personal_share(player, cost)
+  local pad_cost = cost - share
+  local eei
+  if pad_cost > 0 then
+    eei = get_energy_interface(best_data, best)
+    local stored = (eei and eei.valid and eei.energy) or 0
+    if stored < pad_cost then
+      player.print({"etech-tp-not-enough-energy"})
+      return
+    end
+  end
+  local from_surface = player.surface
+  local from_position = player.position
+  local ok, result = common.teleport_player(player, best.surface, best.position, {exact = true})
+  if not ok then
+    player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    return
+  end
+  if pad_cost > 0 and eei and eei.valid then
+    eei.energy = eei.energy - pad_cost
+  end
+  pay_personal_share(player, share)
+  best.timeout = best.prototype.timeout
+  create_flash(best.surface, best.position)
+  create_flash(from_surface, from_position)
+  play_teleport_sound(player)
+  add_recent(player, best)
+  add_recent_pad_at(player, from_surface, from_position, best)
+  note_pad_use(player, best_data, best)
+  if settings.global["etech-teleporter-return-enabled"].value then
+    push_return(player, from_surface.index, from_position)
+  end
 end
 
 -- Unpowered-pad alert: a pad with an empty energy buffer can't be teleported
@@ -1539,13 +2517,14 @@ local migrate_from_original = function(command)
   out({"etech-tp-migrate-done", pads, items})
 end
 
--- Energy cost, the cross-surface rules, the players section, preview size and
--- the platform filter are all read while the destination list is being BUILT,
--- so an open window kept showing the old numbers until some unrelated event
--- forced a rebuild. Rebuild on the spot instead (0.21.1).
+-- Energy cost, the cross-surface rules, the players section, the body entry,
+-- preview size and the platform filter are all read while the destination list
+-- is being BUILT, so an open window kept showing the old numbers until some
+-- unrelated event forced a rebuild. Rebuild on the spot instead (0.21.1).
+-- Pattern covers etech-teleporter-* and etech-teleport-body-*.
 local on_runtime_mod_setting_changed = function(event)
   local setting = event.setting
-  if not (setting and setting:find("^etech%-teleporter%-")) then return end
+  if not (setting and setting:find("^etech%-telepor")) then return end
   refresh_teleporter_frames()
 end
 
@@ -1574,6 +2553,7 @@ teleporters.events =
   [defines.events.on_gui_text_changed] = on_gui_action,
   [defines.events.on_gui_confirmed] = on_gui_action,
   [defines.events.on_gui_selection_state_changed] = on_gui_action,
+  [defines.events.on_gui_checked_state_changed] = on_gui_action,
   [defines.events.on_gui_closed] = on_gui_closed,
   [names.hotkeys.focus_search] = on_search_focused,
   [defines.events.on_player_display_resolution_changed] = on_player_display_resolution_changed,
@@ -1591,6 +2571,9 @@ teleporters.events =
   [defines.events.on_forces_merged] = on_forces_merged,
   [defines.events.on_lua_shortcut] = on_lua_shortcut,
   [names.hotkeys.open_remote] = on_remote_hotkey,
+  [names.hotkeys.jump_back] = on_jump_back_hotkey,
+  [names.hotkeys.recall_home] = on_recall_hotkey,
+  [defines.events.on_player_respawned] = on_player_respawned,
 
   [defines.events.on_trigger_created_entity] = on_trigger_created_entity,
   [defines.events.on_player_setup_blueprint] = on_player_setup_blueprint,
@@ -1602,8 +2585,21 @@ teleporters.on_nth_tick =
   [601] = check_pad_alerts,
 }
 
+-- Every handler above goes through `guarded`, which makes sure script_data has
+-- all of its sub-tables before the handler touches one. See the comment on
+-- SCRIPT_DATA_TABLES: a same-version rebuild does not fire
+-- on_configuration_changed, so a save can come back missing whatever tables
+-- the build that last saved it did not have.
+for event_id, handler in pairs (teleporters.events) do
+  teleporters.events[event_id] = guarded(handler)
+end
+for tick, handler in pairs (teleporters.on_nth_tick) do
+  teleporters.on_nth_tick[tick] = guarded(handler)
+end
+
 teleporters.on_init = function()
   storage.etech_teleporters = storage.etech_teleporters or script_data
+  ensure_script_data()
 end
 
 teleporters.on_load = function()
@@ -1615,20 +2611,28 @@ teleporters.on_configuration_changed = function()
     storage.etech_teleporters = script_data
   end
   local stored = storage.etech_teleporters
-  stored.surface_aliases = stored.surface_aliases or {}
-  stored.surface_filter = stored.surface_filter or {}
-  stored.surface_rename_frames = stored.surface_rename_frames or {}
-  stored.remote_open = stored.remote_open or {}
-  stored.returns = stored.returns or {}
-  stored.favorites = stored.favorites or {}
-  stored.recent = stored.recent or {}
-  stored.sort_mode = stored.sort_mode or {}
-  stored.frame_locations = stored.frame_locations or {}
-  stored.search_text = stored.search_text or {}
+  -- The per-table backfill that used to be written out one line at a time
+  -- lives in SCRIPT_DATA_TABLES now, so adding a table cannot leave the
+  -- migration behind again.
+  script_data = stored
+  ensure_script_data()
   -- 0.10.0: returns went from a single slot to a newest-first array.
   for player_index, ret in pairs (stored.returns) do
     if ret.surface_index then
       stored.returns[player_index] = {ret}
+    end
+  end
+  -- 0.22.0: favorites went from `true` to a numeric rank so starred pads can
+  -- be ordered. Old entries get ranks in name order - arbitrary, but it is
+  -- exactly the order they were displayed in before.
+  for _, favorites in pairs (stored.favorites or {}) do
+    local booleans = {}
+    for unit_number, value in pairs (favorites) do
+      if value == true then booleans[#booleans + 1] = unit_number end
+    end
+    table.sort(booleans)
+    for index, unit_number in ipairs(booleans) do
+      favorites[unit_number] = index
     end
   end
   -- 0.19.0: favorites/recents rekeyed player.name -> player.index (name

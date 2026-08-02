@@ -229,3 +229,9 @@ data:extend({
         },
     },
 })
+
+-- Factory terminal: armor module + toolbar shortcut. Separate toggle, and it
+-- extends the tech above, so it loads last.
+if settings.startup["etech-factory-terminal"].value then
+    require("factory-hub/terminal-data")
+end

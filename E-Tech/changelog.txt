@@ -1,6 +1,196 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.21.1
-Date: 2026-07-31
+Version: 0.22.0
+Date: 2026-08-02
+  Features:
+    - Teleport to your body after you die. Both teleport features now offer a
+      free one-use jump back to where you died: a "Body" entry with a live
+      camera view at the top of the teleporter list (next to the return slots),
+      and a "Body" button in the teleport-to-player shortcut's picker. New map
+      settings "Teleport: teleport to your body after death" (on) and
+      "Teleport: body teleport time limit (minutes)" (15, 0 = no limit) - the
+      time limit is what makes it a "you just died" offer rather than a
+      permanent way home.
+    - Factory terminal (Factorissimo): a toolbar shortcut that lists every
+      factory outlet, inlet, fluid device and sensor on the surface you are
+      standing on - position and what each moved in the last minute - and
+      opens any of them from where you stand. Gated twice: the new Factory
+      terminal technology, and a Factory link armor module that has to be in
+      your armor with charge in it. The link holds 2 MJ off your suit's own
+      generators; opening costs 100 kJ, holding the window open costs 20 kW,
+      and a flat link closes it. Startup toggle "Factory terminal
+      (Factorissimo)", on by default. Its art is the base game's battery
+      equipment, tinted - placeholder until real art exists.
+    - Teleporters: teleporting to a TEAMMATE now asks them first. They answer
+      "Yes, once", "Yes, always", "No, once" or "No, always"; the two standing
+      answers are remembered per person and can be taken back at any time in
+      the new settings window - the gear button in either teleport window -
+      which also decides what happens to requests from anyone you have not
+      answered for (ask, always allow, always refuse). No answer within 30
+      seconds counts as a refusal, so nobody is left waiting on a window
+      someone alt-tabbed away from. New map setting "Teleporter: ask before
+      someone teleports to you", on by default; turn it off for the old
+      land-on-each-other-unannounced behavior. Single-player is unaffected.
+    - Teleporters: starred pads can now be ORDERED. Starring appends to the
+      end of your starred pads and Shift + left-click moves one to the front,
+      so the pad you actually travel to most sits first instead of wherever
+      its name happened to put it. The list numbers the stars (★1, ★2, ...)
+      so it says which favorite each one is.
+    - Teleporters: EXPRESS PADS. Stand on a pad and CONTROL + click another
+      one in the list, or - from the wireless remote, where there is no pad
+      underfoot - CONTROL + click the pad that should send you and then the
+      one it should send you to. Either way, stepping onto the first pad from
+      then on sends you straight to the second - no window, normal energy
+      cost. Every linked pad says where it sends you in green under its name,
+      and a pad waiting for its destination says so in yellow. The pad you
+      arrive on stays inert until you step off it, so two pads pointing at
+      each other are a doorway rather than an infinite bounce, and the
+      wireless remote still opens the full list from where you stand. Map
+      setting "Teleporter: express pads", on by default; turning it off
+      ignores every link without clearing them.
+    - Teleporters: HOME PAD AND EMERGENCY RECALL. ALT + click a pad in the
+      list to mark it home (it gets a house marker), then ALT + R teleports
+      you there from anywhere. It costs a multiple of the normal jump (map
+      setting, 3x by default) and has its own cooldown (5 minutes by
+      default), because it is the "get me out of here" button and not the
+      cheap way home. Optionally, dying now puts you back at your home pad
+      instead of the force's spawn point - map setting, off by default.
+    - Teleporters: PERSONAL TELEPORTER armor module, unlocked by the same
+      Teleporter technology as the pads. It holds 50 MJ off your suit's own
+      generators and pays up to half of every jump's energy bill out of that
+      buffer, so the destination pad is drained less. It never enables a jump
+      you could not otherwise make; it makes the ones you do make cheaper for
+      the network. Art is the base game's battery equipment, tinted -
+      placeholder until real art exists.
+    - Teleporters: pads now show how much traffic they see. A pad's tooltip
+      says how many times it has been travelled to, by whom last, and how
+      long ago - a list of thirty pads otherwise says nothing about which
+      ones your base actually uses.
+    - Teleporters: a pad still inside its five-second trigger timeout now says
+      "cooling down" in the list. It can still be teleported TO; what it will
+      not do is open its own window when you step on it, and that silence
+      looked like a broken pad.
+    - Teleporters: the Return entry's tooltip now says how long it has left
+      before it expires.
+    - Teleporters: how many pads count as "recently used" is now a map
+      setting (default 8, up to 50). It was a hardcoded 8, which on a base
+      with a dozen regularly used pads meant the one you wanted had already
+      fallen off the list.
+    - Teleporters: SHIFT + R jumps straight to the pad you used last, with no
+      window at all. Same cost and same gates as a wireless-remote jump, and
+      since the pad you leave becomes the most recent one, the key alternates
+      between two pads - which is what going back and forth actually is.
+    - Teleporters: ENTER in the destination list's search box teleports to the
+      first pad still showing. Type three letters, press Enter, gone.
+    - Teleporters: pad QUALITY now means something. Every level adds 50% to
+      the pad's energy buffer (a legendary pad holds 700 MJ instead of 200 and
+      rides out a brownout that would strand a normal one) and takes 10% off
+      the cost of jumping to it, to a floor of half price. Does nothing
+      without the Quality mod.
+    - Teleporters: a tips-and-tricks entry, because starring, renaming,
+      sorting, the remote and the jump-back key were all invisible unless you
+      read the mod page.
+    - Teleporters: "Starred only" tick box above the pad list, for bases where
+      the full list runs to dozens of pads. Starred pads plus the Return and
+      Body entries, nothing else. Remembered per player.
+  Bugfixes:
+    - FIXED A CRASH opening the teleporter list: "attempt to index field
+      'express_pending' (a nil value)". Every table this version added to the
+      teleporter module was created by the migration that runs on a mod-set
+      change - and that migration does NOT run when a save is reloaded with a
+      rebuild carrying the same version number, which is exactly what a save
+      played during 0.22.0's development hits. The tables are now ensured at
+      the start of every event instead of being trusted to exist, and the
+      one-line-per-table backfill is a list, so adding a table can no longer
+      leave the migration behind. Starred pads that predate this version are
+      converted to ranked favorites when they are next read, for the same
+      reason.
+    - Teleporters: the destination window is now GROUPED BY SURFACE. Grouping
+      is by kind of surface rather than by name: each planet gets its own
+      section, every space platform shares one "Platforms" section, and
+      Factorissimo interiors share "Factory floors" - so four ships are one
+      section instead of four one-row sections, and launching a fifth changes
+      nothing. The surface underfoot comes first, the rest follow in name
+      order, and each header carries the surface icon, its name and a count.
+      Sections collapse, remembered per player. A "Group" dropdown next to the
+      sort order switches the whole thing off for a flat list; grouped is the
+      default.
+    - Teleporters: with a section header naming the surface, the pads under it
+      stop repeating it. A pad on your own surface shows its distance, one on
+      another world shows when you last used it, and pads in the shared
+      Platforms and Factory floors sections keep their own surface name, since
+      a shared header cannot carry it. Turning grouping off puts the surface
+      back on every tile.
+    - Teleporters: the star rank, home flag and express arrow moved off the
+      name and onto their own row, so a pad called "Rocket Launch Site" is no
+      longer shown as "Rocket Launch Site...". Tiles with nothing to mark
+      don't get the row.
+    - Teleporters: Control + right-click sends a starred pad to the BACK of
+      your starred pads, the counterpart to Shift + left-click sending one to
+      the front. Factorio has no GUI drag events of any kind, so ordering is
+      done with gestures rather than by dragging tiles around.
+    - Teleporters: every entry in the destination window now leads its grey
+      line with the SURFACE'S ICON - the planet's own starmap icon, the
+      space-platform foundation for a ship, a factory building for a
+      Factorissimo interior floor. Pads on this surface show the icon in front
+      of the distance, pads elsewhere in front of the surface name, and the
+      Return, Body and player previews carry it too. A name on its own
+      ("Return 2", "Teleporter 1259086") never said which world it went to.
+    - Teleporters: a button in the destination window's title bar hides the
+      pad click-hint tooltips. Six lines of click actions are what you want
+      once and clutter afterwards; the "not enough energy" explanation still
+      shows on pads that are greyed out. Remembered per player.
+    - Teleporters: the recently-used clock is gone from the pad list. It was
+      drawn with "[img=quantity-time]", a sprite that has not existed since
+      2.0 - and an invalid sprite path does not error, it silently draws a
+      placeholder glyph, so a small mystery circle had been sitting in the pad
+      list looking deliberate. Rather than fix the icon, the marker is
+      retired: the list already sorts by recency, so a clock on half the tiles
+      said nothing the order did not. The home-pad flag and the express arrow
+      that remain are checked against the sprites actually loaded, and fall
+      back to plain text if one ever disappears.
+    - Teleporters: the Return and Body previews now actually show their
+      surface line. Buttons clip their children, so the line was being laid
+      out below the button's own edge and never drawn - which looked exactly
+      like the feature not working.
+    - Factory terminal: opening a device through it no longer puts you in
+      remote view. Remote view replaces your inventory panel with the
+      ghost-cursor palette, so the window that opened next to a factory's
+      contents was not the inventory you wanted to drag things into - which is
+      most of the point of opening a chest. Your character's REACH is extended
+      instead, for exactly as long as the device window is open: you stay in
+      your body, your own inventory is right there, and normal click,
+      shift-click and drag transfers work. Only reach is touched, not build or
+      resource reach, and whatever bonus you already had is put back exactly.
+    - Teleporters: the Return and Body previews, and the players row, now name
+      the surface they are on, with a planet, platform or factory icon. Three
+      Return entries were three identical grey squares.
+    - The Factory terminal technology, the Factory link and the Personal
+      teleporter had no names in locale, so they showed up in-game as
+      Unknown key: "technology-name.etech-factory-terminal" and the like.
+      Nothing in the Lua source references a prototype's own name key - the
+      engine resolves those - so the locale linter could not see the gap; it
+      now reads a data-raw dump and checks every E-Tech prototype has one.
+    - The teleporter pad tooltip never mentioned the Alt-click and
+      Control-click actions added this version, so marking a home pad or
+      linking express pads was invisible unless you read the changelog.
+    - Factory terminal: taking a stack out of a factory did nothing when the
+      device had been opened through the terminal. The terminal puts you in
+      remote view, a remote controller is not a character, and the code asked
+      the CONTROLLER for its inventory - which is nil there, and the failure
+      was silent. It now asks the character, which is what should receive the
+      items anyway, and says so when there is no inventory to fill.
+    - Teleporters: the pad you were standing on when you opened the WIRELESS
+      REMOTE is now marked recently used, so the trip back is at the top of
+      the list. Only the pad a window was opened FROM by walking onto it was
+      recorded before - a remote jump has no linked source pad, so the pad you
+      left never counted as recent and the way home sorted like a pad you had
+      never used. Applies to remote, return, body and jump-to-player trips
+      alike: leave a pad by any means and it counts as recent.
+  Changes:
+    - The teleport-to-player shortcut now always opens its picker while you
+      have a body to go back to, instead of jumping straight to the only other
+      player online - otherwise the body entry would be unreachable. With
+      nobody else online it teleports straight to your body.
   Bugfixes:
     - FIXED A CRASH THAT SHIPPED IN 0.21.0: E-Tech failed to load at all, with
       "attempt to index field 'tool'", for anyone running it alongside

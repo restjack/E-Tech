@@ -1584,9 +1584,25 @@ end
 -- Shift-click: teleport up to one stack of the item straight from the
 -- factories into the player's inventory (slot-level transfer, spoil/quality
 -- preserved).
+-- The CHARACTER's main inventory, not the controller's. Opening a device
+-- through the factory terminal puts the player in remote view, and a remote
+-- controller is not a character - player.get_main_inventory() comes back nil
+-- there, so taking a stack silently did nothing (0.22.0). The character is
+-- still standing where it was and is what should receive the items.
+local function character_inventory(player)
+    local character = player.character
+    if character and character.valid then
+        return character.get_main_inventory()
+    end
+    return player.get_main_inventory()
+end
+
 local function take_item(player, record, name, quality)
-    local player_inv = player.get_main_inventory()
-    if not player_inv then return end
+    local player_inv = character_inventory(player)
+    if not player_inv then
+        player.print({"gui-etech-hub.take-no-inventory"})
+        return
+    end
     local proto = prototypes.item[name]
     if not proto then return end -- item removed by a mod change
     local wanted = proto.stack_size

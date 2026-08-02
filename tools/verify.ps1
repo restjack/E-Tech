@@ -8,7 +8,10 @@
 #   2. Changelog format lint + info.json version cross-check
 #      (tools/lint-changelog.py)
 #   3. Locale coverage lint (tools/lint-locale.py): settings missing their
-#      strings, code referencing keys that do not exist, and dead keys
+#      strings, code referencing keys that do not exist, dead keys, and
+#      prototypes shipped with no name in locale/ (that last one reads a
+#      data-raw dump, so it is only as fresh as the last dump - step 6 re-runs
+#      it against the dump step 5 writes)
 #   4. luacheck, when it is installed locally (CI runs it on every push)
 #   5. factorio --dump-data with the CURRENT mods folder (catches data-stage
 #      errors; requires the zip to be built first via E-Tech/build.ps1)
@@ -27,22 +30,22 @@ $repo = Split-Path $PSScriptRoot -Parent
 $mod = Join-Path $repo "E-Tech"
 $fail = 0
 
-Write-Host "== 1/5 Lua syntax =="
+Write-Host "== 1/6 Lua syntax =="
 Get-ChildItem $mod -Recurse -Filter *.lua | ForEach-Object {
     python -c "from luaparser import ast; import sys; ast.parse(open(sys.argv[1],encoding='utf-8').read())" $_.FullName
     if ($LASTEXITCODE -ne 0) { Write-Host "SYNTAX FAIL: $($_.FullName)"; $script:fail++ }
 }
 if ($fail -eq 0) { Write-Host "all lua files parse" }
 
-Write-Host "== 2/5 Changelog lint =="
+Write-Host "== 2/6 Changelog lint =="
 python (Join-Path $PSScriptRoot "lint-changelog.py")
 if ($LASTEXITCODE -ne 0) { $fail++ }
 
-Write-Host "== 3/5 Locale lint =="
+Write-Host "== 3/6 Locale lint =="
 python (Join-Path $PSScriptRoot "lint-locale.py")
 if ($LASTEXITCODE -ne 0) { $fail++ }
 
-Write-Host "== 4/5 luacheck =="
+Write-Host "== 4/6 luacheck =="
 # Prefer whatever is on PATH. Failing that, fall back to a luarocks install
 # under the user profile - which is what `winget install DEVCOM.Lua` plus
 # `luarocks install luacheck` leaves behind, PATH untouched. The rock's entry
@@ -67,7 +70,7 @@ if ($luacheckCmd) {
 }
 
 if (-not $SkipDump) {
-    Write-Host "== 5/5 dump-data =="
+    Write-Host "== 5/6 dump-data =="
     $factorio = "C:\Program Files (x86)\Steam\steamapps\common\Factorio\bin\x64\factorio.exe"
     if (Test-Path $factorio) {
         & $factorio --dump-data | Out-Null
@@ -78,6 +81,14 @@ if (-not $SkipDump) {
         } else {
             Write-Host "dump-data clean"
         }
+
+        # Step 3 ran before the dump existed, so its prototype-name check used
+        # whatever dump was lying around. Re-run it against the one just
+        # written - this is the check that catches a prototype shipped with no
+        # locale name, which nothing in the Lua source references.
+        Write-Host "== 6/6 prototype locale names (fresh dump) =="
+        python (Join-Path $PSScriptRoot "lint-locale.py")
+        if ($LASTEXITCODE -ne 0) { $fail++ }
     } else {
         Write-Host "factorio.exe not found - skipped dump-data"
     }

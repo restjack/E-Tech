@@ -22,6 +22,13 @@ shared.hotkeys =
 {
   focus_search = "etech-teleporter-focus-search",
   open_remote = "etech-teleporter-open-remote",
+  jump_back = "etech-teleporter-jump-back",
+  recall_home = "etech-teleporter-recall-home",
+}
+
+shared.equipment =
+{
+  personal_teleporter = "etech-personal-teleporter",
 }
 
 shared.shortcuts =
