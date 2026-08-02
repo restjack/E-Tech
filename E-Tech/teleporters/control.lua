@@ -53,6 +53,8 @@ local script_data =
   -- Per-player search filter text, so the typed search survives the full
   -- GUI rebuild that every pad built/mined/rename event triggers.
   search_text = {},
+  -- Per-player "starred + recent only" toggle for the destination list.
+  pinned_only = {},
 }
 
 local RETURN_SLOTS = 3
@@ -182,6 +184,27 @@ local add_recent = function(player, teleporter)
       end
     end
     if index then recent[index] = nil end
+  end
+end
+
+-- Mark the pad the player is LEAVING as recently used, when they were
+-- standing on one. unlink_teleporter only records the pad the GUI was opened
+-- from, so a remote jump - which has no linked source pad even when you are
+-- standing on one - never recorded where you left. The trip home then sorted
+-- like a pad you had never used (0.22.0).
+local add_recent_pad_at = function(player, surface, position, except)
+  if not (surface and surface.valid) then return end
+  local found = surface.find_entities_filtered{
+    name = teleporter_name,
+    position = position,
+    radius = 1.5,
+    limit = 2,
+  }
+  for _, pad in pairs (found) do
+    if pad.valid and pad ~= except then
+      add_recent(player, pad)
+      return
+    end
   end
 end
 
@@ -459,6 +482,15 @@ local make_teleporter_gui = function(player, source)
     tooltip = {"etech-tp-sort-tooltip"}}
   util.register_gui(script_data.button_actions, sort_dropdown, {type = "sort_mode"})
 
+  -- "Starred + recent only": the short list of pads you actually use, for
+  -- bases where the full list is dozens of pads long.
+  local pinned_only = script_data.pinned_only[player.index] or false
+  local pinned_check = filter_flow.add{type = "checkbox",
+    state = pinned_only,
+    caption = {"etech-tp-pinned-only"},
+    tooltip = {"etech-tp-pinned-only-tooltip"}}
+  util.register_gui(script_data.button_actions, pinned_check, {type = "pinned_only"})
+
   if cross_surface and #surface_indices > 1 then
     local items = {{"etech-tp-all-surfaces"}}
     local index_map = {false}
@@ -630,6 +662,10 @@ local make_teleporter_gui = function(player, source)
       else
         show = not (hide_platforms and pad_surface.platform)
       end
+      if show and pinned_only then
+        local unit_number = teleporter_entity.unit_number
+        show = (favorites[unit_number] or recent[unit_number]) and true or false
+      end
       if show then
       local position = teleporter_entity.position
       -- Charting the preview area per pad per rebuild was measurable with
@@ -717,7 +753,9 @@ local make_teleporter_gui = function(player, source)
     end
   end
   if not any then
-    holding_table.add{type = "label", caption = {"etech-tp-no-teleporters"}}
+    -- Distinguish "you have no other pads" from "your own filter hid them".
+    holding_table.add{type = "label",
+      caption = pinned_only and {"etech-tp-no-pinned"} or {"etech-tp-no-teleporters"}}
   end
   if saved_search ~= "" then
     apply_search_filter(holding_table, saved_search)
@@ -963,6 +1001,7 @@ local gui_actions =
     play_teleport_sound(player)
     unlink_teleporter(player)
     add_recent(player, destination)
+    add_recent_pad_at(player, from_surface, from_position, destination)
 
     if remote and settings.global["etech-teleporter-return-enabled"].value then
       push_return(player, from_surface.index, from_position)
@@ -1000,6 +1039,7 @@ local gui_actions =
     create_flash(from_surface, from_position)
     create_flash(surface, result)
     play_teleport_sound(player)
+    add_recent_pad_at(player, from_surface, from_position)
     table.remove(rets, index)
     script_data.returns[player.index] = (#rets > 0) and rets or nil
     unlink_teleporter(player)
@@ -1026,6 +1066,7 @@ local gui_actions =
     create_flash(surface, result)
     play_teleport_sound(player)
     common.clear_death_slot(player)
+    add_recent_pad_at(player, from_surface, from_position)
     unlink_teleporter(player)
   end,
   player_button = function(event, param)
@@ -1050,6 +1091,7 @@ local gui_actions =
     create_flash(from_surface, from_position)
     create_flash(surface, result)
     play_teleport_sound(player)
+    add_recent_pad_at(player, from_surface, from_position)
     unlink_teleporter(player)
   end,
 
@@ -1066,6 +1108,13 @@ local gui_actions =
     local player = game.get_player(event.player_index)
     if not (player and player.valid) then return end
     script_data.sort_mode[player.index] = event.element.selected_index
+    check_player_linked_teleporter(player)
+  end,
+  pinned_only = function(event, param)
+    if event.name ~= defines.events.on_gui_checked_state_changed then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    script_data.pinned_only[player.index] = event.element.state or nil
     check_player_linked_teleporter(player)
   end,
   rename_surface_button = function(event, param)
@@ -1610,6 +1659,7 @@ teleporters.events =
   [defines.events.on_gui_text_changed] = on_gui_action,
   [defines.events.on_gui_confirmed] = on_gui_action,
   [defines.events.on_gui_selection_state_changed] = on_gui_action,
+  [defines.events.on_gui_checked_state_changed] = on_gui_action,
   [defines.events.on_gui_closed] = on_gui_closed,
   [names.hotkeys.focus_search] = on_search_focused,
   [defines.events.on_player_display_resolution_changed] = on_player_display_resolution_changed,
@@ -1661,6 +1711,7 @@ teleporters.on_configuration_changed = function()
   stored.sort_mode = stored.sort_mode or {}
   stored.frame_locations = stored.frame_locations or {}
   stored.search_text = stored.search_text or {}
+  stored.pinned_only = stored.pinned_only or {}
   -- 0.10.0: returns went from a single slot to a newest-first array.
   for player_index, ret in pairs (stored.returns) do
     if ret.surface_index then

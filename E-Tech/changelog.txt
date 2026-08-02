@@ -20,6 +20,18 @@ Date: 2026-08-02
       and a flat link closes it. Startup toggle "Factory terminal
       (Factorissimo)", on by default. Its art is the base game's battery
       equipment, tinted - placeholder until real art exists.
+    - Teleporters: "Starred + recent only" tick box above the pad list. Shows
+      just the pads you starred plus the up-to-8 you used recently, which on a
+      base with dozens of pads is the short list you actually travel between.
+      Remembered per player.
+  Bugfixes:
+    - Teleporters: the pad you were standing on when you opened the WIRELESS
+      REMOTE is now marked recently used, so the trip back is at the top of
+      the list. Only the pad a window was opened FROM by walking onto it was
+      recorded before - a remote jump has no linked source pad, so the pad you
+      left never counted as recent and the way home sorted like a pad you had
+      never used. Applies to remote, return, body and jump-to-player trips
+      alike: leave a pad by any means and it counts as recent.
   Changes:
     - The teleport-to-player shortcut now always opens its picker while you
       have a body to go back to, instead of jumping straight to the only other
