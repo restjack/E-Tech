@@ -152,6 +152,10 @@ local technology =
     {
       type = "unlock-recipe",
       recipe = name
+    },
+    {
+      type = "unlock-recipe",
+      recipe = names.equipment.personal_teleporter
     }
   },
   unit =
@@ -200,6 +204,53 @@ local jump_back_hotkey =
   key_sequence = "SHIFT + R",
   localised_name = {"etech-tp-jump-back-hotkey-name"},
   localised_description = {"etech-tp-jump-back-hotkey-description"},
+}
+
+local recall_hotkey =
+{
+  type = "custom-input",
+  name = names.hotkeys.recall_home,
+  key_sequence = "ALT + R",
+  localised_name = {"etech-tp-recall-hotkey-name"},
+  localised_description = {"etech-tp-recall-hotkey-description"},
+}
+
+-- Personal teleporter: armor module that pays up to half of a jump's energy
+-- out of its own buffer. Battery-equipment, so it charges from the suit's own
+-- generators and the control stage just does arithmetic on its energy.
+-- Placeholder art: the base game's personal roboport equipment, tinted the
+-- teleporter's blue.
+local teleporter_tint = { r = 0.4, g = 0.7, b = 1, a = 1 }
+local personal_teleporter = util.table.deepcopy(data.raw["battery-equipment"]["battery-equipment"])
+personal_teleporter.name = names.equipment.personal_teleporter
+personal_teleporter.sprite.tint = teleporter_tint
+personal_teleporter.energy_source.buffer_capacity = "50MJ"
+personal_teleporter.take_result = names.equipment.personal_teleporter
+
+local personal_teleporter_item = util.table.deepcopy(data.raw["item"]["battery-equipment"])
+personal_teleporter_item.name = names.equipment.personal_teleporter
+personal_teleporter_item.icon = nil
+personal_teleporter_item.icons = {{
+  icon = "__base__/graphics/icons/battery-equipment.png",
+  icon_size = 64,
+  tint = teleporter_tint,
+}}
+personal_teleporter_item.place_as_equipment_result = names.equipment.personal_teleporter
+personal_teleporter_item.order = "e[personal-teleporter]"
+
+local personal_teleporter_recipe =
+{
+  type = "recipe",
+  name = names.equipment.personal_teleporter,
+  enabled = false,
+  energy_required = 10,
+  ingredients =
+  {
+    {type = "item", name = "battery-equipment", amount = 1},
+    {type = "item", name = "processing-unit", amount = 20},
+    {type = "item", name = "steel-plate", amount = 20},
+  },
+  results = {{type = "item", name = names.equipment.personal_teleporter, amount = 1}},
 }
 
 -- Invisible electric buffer placed on top of each pad by the control stage.
@@ -265,6 +316,10 @@ data:extend
   hotkey,
   remote_hotkey,
   jump_back_hotkey,
+  recall_hotkey,
+  personal_teleporter,
+  personal_teleporter_item,
+  personal_teleporter_recipe,
   -- Everything the destination window can do that nothing on screen says:
   -- starring, renaming, sorting, the remote and jump-back keys.
   {

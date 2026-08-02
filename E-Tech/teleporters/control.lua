@@ -55,6 +55,14 @@ local script_data =
   search_text = {},
   -- Per-player "starred + recent only" toggle for the destination list.
   pinned_only = {},
+  -- Per-player home pad (unit_number) for the recall hotkey, and the tick of
+  -- their last recall, for its cooldown.
+  home = {},
+  recall_tick = {},
+  -- Per-player express-jump suppression: the pad they were just expressed to
+  -- plus where they stood on arrival, so an A->B->A pair of express pads is a
+  -- doorway rather than an infinite bounce.
+  express_block = {},
 }
 
 local RETURN_SLOTS = 3
@@ -174,7 +182,11 @@ local add_recent = function(player, teleporter)
     script_data.recent[player.index] = recent
   end
   recent[teleporter.unit_number] = game.tick
-  if table_size(recent) >= 9 then
+  -- How many pads count as "recent" is a map setting since 0.22.0; it used to
+  -- be a hardcoded 8, which on a base with a dozen regularly used pads meant
+  -- the one you wanted had already fallen off.
+  local cap = settings.global["etech-teleporter-recent-slots"].value
+  while table_size(recent) > cap do
     local min = math.huge
     local index
     for k, tick in pairs (recent) do
@@ -183,8 +195,19 @@ local add_recent = function(player, teleporter)
         index = k
       end
     end
-    if index then recent[index] = nil end
+    if not index then break end
+    recent[index] = nil
   end
+end
+
+-- Traffic bookkeeping: how often a pad has been travelled to, and by whom
+-- last. Shown in the pad's tooltip - a list of thirty pads says nothing about
+-- which ones your base actually uses.
+local note_pad_use = function(player, teleporter_data, entity)
+  if not (teleporter_data and entity and entity.valid) then return end
+  teleporter_data.uses = (teleporter_data.uses or 0) + 1
+  teleporter_data.last_user = player.name
+  teleporter_data.last_used_tick = game.tick
 end
 
 -- Mark the pad the player is LEAVING as recently used, when they were
@@ -337,6 +360,37 @@ local get_teleport_cost = function(source, destination, player, cfg)
   return cost * 1000000
 end
 
+-- Personal teleporter: an armor module that pays part of the pad's bill out
+-- of its own buffer. It never enables a jump you could not otherwise make -
+-- it makes the ones you do make cheaper for the network, which is what a
+-- personal power source should do.
+local PERSONAL_MODULE = "etech-personal-teleporter"
+
+local personal_module = function(player)
+  if not (player and player.valid) then return nil end
+  local character = player.character
+  local grid = character and character.valid and character.grid
+  if not grid then return nil end
+  return grid.find(PERSONAL_MODULE)
+end
+
+-- How much of `cost` the module covers: up to half, capped by what it holds.
+-- Pure - the drain happens in pay_personal_share once the jump is actually
+-- going ahead - so the destination list can price every pad without spending
+-- anything.
+local personal_share = function(player, cost)
+  if cost <= 0 then return 0 end
+  local module = personal_module(player)
+  if not module then return 0 end
+  return math.min(module.energy, cost * 0.5)
+end
+
+local pay_personal_share = function(player, share)
+  if share <= 0 then return end
+  local module = personal_module(player)
+  if module then module.energy = math.max(0, module.energy - share) end
+end
+
 -- Display name for a surface: player-set alias first, then the platform's
 -- ship name ("Icarus", not "platform-1"), then the planet prototype's
 -- localised name ("Nauvis", not "nauvis"), then the engine's localised
@@ -408,6 +462,9 @@ local make_teleporter_gui = function(player, source)
 
   local force = source and source.force or player.force
   local network = script_data.networks[force.name] or {}
+  -- The record of the pad being stood on, when there is one: it owns the
+  -- express link, so the list marks its target and CONTROL-click retargets it.
+  local source_record = source and script_data.teleporter_map[source.unit_number] or nil
   -- The surface jumps are measured from (pad surface, or the player's own
   -- for remote use).
   local here_surface = source and source.surface or player.surface
@@ -568,14 +625,22 @@ local make_teleporter_gui = function(player, source)
   end
 
   local rets = get_valid_returns(player)
+  local return_grace = settings.global["etech-teleporter-return-grace-min"].value
   for i, ret in ipairs(rets) do
     local caption = (#rets > 1) and {"", {"etech-tp-return"}, " " .. i} or {"etech-tp-return"}
+    -- The slot expires silently; say when. Grace 0 means it never does.
+    local tooltip = {"", {"etech-tp-return-tooltip", get_surface_label(game.surfaces[ret.surface_index])}}
+    if return_grace > 0 then
+      local left = math.max(0, (ret.tick + return_grace * 60 * 60) - game.tick)
+      tooltip[#tooltip + 1] = "\n"
+      tooltip[#tooltip + 1] = {"etech-tp-return-expires", string.format("%.0f", left / 3600)}
+    end
     -- Pass the entry itself, not its index — the list can shift between GUI
     -- build and click (slots expiring / other slots consumed).
     add_preview_button(get_special_flow(),
       {type = "camera", position = ret.position, surface_index = ret.surface_index, zoom = 0.2},
       caption,
-      {"etech-tp-return-tooltip", get_surface_label(game.surfaces[ret.surface_index])},
+      tooltip,
       {type = "return_button", ret = ret})
   end
 
@@ -743,7 +808,15 @@ local make_teleporter_gui = function(player, source)
       if favorites[teleporter_entity.unit_number] then
         caption = "★ "..caption
       end
-      button.tooltip = {"etech-tp-favorite-tooltip"}
+      -- Two more markers, both set from this list: your home pad (ALT-click)
+      -- and this pad's express target (CONTROL-click, only while standing on
+      -- the pad that would send you there).
+      if script_data.home[player.index] == teleporter_entity.unit_number then
+        caption = "⌂ "..caption
+      end
+      if source_record and source_record.express == teleporter_entity.unit_number then
+        caption = "⇒ "..caption
+      end
       local label = inner_flow.add{type = "label", caption = caption}
       label.style.horizontally_stretchable = true
       label.style.font = "default-dialog-button"
@@ -760,17 +833,38 @@ local make_teleporter_gui = function(player, source)
         distance_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
         distance_label.style.maximal_width = preview_size
       end
-      if cost > 0 then
+      -- A pad still inside its trigger timeout can be teleported TO; what it
+      -- won't do is open its own window when you step on it. That silence is
+      -- what looked like a broken pad, so say it out loud.
+      local cooling = teleporter_entity.timeout or 0
+      if cooling > 0 then
+        local cooling_label = inner_flow.add{type = "label",
+          caption = {"etech-tp-cooling", string.format("%.0f", cooling / 60)}}
+        cooling_label.style.font_color = {r = 0.9, g = 0.8, b = 0.4}
+        cooling_label.style.maximal_width = preview_size
+      end
+      -- Tooltip: the click hints, then how much traffic this pad sees, then
+      -- the energy line.
+      local tooltip = {"", {"etech-tp-favorite-tooltip"}}
+      if (teleporter.uses or 0) > 0 then
+        tooltip[#tooltip + 1] = "\n"
+        tooltip[#tooltip + 1] = {"etech-tp-traffic", teleporter.uses,
+          teleporter.last_user or "?", string.format("%.0f", (game.tick - (teleporter.last_used_tick or game.tick)) / 3600)}
+      end
+      local pad_cost = cost - personal_share(player, cost)
+      if pad_cost > 0 then
         local eei = get_energy_interface(teleporter, teleporter_entity)
         local stored = (eei and eei.valid and eei.energy) or 0
-        local energy_line = {"etech-tp-energy-label", string.format("%.0f", cost / 1000000), string.format("%.0f", stored / 1000000)}
-        if stored < cost then
+        local energy_line = {"etech-tp-energy-label", string.format("%.0f", pad_cost / 1000000), string.format("%.0f", stored / 1000000)}
+        if stored < pad_cost then
           button.enabled = false
-          button.tooltip = {"", {"etech-tp-not-enough-energy"}, "\n", energy_line}
+          tooltip = {"", {"etech-tp-not-enough-energy"}, "\n", energy_line}
         else
-          button.tooltip = {"", {"etech-tp-favorite-tooltip"}, "\n", energy_line}
+          tooltip[#tooltip + 1] = "\n"
+          tooltip[#tooltip + 1] = energy_line
         end
       end
+      button.tooltip = tooltip
       util.register_gui(script_data.button_actions, button, {type = "teleport_button", param = teleporter})
       any = true
       end
@@ -969,6 +1063,29 @@ gui_actions =
     local player = game.players[event.player_index]
     if not (player and player.valid) then return end
 
+    -- ALT-click marks this pad as home (the recall hotkey's destination);
+    -- CONTROL-click makes it the express target of the pad you are standing
+    -- on. Both toggle, and neither teleports.
+    if event.name == defines.events.on_gui_click and event.alt then
+      local unit_number = destination.unit_number
+      script_data.home[player.index] = (script_data.home[player.index] ~= unit_number) and unit_number or nil
+      check_player_linked_teleporter(player)
+      return
+    end
+    if event.name == defines.events.on_gui_click and event.control then
+      local source_pad = script_data.player_linked_teleporter[player.index]
+      local source_record = source_pad and source_pad.valid and script_data.teleporter_map[source_pad.unit_number]
+      if not source_record then
+        player.print({"etech-tp-express-needs-pad"})
+        return
+      end
+      local unit_number = destination.unit_number
+      source_record.express = (source_record.express ~= unit_number) and unit_number or nil
+      player.print(source_record.express and {"etech-tp-express-set"} or {"etech-tp-express-cleared"})
+      check_player_linked_teleporter(player)
+      return
+    end
+
     -- Right-click stars/unstars the pad; shift+right-click renames it.
     if event.name == defines.events.on_gui_click and event.button == defines.mouse_button_type.right then
       if event.shift then
@@ -997,11 +1114,13 @@ gui_actions =
       end
     end
     local cost = get_teleport_cost(source, destination, player)
+    local share = personal_share(player, cost)
+    local pad_cost = cost - share
     local eei
-    if cost > 0 then
+    if pad_cost > 0 then
       eei = get_energy_interface(teleport_param, destination)
       local stored = (eei and eei.valid and eei.energy) or 0
-      if stored < cost then
+      if stored < pad_cost then
         player.print({"etech-tp-not-enough-energy"})
         return
       end
@@ -1021,15 +1140,17 @@ gui_actions =
       player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
       return
     end
-    if cost > 0 and eei and eei.valid then
-      eei.energy = eei.energy - cost
+    if pad_cost > 0 and eei and eei.valid then
+      eei.energy = eei.energy - pad_cost
     end
+    pay_personal_share(player, share)
     create_flash(destination_surface, destination_position)
     create_flash(from_surface, from_position)
     play_teleport_sound(player)
     unlink_teleporter(player)
     add_recent(player, destination)
     add_recent_pad_at(player, from_surface, from_position, destination)
+    note_pad_use(player, teleport_param, destination)
 
     if remote and settings.global["etech-teleporter-return-enabled"].value then
       push_return(player, from_surface.index, from_position)
@@ -1277,10 +1398,73 @@ local on_teleporter_removed = function(entity)
   for _, recent in pairs (script_data.recent) do
     recent[entity.unit_number] = nil
   end
+  -- A mined pad must not stay someone's home or another pad's express target.
+  for player_index, home in pairs (script_data.home) do
+    if home == entity.unit_number then script_data.home[player_index] = nil end
+  end
+  for _, teleporter_data in pairs (script_data.teleporter_map) do
+    if teleporter_data.express == entity.unit_number then teleporter_data.express = nil end
+  end
 
   script_data.to_be_removed[entity.unit_number] = true
   refresh_teleporter_frames()
   script_data.to_be_removed[entity.unit_number] = nil
+end
+
+-- Move `player` from the pad they are standing on straight to its express
+-- target, charging it like any other pad-to-pad jump. Returns false when the
+-- link can't be used right now (gone, unaffordable, refused), so the caller
+-- falls back to opening the normal window.
+local run_express = function(player, source, source_record)
+  local target_record = script_data.teleporter_map[source_record.express]
+  local destination = target_record and target_record.teleporter
+  if not (destination and destination.valid) then
+    source_record.express = nil
+    return false
+  end
+  if destination.surface ~= source.surface
+    and not settings.global["etech-teleporter-cross-surface"].value then
+    return false
+  end
+  local cost = get_teleport_cost(source, destination, player)
+  local share = personal_share(player, cost)
+  local pad_cost = cost - share
+  local eei
+  if pad_cost > 0 then
+    eei = get_energy_interface(target_record, destination)
+    local stored = (eei and eei.valid and eei.energy) or 0
+    if stored < pad_cost then
+      player.print({"etech-tp-not-enough-energy"})
+      return false
+    end
+  end
+  local from_surface = source.surface
+  local from_position = source.position
+  local ok, result = common.teleport_player(player, destination.surface, destination.position, {exact = true})
+  if not ok then
+    player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    return false
+  end
+  if pad_cost > 0 and eei and eei.valid then
+    eei.energy = eei.energy - pad_cost
+  end
+  pay_personal_share(player, share)
+  destination.timeout = destination.prototype.timeout
+  source.timeout = source.prototype.timeout
+  create_flash(destination.surface, destination.position)
+  create_flash(from_surface, from_position)
+  play_teleport_sound(player)
+  add_recent(player, destination)
+  add_recent(player, source)
+  note_pad_use(player, target_record, destination)
+  -- Remember where they landed: until they step off, this pad's own express
+  -- link stays inert, so a pair of pads pointing at each other is a doorway
+  -- and not a loop.
+  script_data.express_block[player.index] = {
+    unit_number = destination.unit_number,
+    position = destination.position,
+  }
+  return true
 end
 
 local teleporter_triggered = function(entity, character)
@@ -1288,6 +1472,26 @@ local teleporter_triggered = function(entity, character)
   if character.type ~= "character" then return end
   local player = character.player
   if not player then return end
+
+  -- Express pads: stepping on one sends you straight to its target, no
+  -- window. Standing on the pad you just arrived at does nothing (see
+  -- express_block); walking off and back on works normally, and the remote
+  -- hotkey still opens the full list from where you stand.
+  local record = script_data.teleporter_map[entity.unit_number]
+  local block = script_data.express_block[player.index]
+  if block then
+    local same_pad = block.unit_number == entity.unit_number
+      and util.distance(block.position, player.position) <= 2
+    if not same_pad then
+      script_data.express_block[player.index] = nil
+      block = nil
+    end
+  end
+  if record and record.express and not block
+    and settings.global["etech-teleporter-express"].value then
+    if run_express(player, entity, record) then return end
+  end
+
   player.teleport(entity.position)
   entity.disabled_by_script = true
   entity.timeout = entity.prototype.timeout
@@ -1482,6 +1686,89 @@ local on_remote_hotkey = function(event)
   open_remote(game.get_player(event.player_index))
 end
 
+-- Emergency recall: back to the pad you marked home (ALT-click in the list),
+-- from anywhere, at a premium and on a cooldown. Deliberately more expensive
+-- than walking to a pad and jumping - it is the "get me out of here" button,
+-- not the cheap way home.
+local on_recall_hotkey = function(event)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  if not settings.global["etech-teleporter-remote"].value then
+    player.print({"etech-tp-remote-disabled"})
+    return
+  end
+  local tech = player.force.technologies[teleporter_name]
+  if tech and not tech.researched then
+    player.print({"etech-tp-remote-not-researched"})
+    return
+  end
+  local home_record = script_data.teleporter_map[script_data.home[player.index] or 0]
+  local home = home_record and home_record.teleporter
+  if not (home and home.valid) then
+    script_data.home[player.index] = nil
+    player.print({"etech-tp-recall-no-home"})
+    return
+  end
+  local cooldown = settings.global["etech-teleporter-recall-cooldown-min"].value * 60 * 60
+  local last = script_data.recall_tick[player.index]
+  if cooldown > 0 and last and game.tick - last < cooldown then
+    player.print({"etech-tp-recall-cooldown", string.format("%.0f", (cooldown - (game.tick - last)) / 60)})
+    return
+  end
+  local cost = get_teleport_cost(nil, home, player) * settings.global["etech-teleporter-recall-multiplier"].value
+  local share = personal_share(player, cost)
+  local pad_cost = cost - share
+  local eei
+  if pad_cost > 0 then
+    eei = get_energy_interface(home_record, home)
+    local stored = (eei and eei.valid and eei.energy) or 0
+    if stored < pad_cost then
+      player.print({"etech-tp-not-enough-energy"})
+      return
+    end
+  end
+  local from_surface = player.surface
+  local from_position = player.position
+  local ok, result = common.teleport_player(player, home.surface, home.position, {exact = true})
+  if not ok then
+    player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    return
+  end
+  if pad_cost > 0 and eei and eei.valid then
+    eei.energy = eei.energy - pad_cost
+  end
+  pay_personal_share(player, share)
+  script_data.recall_tick[player.index] = game.tick
+  home.timeout = home.prototype.timeout
+  create_flash(home.surface, home.position)
+  create_flash(from_surface, from_position)
+  play_teleport_sound(player)
+  add_recent(player, home)
+  add_recent_pad_at(player, from_surface, from_position, home)
+  note_pad_use(player, home_record, home)
+  if settings.global["etech-teleporter-return-enabled"].value then
+    push_return(player, from_surface.index, from_position)
+  end
+end
+
+-- Respawn straight at the home pad instead of the force's spawn point. Free:
+-- you have just lost everything you were carrying, and charging a pad for it
+-- would only mean dying twice.
+local on_player_respawned = function(event)
+  if not settings.global["etech-teleporter-respawn-home"].value then return end
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  local home_record = script_data.teleporter_map[script_data.home[player.index] or 0]
+  local home = home_record and home_record.teleporter
+  if not (home and home.valid) then return end
+  local ok = common.teleport_player(player, home.surface, home.position, {exact = true})
+  if ok then
+    create_flash(home.surface, home.position)
+    play_teleport_sound(player)
+    player.print({"etech-tp-respawn-home"})
+  end
+end
+
 -- Jump straight to the pad used most recently, no window. Same gates as the
 -- remote (it IS a remote jump), same energy cost, and the pad you leave
 -- becomes the new most-recent one - so the hotkey alternates between two
@@ -1509,7 +1796,7 @@ local on_jump_back_hotkey = function(event)
   local cross_surface = settings.global["etech-teleporter-cross-surface"].value
   local network = script_data.networks[player.force.name] or {}
   local best, best_tick, best_data
-  for name, teleporter_data in pairs (network) do
+  for _, teleporter_data in pairs (network) do
     local entity = teleporter_data.teleporter
     if entity and entity.valid then
       local tick = recent[entity.unit_number]
@@ -1520,18 +1807,19 @@ local on_jump_back_hotkey = function(event)
         best, best_tick, best_data = entity, tick, teleporter_data
       end
     end
-    -- `name` is only in scope for the network iteration; nothing to do with it.
   end
   if not best then
     player.print({"etech-tp-jump-back-none"})
     return
   end
   local cost = get_teleport_cost(nil, best, player)
+  local share = personal_share(player, cost)
+  local pad_cost = cost - share
   local eei
-  if cost > 0 then
+  if pad_cost > 0 then
     eei = get_energy_interface(best_data, best)
     local stored = (eei and eei.valid and eei.energy) or 0
-    if stored < cost then
+    if stored < pad_cost then
       player.print({"etech-tp-not-enough-energy"})
       return
     end
@@ -1543,15 +1831,17 @@ local on_jump_back_hotkey = function(event)
     player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
     return
   end
-  if cost > 0 and eei and eei.valid then
-    eei.energy = eei.energy - cost
+  if pad_cost > 0 and eei and eei.valid then
+    eei.energy = eei.energy - pad_cost
   end
+  pay_personal_share(player, share)
   best.timeout = best.prototype.timeout
   create_flash(best.surface, best.position)
   create_flash(from_surface, from_position)
   play_teleport_sound(player)
   add_recent(player, best)
   add_recent_pad_at(player, from_surface, from_position, best)
+  note_pad_use(player, best_data, best)
   if settings.global["etech-teleporter-return-enabled"].value then
     push_return(player, from_surface.index, from_position)
   end
@@ -1816,6 +2106,8 @@ teleporters.events =
   [defines.events.on_lua_shortcut] = on_lua_shortcut,
   [names.hotkeys.open_remote] = on_remote_hotkey,
   [names.hotkeys.jump_back] = on_jump_back_hotkey,
+  [names.hotkeys.recall_home] = on_recall_hotkey,
+  [defines.events.on_player_respawned] = on_player_respawned,
 
   [defines.events.on_trigger_created_entity] = on_trigger_created_entity,
   [defines.events.on_player_setup_blueprint] = on_player_setup_blueprint,
@@ -1851,6 +2143,9 @@ teleporters.on_configuration_changed = function()
   stored.frame_locations = stored.frame_locations or {}
   stored.search_text = stored.search_text or {}
   stored.pinned_only = stored.pinned_only or {}
+  stored.home = stored.home or {}
+  stored.recall_tick = stored.recall_tick or {}
+  stored.express_block = stored.express_block or {}
   -- 0.10.0: returns went from a single slot to a newest-first array.
   for player_index, ret in pairs (stored.returns) do
     if ret.surface_index then

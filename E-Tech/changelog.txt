@@ -30,6 +30,42 @@ Date: 2026-08-02
       someone alt-tabbed away from. New map setting "Teleporter: ask before
       someone teleports to you", on by default; turn it off for the old
       land-on-each-other-unannounced behavior. Single-player is unaffected.
+    - Teleporters: EXPRESS PADS. Stand on a pad, CONTROL + click another one
+      in the list, and from then on stepping onto the first pad sends you
+      straight to the second - no window, normal energy cost. The pad you
+      arrive on stays inert until you step off it, so two pads pointing at
+      each other are a doorway rather than an infinite bounce, and the
+      wireless remote still opens the full list from where you stand. Map
+      setting "Teleporter: express pads", on by default; turning it off
+      ignores every link without clearing them.
+    - Teleporters: HOME PAD AND EMERGENCY RECALL. ALT + click a pad in the
+      list to mark it home (it gets a house marker), then ALT + R teleports
+      you there from anywhere. It costs a multiple of the normal jump (map
+      setting, 3x by default) and has its own cooldown (5 minutes by
+      default), because it is the "get me out of here" button and not the
+      cheap way home. Optionally, dying now puts you back at your home pad
+      instead of the force's spawn point - map setting, off by default.
+    - Teleporters: PERSONAL TELEPORTER armor module, unlocked by the same
+      Teleporter technology as the pads. It holds 50 MJ off your suit's own
+      generators and pays up to half of every jump's energy bill out of that
+      buffer, so the destination pad is drained less. It never enables a jump
+      you could not otherwise make; it makes the ones you do make cheaper for
+      the network. Art is the base game's battery equipment, tinted -
+      placeholder until real art exists.
+    - Teleporters: pads now show how much traffic they see. A pad's tooltip
+      says how many times it has been travelled to, by whom last, and how
+      long ago - a list of thirty pads otherwise says nothing about which
+      ones your base actually uses.
+    - Teleporters: a pad still inside its five-second trigger timeout now says
+      "cooling down" in the list. It can still be teleported TO; what it will
+      not do is open its own window when you step on it, and that silence
+      looked like a broken pad.
+    - Teleporters: the Return entry's tooltip now says how long it has left
+      before it expires.
+    - Teleporters: how many pads count as "recently used" is now a map
+      setting (default 8, up to 50). It was a hardcoded 8, which on a base
+      with a dozen regularly used pads meant the one you wanted had already
+      fallen off the list.
     - Teleporters: SHIFT + R jumps straight to the pad you used last, with no
       window at all. Same cost and same gates as a wireless-remote jump, and
       since the pad you leave becomes the most recent one, the key alternates
