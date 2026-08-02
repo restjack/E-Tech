@@ -104,6 +104,30 @@ Date: 2026-08-02
       leave the migration behind. Starred pads that predate this version are
       converted to ranked favorites when they are next read, for the same
       reason.
+    - Teleporters: the destination window is now GROUPED BY SURFACE. Grouping
+      is by kind of surface rather than by name: each planet gets its own
+      section, every space platform shares one "Platforms" section, and
+      Factorissimo interiors share "Factory floors" - so four ships are one
+      section instead of four one-row sections, and launching a fifth changes
+      nothing. The surface underfoot comes first, the rest follow in name
+      order, and each header carries the surface icon, its name and a count.
+      Sections collapse, remembered per player. A "Group" dropdown next to the
+      sort order switches the whole thing off for a flat list; grouped is the
+      default.
+    - Teleporters: with a section header naming the surface, the pads under it
+      stop repeating it. A pad on your own surface shows its distance, one on
+      another world shows when you last used it, and pads in the shared
+      Platforms and Factory floors sections keep their own surface name, since
+      a shared header cannot carry it. Turning grouping off puts the surface
+      back on every tile.
+    - Teleporters: the star rank, home flag and express arrow moved off the
+      name and onto their own row, so a pad called "Rocket Launch Site" is no
+      longer shown as "Rocket Launch Site...". Tiles with nothing to mark
+      don't get the row.
+    - Teleporters: Control + right-click sends a starred pad to the BACK of
+      your starred pads, the counterpart to Shift + left-click sending one to
+      the front. Factorio has no GUI drag events of any kind, so ordering is
+      done with gestures rather than by dragging tiles around.
     - Teleporters: every entry in the destination window now leads its grey
       line with the SURFACE'S ICON - the planet's own starmap icon, the
       space-platform foundation for a ship, a factory building for a
