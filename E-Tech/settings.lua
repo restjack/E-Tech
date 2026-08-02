@@ -409,6 +409,24 @@ data:extend({
     maximum_value = 1440,
     order = "th",
   },
+  -- Body jump: shared by the pad/remote GUI and the teleport-to-player
+  -- shortcut, hence the etech-teleport-* name rather than etech-teleporter-*.
+  {
+    type = "bool-setting",
+    name = "etech-teleport-body-enabled",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "th1",
+  },
+  {
+    type = "double-setting",
+    name = "etech-teleport-body-grace-min",
+    setting_type = "runtime-global",
+    default_value = 15,
+    minimum_value = 0,
+    maximum_value = 1440,
+    order = "th2",
+  },
   {
     type = "bool-setting",
     name = "etech-teleporter-players-section",

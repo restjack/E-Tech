@@ -523,6 +523,17 @@ local make_teleporter_gui = function(player, source)
       {type = "return_button", ret = ret})
   end
 
+  -- Your body, when the feature is on and the death is recent enough. Sits
+  -- next to the return slots: same shape (free, one-shot, camera preview).
+  local death = common.get_death_slot(player)
+  if death then
+    add_preview_button(get_special_flow(),
+      {type = "camera", position = death.position, surface_index = death.surface_index, zoom = 0.2},
+      {"etech-tp-body"},
+      {"etech-tp-body-tooltip", get_surface_label(game.surfaces[death.surface_index]), common.death_age_minutes(death)},
+      {type = "body_button"})
+  end
+
   if settings.global["etech-teleporter-players-section"].value then
     for _, other in pairs (player.force.connected_players) do
       if other.index ~= player.index then
@@ -991,6 +1002,30 @@ local gui_actions =
     play_teleport_sound(player)
     table.remove(rets, index)
     script_data.returns[player.index] = (#rets > 0) and rets or nil
+    unlink_teleporter(player)
+  end,
+  body_button = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    local slot = common.get_death_slot(player)
+    if not slot then
+      player.print({"etech-tp-body-expired"})
+      check_player_linked_teleporter(player)
+      return
+    end
+    local surface = game.surfaces[slot.surface_index]
+    local from_surface = player.surface
+    local from_position = player.position
+    local ok, result = common.teleport_player(player, surface, slot.position)
+    if not ok then
+      player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+      return
+    end
+    create_flash(from_surface, from_position)
+    create_flash(surface, result)
+    play_teleport_sound(player)
+    common.clear_death_slot(player)
     unlink_teleporter(player)
   end,
   player_button = function(event, param)
@@ -1539,13 +1574,14 @@ local migrate_from_original = function(command)
   out({"etech-tp-migrate-done", pads, items})
 end
 
--- Energy cost, the cross-surface rules, the players section, preview size and
--- the platform filter are all read while the destination list is being BUILT,
--- so an open window kept showing the old numbers until some unrelated event
--- forced a rebuild. Rebuild on the spot instead (0.21.1).
+-- Energy cost, the cross-surface rules, the players section, the body entry,
+-- preview size and the platform filter are all read while the destination list
+-- is being BUILT, so an open window kept showing the old numbers until some
+-- unrelated event forced a rebuild. Rebuild on the spot instead (0.21.1).
+-- Pattern covers etech-teleporter-* and etech-teleport-body-*.
 local on_runtime_mod_setting_changed = function(event)
   local setting = event.setting
-  if not (setting and setting:find("^etech%-teleporter%-")) then return end
+  if not (setting and setting:find("^etech%-telepor")) then return end
   refresh_teleporter_frames()
 end
 

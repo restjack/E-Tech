@@ -1,6 +1,20 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.21.1
-Date: 2026-07-31
+Version: 0.22.0
+Date: 2026-08-02
+  Features:
+    - Teleport to your body after you die. Both teleport features now offer a
+      free one-use jump back to where you died: a "Body" entry with a live
+      camera view at the top of the teleporter list (next to the return slots),
+      and a "Body" button in the teleport-to-player shortcut's picker. New map
+      settings "Teleport: teleport to your body after death" (on) and
+      "Teleport: body teleport time limit (minutes)" (15, 0 = no limit) - the
+      time limit is what makes it a "you just died" offer rather than a
+      permanent way home.
+  Changes:
+    - The teleport-to-player shortcut now always opens its picker while you
+      have a body to go back to, instead of jumping straight to the only other
+      player online - otherwise the body entry would be unreachable. With
+      nobody else online it teleports straight to your body.
   Bugfixes:
     - FIXED A CRASH THAT SHIPPED IN 0.21.0: E-Tech failed to load at all, with
       "attempt to index field 'tool'", for anyone running it alongside

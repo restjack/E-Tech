@@ -12,6 +12,9 @@
 --    check uses the actual character prototype name.
 --  * anything the engine still refuses is caught by pcall (reason "error")
 --    instead of crashing the GUI handler.
+--
+-- Also owns the per-player death location both features offer as a "teleport
+-- to your body" jump (see the death-slot block below).
 
 local M = {}
 
@@ -47,6 +50,81 @@ M.teleport_player = function(player, surface, position, opts)
   end)
   if ok then return true, dest end
   return false, "error"
+end
+
+--------------------------------------------------------------------------------
+-- Death location ("teleport to your body")
+--------------------------------------------------------------------------------
+-- One slot per player, overwritten by the next death. It lives in its own
+-- storage key rather than in the teleporter module's script_data because both
+-- teleport features offer the jump and either can be enabled alone - the pad
+-- module isn't even required when only the shortcut is on.
+--
+-- Recorded unconditionally on death; the ENABLED setting is read when the slot
+-- is asked for, so turning the feature on mid-save works for a death that
+-- already happened.
+local DEATH_KEY = "etech_death_slots"
+
+M.record_death = function(player)
+  local slots = storage[DEATH_KEY]
+  if not slots then
+    slots = {}
+    storage[DEATH_KEY] = slots
+  end
+  slots[player.index] = {
+    surface_index = (player.physical_surface or player.surface).index,
+    position = player.physical_position or player.position,
+    tick = game.tick,
+  }
+end
+
+-- The player's still-usable death slot (feature on, surface alive, grace not
+-- expired), or nil. Prunes the dead entry as a side effect - same shape as the
+-- teleporter module's get_valid_returns.
+M.get_death_slot = function(player)
+  local slots = storage[DEATH_KEY]
+  local slot = slots and slots[player.index]
+  if not slot then return nil end
+  if not settings.global["etech-teleport-body-enabled"].value then return nil end
+  local surface = game.surfaces[slot.surface_index]
+  local grace = settings.global["etech-teleport-body-grace-min"].value
+  if not (surface and surface.valid)
+    or (grace > 0 and game.tick > slot.tick + grace * 60 * 60) then
+    slots[player.index] = nil
+    return nil
+  end
+  return slot
+end
+
+M.clear_death_slot = function(player)
+  local slots = storage[DEATH_KEY]
+  if slots then slots[player.index] = nil end
+end
+
+-- Whole minutes since the recorded death, for the button tooltip.
+M.death_age_minutes = function(slot)
+  return math.floor((game.tick - slot.tick) / 3600)
+end
+
+M.on_player_died = function(event)
+  local player = game.get_player(event.player_index)
+  if player and player.valid then M.record_death(player) end
+end
+
+-- The corpse decayed, so there is nothing left to walk back to. Matched on the
+-- death TICK, not just the player: an older corpse expiring must not clear the
+-- slot of a more recent death.
+M.on_character_corpse_expired = function(event)
+  local corpse = event.corpse
+  if not (corpse and corpse.valid) then return end
+  local index = corpse.character_corpse_player_index
+  if not index then return end
+  local slots = storage[DEATH_KEY]
+  local slot = slots and slots[index]
+  if not slot then return end
+  if math.abs(corpse.character_corpse_tick_of_death - slot.tick) <= 60 then
+    slots[index] = nil
+  end
 end
 
 -- The teleport sound the traveling player themselves hears (per-player
