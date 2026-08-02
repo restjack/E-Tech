@@ -1234,6 +1234,11 @@ local make_teleporter_gui = function(player, source)
     local holding_table = body.add{type = "table", column_count = column_count}
     holding_table.style.horizontal_spacing = 2
     holding_table.style.vertical_spacing = 2
+    -- The section frame stretches to the window width so headers and bodies
+    -- line up; the TABLE inside it must not, or its columns share out the
+    -- leftover width and the pads drift apart with gaps between them.
+    holding_table.style.horizontally_stretchable = false
+    holding_table.style.horizontally_squashable = false
     section_tables[#section_tables + 1] = holding_table
     for _, entry in ipairs(section.entries) do
       build_pad_tile(holding_table, entry)
