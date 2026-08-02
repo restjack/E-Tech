@@ -105,6 +105,17 @@ Date: 2026-08-02
       leave the migration behind. Starred pads that predate this version are
       converted to ranked favorites when they are next read, for the same
       reason.
+    - Teleporters: every entry in the destination window now leads its grey
+      line with the SURFACE'S ICON - the planet's own starmap icon, the
+      space-platform foundation for a ship, a factory building for a
+      Factorissimo interior floor. Pads on this surface show the icon in front
+      of the distance, pads elsewhere in front of the surface name, and the
+      Return, Body and player previews carry it too. A name on its own
+      ("Return 2", "Teleporter 1259086") never said which world it went to.
+    - Teleporters: a button in the destination window's title bar hides the
+      pad click-hint tooltips. Six lines of click actions are what you want
+      once and clutter afterwards; the "not enough energy" explanation still
+      shows on pads that are greyed out. Remembered per player.
     - Teleporters: the recently-used clock on a pad is an icon again. It was
       drawn with "[img=quantity-time]", a sprite that has not existed since
       2.0 - and an invalid sprite path does not error, it silently draws a

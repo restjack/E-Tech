@@ -66,6 +66,8 @@ local script_data =
   -- Pad armed as an express SOURCE while linking from the wireless remote,
   -- where there is no pad underfoot to be the source (per player).
   express_pending = {},
+  -- Per-player: hide the six-line click-hint tooltip on pad buttons.
+  hide_tooltips = {},
 }
 
 local RETURN_SLOTS = 3
@@ -86,7 +88,7 @@ local SCRIPT_DATA_TABLES = {
   "search_boxes", "recent", "surface_aliases", "surface_filter",
   "surface_rename_frames", "remote_open", "returns", "favorites", "sort_mode",
   "frame_locations", "search_text", "pinned_only", "home", "recall_tick",
-  "express_block", "express_pending",
+  "express_block", "express_pending", "hide_tooltips",
 }
 
 local ensure_script_data = function()
@@ -505,29 +507,43 @@ local factorissimo_interior = function(surface)
   return ok and result == true
 end
 
--- A short "where is this" line for the camera tiles (Return, Body), with an
--- icon when the game has one: those previews are three grey squares
--- otherwise, and which grey square is which matters.
-local surface_marker = function(surface)
-  if not (surface and surface.valid) then return nil end
+-- Just the icon for a surface ("" when the game has none): a planet's own
+-- starmap icon, the space-platform foundation for a ship, a factory building
+-- for a Factorissimo interior floor. Every destination line in the window
+-- carries one, because a name alone ("Return 2", "Teleporter 1259086") does
+-- not tell you which world you are looking at.
+local surface_icon = function(surface)
+  if not (surface and surface.valid) then return "" end
   if factorissimo_interior(surface) then
-    local icon = prototypes.entity["factory-1"] and "[img=entity/factory-1] " or ""
-    return {"", icon, {"etech-tp-inside-factory"}}
+    return prototypes.entity["factory-1"] and "[img=entity/factory-1]" or ""
   end
-  local platform = surface.platform
-  if platform then
-    local icon = prototypes.item["space-platform-foundation"]
-      and "[img=item/space-platform-foundation] " or ""
-    return {"", icon, platform.name}
+  if surface.platform then
+    return prototypes.item["space-platform-foundation"]
+      and "[img=item/space-platform-foundation]" or ""
   end
   local planet = surface.planet
-  if planet then
-    local name = planet.name
-    local icon = (prototypes.space_location and prototypes.space_location[name])
-      and ("[img=space-location/" .. name .. "] ") or ""
-    return {"", icon, planet.prototype.localised_name}
+  if planet and prototypes.space_location and prototypes.space_location[planet.name] then
+    return "[img=space-location/" .. planet.name .. "]"
   end
-  return {"", surface.localised_name or surface.name}
+  return ""
+end
+
+-- Icon + name, for the camera tiles (Return, Body, players) whose previews
+-- are otherwise three interchangeable grey squares.
+local surface_marker = function(surface)
+  if not (surface and surface.valid) then return nil end
+  local icon = surface_icon(surface)
+  if icon ~= "" then icon = icon .. " " end
+  if factorissimo_interior(surface) then
+    return {"", icon, {"etech-tp-inside-factory"}}
+  end
+  if surface.platform then
+    return {"", icon, surface.platform.name}
+  end
+  if surface.planet then
+    return {"", icon, surface.planet.prototype.localised_name}
+  end
+  return {"", icon, surface.localised_name or surface.name}
 end
 
 local get_surface_label = function(surface)
@@ -648,6 +664,14 @@ local make_teleporter_gui = function(player, source)
   local saved_search = script_data.search_text[player.index] or ""
   local search_box = title_flow.add{type = "textfield", visible = saved_search ~= "", text = saved_search}
   local search_button = title_flow.add{type = "sprite-button", style = "frame_action_button", sprite = "utility/search", tooltip = {"gui.search-with-focus", {"etech-tp-search"}}}
+  -- The pad tooltip lists six click actions, which is what you want once and
+  -- clutter forever after. This hides them (per player, remembered).
+  local tooltips_hidden = script_data.hide_tooltips[player.index] or false
+  local tooltip_button = title_flow.add{type = "sprite-button", style = "frame_action_button",
+    sprite = "utility/questionmark",
+    tooltip = tooltips_hidden and {"etech-tp-tooltips-show"} or {"etech-tp-tooltips-hide"}}
+  tooltip_button.toggled = not tooltips_hidden
+  util.register_gui(script_data.button_actions, tooltip_button, {type = "toggle_tooltips"})
   local settings_button = title_flow.add{type = "sprite-button", style = "frame_action_button",
     sprite = "utility/preset", tooltip = {"etech-tp-consent-settings-tooltip"}}
   util.register_gui(script_data.button_actions, settings_button, {type = "consent_settings"})
@@ -1005,16 +1029,22 @@ local make_teleporter_gui = function(player, source)
       label.style.font_color = {}
       label.style.horizontally_stretchable = true
       label.style.maximal_width = preview_size
+      -- One grey line under the name, and it always leads with the surface's
+      -- icon: a pad on another world says WHICH world, a pad on this one says
+      -- how far, and either way the icon answers "where am I going" without
+      -- reading anything.
+      local icon = surface_icon(pad_surface)
+      if icon ~= "" then icon = icon .. " " end
+      local sub_caption
       if pad_surface ~= here_surface then
-        local surface_label = inner_flow.add{type = "label", caption = get_surface_label(pad_surface)}
-        surface_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
-        surface_label.style.maximal_width = preview_size
+        sub_caption = {"", icon, get_surface_label(pad_surface)}
       else
         local dist = util.distance(anchor_position, position)
-        local distance_label = inner_flow.add{type = "label", caption = {"etech-tp-distance", string.format("%.0f", dist)}}
-        distance_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
-        distance_label.style.maximal_width = preview_size
+        sub_caption = {"", icon, {"etech-tp-distance", string.format("%.0f", dist)}}
       end
+      local sub_label = inner_flow.add{type = "label", caption = sub_caption}
+      sub_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+      sub_label.style.maximal_width = preview_size
       -- Express state, spelled out on the pad that does the sending: where it
       -- sends you (green), or that it is armed and waiting for a destination
       -- (yellow). Without this the only sign a pad was an express pad was
@@ -1060,7 +1090,13 @@ local make_teleporter_gui = function(player, source)
           tooltip[#tooltip + 1] = energy_line
         end
       end
-      button.tooltip = tooltip
+      -- With tooltips hidden the click hints go, but a pad that cannot afford
+      -- the jump still has to say why it is greyed out.
+      if tooltips_hidden then
+        button.tooltip = button.enabled and nil or {"etech-tp-not-enough-energy"}
+      else
+        button.tooltip = tooltip
+      end
       util.register_gui(script_data.button_actions, button, {type = "teleport_button", param = teleporter})
       any = true
       end
@@ -1512,6 +1548,13 @@ gui_actions =
     local player = game.get_player(event.player_index)
     if not (player and player.valid) then return end
     script_data.sort_mode[player.index] = event.element.selected_index
+    check_player_linked_teleporter(player)
+  end,
+  toggle_tooltips = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if not (player and player.valid) then return end
+    script_data.hide_tooltips[player.index] = not script_data.hide_tooltips[player.index] or nil
     check_player_linked_teleporter(player)
   end,
   pinned_only = function(event, param)
