@@ -36,6 +36,11 @@ end
 if settings.startup["etech-factory-hub"].value
   and script.active_mods["factorissimo-2-notnotmelon"] then
   handler.add_lib(require("factory-hub/control"))
+  -- The terminal reads the hub's device records, so it needs the hub itself;
+  -- its own toggle only decides whether the module/shortcut exist on top.
+  if settings.startup["etech-factory-terminal"].value then
+    handler.add_lib(require("factory-hub/terminal"))
+  end
 end
 
 -- Factory Mk4: the tier-4 layout is registered with Factorissimo at runtime

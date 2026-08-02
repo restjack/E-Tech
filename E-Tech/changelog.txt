@@ -10,6 +10,16 @@ Date: 2026-08-02
       "Teleport: body teleport time limit (minutes)" (15, 0 = no limit) - the
       time limit is what makes it a "you just died" offer rather than a
       permanent way home.
+    - Factory terminal (Factorissimo): a toolbar shortcut that lists every
+      factory outlet, inlet, fluid device and sensor on the surface you are
+      standing on - position and what each moved in the last minute - and
+      opens any of them from where you stand. Gated twice: the new Factory
+      terminal technology, and a Factory link armor module that has to be in
+      your armor with charge in it. The link holds 2 MJ off your suit's own
+      generators; opening costs 100 kJ, holding the window open costs 20 kW,
+      and a flat link closes it. Startup toggle "Factory terminal
+      (Factorissimo)", on by default. Its art is the base game's battery
+      equipment, tinted - placeholder until real art exists.
   Changes:
     - The teleport-to-player shortcut now always opens its picker while you
       have a body to go back to, instead of jumping straight to the only other

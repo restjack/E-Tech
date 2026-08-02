@@ -233,6 +233,13 @@ data:extend({
   -- since 0.17.0 - see factory-hub/data.lua and factory-hub/control.lua.
   {
     type = "bool-setting",
+    name = "etech-factory-terminal",
+    setting_type = "startup",
+    default_value = true,
+    order = "bk1",
+  },
+  {
+    type = "bool-setting",
     name = "etech-factory-roboport",
     setting_type = "startup",
     default_value = true,
