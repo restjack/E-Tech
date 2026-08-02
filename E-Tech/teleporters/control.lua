@@ -894,14 +894,19 @@ local make_teleporter_gui = function(player, source)
 
   -- The pad list: one scroll pane holding a section header + pad table per
   -- surface group (or a single unlabelled group when grouping is off).
-  local list_root = frame.add{type = "flow", direction = "vertical"}
-  local scroll = list_root.add{type = "scroll-pane", direction = "vertical"}
+  local scroll = frame.add{type = "scroll-pane", direction = "vertical"}
   scroll.style.maximal_height = (player.display_resolution.height / player.display_scale) * 0.8
-  scroll.style.horizontally_stretchable = true
-  list_root = scroll
+  local list_root = scroll
   -- At least one column — a large preview size on a small window would
   -- otherwise round to zero and error on the table add.
   local column_count = math.max(1, math.floor(((player.display_resolution.width / player.display_scale) * 0.6) / preview_size))
+  -- The window used to take its width from the one table inside the scroll
+  -- pane. With the pads split across per-section tables it took it from the
+  -- title bar instead, and the whole list ended up three columns wide behind a
+  -- horizontal scrollbar (0.22.0). State the width the columns need, and
+  -- refuse to scroll sideways: this list scrolls down, never across.
+  scroll.style.minimal_width = column_count * (preview_size + 14) + 24
+  scroll.horizontal_scroll_policy = "never"
   local section_tables = {}
   util.register_gui(script_data.button_actions, search_box, {type = "search_text_changed", parent = scroll})
   util.register_gui(script_data.button_actions, search_button, {type = "search_button", box = search_box, parent = scroll})
