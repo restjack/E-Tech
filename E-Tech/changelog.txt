@@ -30,9 +30,18 @@ Date: 2026-08-02
       someone alt-tabbed away from. New map setting "Teleporter: ask before
       someone teleports to you", on by default; turn it off for the old
       land-on-each-other-unannounced behavior. Single-player is unaffected.
-    - Teleporters: EXPRESS PADS. Stand on a pad, CONTROL + click another one
-      in the list, and from then on stepping onto the first pad sends you
-      straight to the second - no window, normal energy cost. The pad you
+    - Teleporters: starred pads can now be ORDERED. Starring appends to the
+      end of your starred pads and Shift + left-click moves one to the front,
+      so the pad you actually travel to most sits first instead of wherever
+      its name happened to put it. The list numbers the stars (★1, ★2, ...)
+      so it says which favorite each one is.
+    - Teleporters: EXPRESS PADS. Stand on a pad and CONTROL + click another
+      one in the list, or - from the wireless remote, where there is no pad
+      underfoot - CONTROL + click the pad that should send you and then the
+      one it should send you to. Either way, stepping onto the first pad from
+      then on sends you straight to the second - no window, normal energy
+      cost. Every linked pad says where it sends you in green under its name,
+      and a pad waiting for its destination says so in yellow. The pad you
       arrive on stays inert until you step off it, so two pads pointing at
       each other are a doorway rather than an infinite bounce, and the
       wireless remote still opens the full list from where you stand. Map
@@ -85,6 +94,21 @@ Date: 2026-08-02
       base with dozens of pads is the short list you actually travel between.
       Remembered per player.
   Bugfixes:
+    - The Factory terminal technology, the Factory link and the Personal
+      teleporter had no names in locale, so they showed up in-game as
+      Unknown key: "technology-name.etech-factory-terminal" and the like.
+      Nothing in the Lua source references a prototype's own name key - the
+      engine resolves those - so the locale linter could not see the gap; it
+      now reads a data-raw dump and checks every E-Tech prototype has one.
+    - The teleporter pad tooltip never mentioned the Alt-click and
+      Control-click actions added this version, so marking a home pad or
+      linking express pads was invisible unless you read the changelog.
+    - Factory terminal: taking a stack out of a factory did nothing when the
+      device had been opened through the terminal. The terminal puts you in
+      remote view, a remote controller is not a character, and the code asked
+      the CONTROLLER for its inventory - which is nil there, and the failure
+      was silent. It now asks the character, which is what should receive the
+      items anyway, and says so when there is no inventory to fill.
     - Teleporters: the pad you were standing on when you opened the WIRELESS
       REMOTE is now marked recently used, so the trip back is at the top of
       the list. Only the pad a window was opened FROM by walking onto it was

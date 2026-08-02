@@ -63,6 +63,91 @@ NOT_LOCALE = {
 # such a line (or the line above it) to skip it.
 IGNORE_MARKER = "lint-locale: ignore"
 
+# Check 4 (prototype names) reads a data-raw dump, because prototype names are
+# resolved by the ENGINE - nothing in the Lua source references
+# "technology-name.etech-factory-terminal", so checks 2 and 3 are blind to it.
+# A tech shipped with no name in 0.22.0 and showed up in-game as
+# Unknown key: "technology-name.etech-factory-terminal".
+#
+# Prototype type -> the locale section the game looks the name up in. Only
+# types E-Tech actually defines are listed; anything else is reported as
+# unknown rather than guessed at, so a wrong mapping can't hide a real gap.
+DUMP_PATH_DEFAULT = Path.home() / "AppData/Roaming/Factorio/script-output/data-raw-dump.json"
+
+ITEM_TYPES = {
+    "item", "capsule", "module", "tool", "armor", "gun", "ammo",
+    "item-with-entity-data", "rail-planner", "repair-tool",
+    "space-platform-starter-pack",
+}
+ENTITY_TYPES = {
+    "container", "logistic-container", "storage-tank", "constant-combinator",
+    "land-mine", "assembling-machine", "furnace", "lab", "mining-drill",
+    "roboport", "beacon", "simple-entity-with-owner",
+}
+# Types that are real prototypes but carry no player-visible name of their
+# own: hidden companions, effects, and inputs whose text lives elsewhere.
+NO_LOCALE_TYPES = {
+    "explosion", "sticker", "sound", "custom-input", "shortcut",
+    "electric-energy-interface", "tips-and-tricks-item-category",
+    "recipe-category", "item-subgroup", "item-group", "trigger-target-type",
+}
+
+
+def prototype_section(ptype):
+    if ptype in NO_LOCALE_TYPES:
+        return None
+    if ptype == "technology":
+        return "technology-name"
+    if ptype == "fluid":
+        return "fluid-name"
+    if ptype == "recipe":
+        return None  # falls back to the product's name
+    if ptype == "tips-and-tricks-item":
+        return "tips-and-tricks-item-name"
+    if ptype.endswith("-equipment"):
+        return "equipment-name"
+    if ptype in ITEM_TYPES:
+        return "item-name"
+    if ptype in ENTITY_TYPES:
+        return "entity-name"
+    return False  # unknown type - reported, not guessed
+
+
+def check_prototype_names(sections, dump_path):
+    """-> list of problems. Empty (with a note) when no dump is available."""
+    import json
+    if not dump_path.exists():
+        print(f"  note: no data-raw dump at {dump_path} - prototype name check skipped")
+        print("        (run tools/verify.ps1 without -SkipDump to produce one)")
+        return []
+    data = json.loads(dump_path.read_text(encoding="utf-8"))
+    problems = []
+    for ptype, prototypes in sorted(data.items()):
+        if not isinstance(prototypes, dict):
+            continue
+        for name, proto in sorted(prototypes.items()):
+            if not name.startswith("etech"):
+                continue
+            if not isinstance(proto, dict):
+                continue
+            # An explicit localised_name in the prototype wins; the engine
+            # never looks in the locale file for those.
+            if "localised_name" in proto:
+                continue
+            if proto.get("hidden"):
+                continue
+            section = prototype_section(ptype)
+            if section is None:
+                continue
+            if section is False:
+                problems.append(
+                    f"{name!r} is a {ptype!r}, which lint-locale has no locale "
+                    f"section mapping for - add one to prototype_section()")
+                continue
+            if name not in sections.get(section, set()):
+                problems.append(f"{ptype} {name!r} has no [{section}] entry")
+    return problems
+
 
 def parse_cfg(path):
     """-> (set of qualified keys, dict section -> set of keys)"""
@@ -164,6 +249,10 @@ def main() -> int:
             qualified = f"{section}.{key}"
             if "etech" in qualified.lower() and not is_used(qualified, key):
                 problems.append(f"locale key {qualified!r} is defined but never referenced")
+
+    # --- 4. prototype names (needs a data-raw dump) --------------------------
+    dump = Path(sys.argv[2]) if len(sys.argv) > 2 else DUMP_PATH_DEFAULT
+    problems.extend(check_prototype_names(sections, dump))
 
     if problems:
         print(f"{locale_dir}: {len(problems)} problem(s)")

@@ -63,6 +63,9 @@ local script_data =
   -- plus where they stood on arrival, so an A->B->A pair of express pads is a
   -- doorway rather than an infinite bounce.
   express_block = {},
+  -- Pad armed as an express SOURCE while linking from the wireless remote,
+  -- where there is no pad underfoot to be the source (per player).
+  express_pending = {},
 }
 
 local RETURN_SLOTS = 3
@@ -166,6 +169,10 @@ end
 
 -- Favorites/recents are keyed by player.index since 0.19.0 (player.name
 -- broke on player rename; on_configuration_changed migrates old keys).
+-- favorites[unit_number] = RANK (a number, lower sorts first) since 0.22.0.
+-- It used to be `true`, which made every starred pad equal and left their
+-- order to the pad name - so the one you actually travel to most could sit
+-- below five others. Old boolean entries are migrated on config change.
 local get_favorites = function(player)
   local favorites = script_data.favorites[player.index]
   if not favorites then
@@ -173,6 +180,30 @@ local get_favorites = function(player)
     script_data.favorites[player.index] = favorites
   end
   return favorites
+end
+
+local favorite_rank_bounds = function(favorites)
+  local min, max
+  for _, rank in pairs (favorites) do
+    if type(rank) == "number" then
+      if not min or rank < min then min = rank end
+      if not max or rank > max then max = rank end
+    end
+  end
+  return min, max
+end
+
+-- A newly starred pad goes to the BACK of the starred ones; shift+left-click
+-- promotes one to the front. No renumbering pass: ranks are just numbers with
+-- gaps, and only their order matters.
+local star_favorite = function(favorites, unit_number)
+  local _, max = favorite_rank_bounds(favorites)
+  favorites[unit_number] = (max or 0) + 1
+end
+
+local promote_favorite = function(favorites, unit_number)
+  local min = favorite_rank_bounds(favorites)
+  favorites[unit_number] = (min or 1) - 1
 end
 
 local add_recent = function(player, teleporter)
@@ -519,6 +550,23 @@ local make_teleporter_gui = function(player, source)
   script_data.search_boxes[player.index] = search_box
   local recent = script_data.recent[player.index] or {}
   local favorites = get_favorites(player)
+  -- Rank -> 1..N display positions for the star badges. Ranks carry gaps by
+  -- design (starring appends, promoting prepends), so the badge number comes
+  -- from their ORDER, not from the rank itself.
+  local favorite_positions = {}
+  do
+    local ordered = {}
+    for unit_number, rank in pairs (favorites) do
+      ordered[#ordered + 1] = { unit_number = unit_number, rank = tonumber(rank) or 0 }
+    end
+    table.sort(ordered, function(a, b)
+      if a.rank ~= b.rank then return a.rank < b.rank end
+      return a.unit_number < b.unit_number
+    end)
+    for position, entry in ipairs(ordered) do
+      favorite_positions[entry.unit_number] = position
+    end
+  end
 
   local sorted = {}
   local i = 1
@@ -700,6 +748,12 @@ local make_teleporter_gui = function(player, source)
       return fav_a
     end
     if fav_a then
+      -- Starred pads sort by their own rank (shift+left-click reorders),
+      -- falling back to the name when two share one - which only old
+      -- boolean-era saves can produce.
+      local rank_a = tonumber(favorites[a.unit_number]) or 0
+      local rank_b = tonumber(favorites[b.unit_number]) or 0
+      if rank_a ~= rank_b then return rank_a < rank_b end
       return a.name:lower() < b.name:lower()
     end
 
@@ -731,6 +785,17 @@ local make_teleporter_gui = function(player, source)
   for k, sorted_script_data in pairs (sorted) do
     sorted_network[sorted_script_data.name] = sorted_script_data.teleporter
   end
+
+  -- unit_number -> display name, so an express link can be shown as the
+  -- DESTINATION'S NAME rather than a number nobody can place.
+  local name_by_unit = {}
+  for pad_name, teleporter_data in pairs (network) do
+    local entity = teleporter_data.teleporter
+    if entity and entity.valid then
+      name_by_unit[entity.unit_number] = pad_name
+    end
+  end
+  local armed_express = script_data.express_pending[player.index]
 
   local chart = player.force.chart
   local cost_cfg = read_cost_settings()
@@ -806,7 +871,9 @@ local make_teleporter_gui = function(player, source)
         caption = "[img=quantity-time] "..name
       end
       if favorites[teleporter_entity.unit_number] then
-        caption = "★ "..caption
+        -- Number the stars by their place in the starred order, so the list
+        -- says WHICH favorite this is rather than just that it is one.
+        caption = "★" .. (favorite_positions[teleporter_entity.unit_number] or "") .. " " .. caption
       end
       -- Two more markers, both set from this list: your home pad (ALT-click)
       -- and this pad's express target (CONTROL-click, only while standing on
@@ -832,6 +899,20 @@ local make_teleporter_gui = function(player, source)
         local distance_label = inner_flow.add{type = "label", caption = {"etech-tp-distance", string.format("%.0f", dist)}}
         distance_label.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
         distance_label.style.maximal_width = preview_size
+      end
+      -- Express state, spelled out on the pad that does the sending: where it
+      -- sends you (green), or that it is armed and waiting for a destination
+      -- (yellow). Without this the only sign a pad was an express pad was
+      -- being thrown across the map by standing on it.
+      if teleporter.express and name_by_unit[teleporter.express] then
+        local express_label = inner_flow.add{type = "label",
+          caption = {"etech-tp-express-to", name_by_unit[teleporter.express]}}
+        express_label.style.font_color = {r = 0.4, g = 1, b = 0.4}
+        express_label.style.maximal_width = preview_size
+      elseif armed_express == teleporter_entity.unit_number then
+        local armed_label = inner_flow.add{type = "label", caption = {"etech-tp-express-armed-label"}}
+        armed_label.style.font_color = {r = 1, g = 0.9, b = 0.3}
+        armed_label.style.maximal_width = preview_size
       end
       -- A pad still inside its trigger timeout can be teleported TO; what it
       -- won't do is open its own window when you step on it. That silence is
@@ -1072,14 +1153,39 @@ gui_actions =
       check_player_linked_teleporter(player)
       return
     end
+    -- CONTROL-click links pads. Standing on a pad, one click is enough: that
+    -- pad is the source. From the remote there is no source, so the first
+    -- click ARMS a pad and the second picks its destination - and clicking
+    -- the armed pad again clears both the arming and any link it had.
     if event.name == defines.events.on_gui_click and event.control then
+      local unit_number = destination.unit_number
       local source_pad = script_data.player_linked_teleporter[player.index]
       local source_record = source_pad and source_pad.valid and script_data.teleporter_map[source_pad.unit_number]
       if not source_record then
-        player.print({"etech-tp-express-needs-pad"})
+        local armed = script_data.express_pending[player.index]
+        if not armed then
+          script_data.express_pending[player.index] = unit_number
+          player.print({"etech-tp-express-armed"})
+          check_player_linked_teleporter(player)
+          return
+        end
+        script_data.express_pending[player.index] = nil
+        local armed_record = script_data.teleporter_map[armed]
+        if not (armed_record and armed_record.teleporter and armed_record.teleporter.valid) then
+          player.print({"etech-tp-express-source-gone"})
+          check_player_linked_teleporter(player)
+          return
+        end
+        if armed == unit_number then
+          armed_record.express = nil
+          player.print({"etech-tp-express-cleared"})
+        else
+          armed_record.express = unit_number
+          player.print({"etech-tp-express-set"})
+        end
+        check_player_linked_teleporter(player)
         return
       end
-      local unit_number = destination.unit_number
       source_record.express = (source_record.express ~= unit_number) and unit_number or nil
       player.print(source_record.express and {"etech-tp-express-set"} or {"etech-tp-express-cleared"})
       check_player_linked_teleporter(player)
@@ -1100,7 +1206,27 @@ gui_actions =
       end
       local favorites = get_favorites(player)
       local unit_number = destination.unit_number
-      favorites[unit_number] = not favorites[unit_number] or nil
+      if favorites[unit_number] then
+        favorites[unit_number] = nil
+      else
+        star_favorite(favorites, unit_number)
+      end
+      check_player_linked_teleporter(player)
+      return
+    end
+
+    -- Shift + LEFT-click promotes an already-starred pad to the front of the
+    -- starred ones. Repeated on two pads it orders the whole set, which is
+    -- all the ordering a list this size needs.
+    if event.name == defines.events.on_gui_click and event.shift
+      and event.button == defines.mouse_button_type.left then
+      local favorites = get_favorites(player)
+      local unit_number = destination.unit_number
+      if not favorites[unit_number] then
+        player.print({"etech-tp-promote-needs-star"})
+        return
+      end
+      promote_favorite(favorites, unit_number)
       check_player_linked_teleporter(player)
       return
     end
@@ -2146,10 +2272,24 @@ teleporters.on_configuration_changed = function()
   stored.home = stored.home or {}
   stored.recall_tick = stored.recall_tick or {}
   stored.express_block = stored.express_block or {}
+  stored.express_pending = stored.express_pending or {}
   -- 0.10.0: returns went from a single slot to a newest-first array.
   for player_index, ret in pairs (stored.returns) do
     if ret.surface_index then
       stored.returns[player_index] = {ret}
+    end
+  end
+  -- 0.22.0: favorites went from `true` to a numeric rank so starred pads can
+  -- be ordered. Old entries get ranks in name order - arbitrary, but it is
+  -- exactly the order they were displayed in before.
+  for _, favorites in pairs (stored.favorites or {}) do
+    local booleans = {}
+    for unit_number, value in pairs (favorites) do
+      if value == true then booleans[#booleans + 1] = unit_number end
+    end
+    table.sort(booleans)
+    for index, unit_number in ipairs(booleans) do
+      favorites[unit_number] = index
     end
   end
   -- 0.19.0: favorites/recents rekeyed player.name -> player.index (name
