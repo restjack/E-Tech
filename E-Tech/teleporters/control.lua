@@ -474,6 +474,40 @@ end
 -- ship name ("Icarus", not "platform-1"), then the planet prototype's
 -- localised name ("Nauvis", not "nauvis"), then the engine's localised
 -- name, then the raw name.
+-- Is this one of Factorissimo's interior surfaces? Those are named
+-- "factory-floor-N" and carry dozens of unrelated factories, so "Nauvis" is
+-- the wrong answer and the raw name is no answer at all.
+local factorissimo_interior = function(surface)
+  if not remote.interfaces["factorissimo"] then return false end
+  local ok, result = pcall(remote.call, "factorissimo", "is_factorissimo_surface", surface)
+  return ok and result == true
+end
+
+-- A short "where is this" line for the camera tiles (Return, Body), with an
+-- icon when the game has one: those previews are three grey squares
+-- otherwise, and which grey square is which matters.
+local surface_marker = function(surface)
+  if not (surface and surface.valid) then return nil end
+  if factorissimo_interior(surface) then
+    local icon = prototypes.entity["factory-1"] and "[img=entity/factory-1] " or ""
+    return {"", icon, {"etech-tp-inside-factory"}}
+  end
+  local platform = surface.platform
+  if platform then
+    local icon = prototypes.item["space-platform-foundation"]
+      and "[img=item/space-platform-foundation] " or ""
+    return {"", icon, platform.name}
+  end
+  local planet = surface.planet
+  if planet then
+    local name = planet.name
+    local icon = (prototypes.space_location and prototypes.space_location[name])
+      and ("[img=space-location/" .. name .. "] ") or ""
+    return {"", icon, planet.prototype.localised_name}
+  end
+  return {"", surface.localised_name or surface.name}
+end
+
 local get_surface_label = function(surface)
   local alias = script_data.surface_aliases[surface.index]
   if alias and alias ~= "" then return alias end
@@ -698,7 +732,7 @@ local make_teleporter_gui = function(player, source)
     return special_flow
   end
 
-  local add_preview_button = function(parent, view_spec, caption, tooltip, action)
+  local add_preview_button = function(parent, view_spec, caption, tooltip, action, subcaption)
     local button = parent.add{type = "button"}
     button.style.height = special_size + 32 + 8
     button.style.width = special_size + 8
@@ -717,6 +751,14 @@ local make_teleporter_gui = function(player, source)
     label.style.font = "default-dialog-button"
     label.style.font_color = {}
     label.style.maximal_width = special_size
+    -- Which surface this preview is of. Three Return tiles all look like the
+    -- same patch of grey without it.
+    if subcaption then
+      local sub = inner_flow.add{type = "label", caption = subcaption}
+      sub.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+      sub.style.maximal_width = special_size
+      sub.style.single_line = false
+    end
     util.register_gui(script_data.button_actions, button, action)
   end
 
@@ -737,7 +779,8 @@ local make_teleporter_gui = function(player, source)
       {type = "camera", position = ret.position, surface_index = ret.surface_index, zoom = 0.2},
       caption,
       tooltip,
-      {type = "return_button", ret = ret})
+      {type = "return_button", ret = ret},
+      surface_marker(game.surfaces[ret.surface_index]))
   end
 
   -- Your body, when the feature is on and the death is recent enough. Sits
@@ -748,7 +791,8 @@ local make_teleporter_gui = function(player, source)
       {type = "camera", position = death.position, surface_index = death.surface_index, zoom = 0.2},
       {"etech-tp-body"},
       {"etech-tp-body-tooltip", get_surface_label(game.surfaces[death.surface_index]), common.death_age_minutes(death)},
-      {type = "body_button"})
+      {type = "body_button"},
+      surface_marker(game.surfaces[death.surface_index]))
   end
 
   if settings.global["etech-teleporter-players-section"].value then
@@ -760,7 +804,8 @@ local make_teleporter_gui = function(player, source)
           {type = "minimap", surface_index = other_surface.index, zoom = 1, force = force.name, position = other_position},
           other.name,
           {"etech-tp-player-tooltip", other.name, get_surface_label(other_surface)},
-          {type = "player_button", target_index = other.index})
+          {type = "player_button", target_index = other.index},
+          surface_marker(other_surface))
       end
     end
   end

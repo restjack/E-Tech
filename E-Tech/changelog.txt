@@ -105,6 +105,18 @@ Date: 2026-08-02
       leave the migration behind. Starred pads that predate this version are
       converted to ranked favorites when they are next read, for the same
       reason.
+    - Factory terminal: opening a device through it no longer puts you in
+      remote view. Remote view replaces your inventory panel with the
+      ghost-cursor palette, so the window that opened next to a factory's
+      contents was not the inventory you wanted to drag things into - which is
+      most of the point of opening a chest. Your character's REACH is extended
+      instead, for exactly as long as the device window is open: you stay in
+      your body, your own inventory is right there, and normal click,
+      shift-click and drag transfers work. Only reach is touched, not build or
+      resource reach, and whatever bonus you already had is put back exactly.
+    - Teleporters: the Return and Body previews, and the players row, now name
+      the surface they are on, with a planet, platform or factory icon. Three
+      Return entries were three identical grey squares.
     - The Factory terminal technology, the Factory link and the Personal
       teleporter had no names in locale, so they showed up in-game as
       Unknown key: "technology-name.etech-factory-terminal" and the like.

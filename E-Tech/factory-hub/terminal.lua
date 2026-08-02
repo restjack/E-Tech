@@ -8,13 +8,22 @@
 -- HOW THE REMOTE OPEN WORKS. The outlet/inlet panels are RELATIVE GUIs
 -- anchored to the entity's own container GUI (factory-hub/control.lua), so
 -- there is nothing to "open" without opening the container itself - and the
--- engine range-checks that for a character controller. The 1.1-era mods that
--- did this inflated the player's reach around the call; 2.0 gave us a
--- supported path instead: put the player in Remote View at the device
--- (set_controller with defines.controllers.remote), then set player.opened.
--- That is exactly what a player clicking the device in remote view does, so
--- every panel behaves normally and control.lua needed no changes at all.
--- Closing the device GUI puts a player we moved back in their body.
+-- engine range-checks that for a character controller.
+--
+-- The first implementation used Remote View (set_controller with
+-- defines.controllers.remote), which is the 2.0-supported way to open a
+-- distant entity. It worked, and it was wrong for this: remote view replaces
+-- the player's inventory panel with the ghost-cursor palette, so the window
+-- that opened beside the factory's contents was not the inventory you wanted
+-- to move things into - which is most of the point of opening a chest.
+--
+-- So it does what the 1.1-era mods did after all: raise the character's REACH
+-- for as long as the device GUI is open. The player stays in their body, the
+-- normal inventory panel is right there, and the engine allows the ordinary
+-- transfers (click, shift-click, drag) as well as the panel's own take
+-- button. Only reach distance is touched - not build or resource reach - and
+-- the previous value is put back exactly, rather than reset to a constant
+-- that would silently eat another mod's bonus.
 --
 -- Reads control.lua's storage (storage.etech_factory_hub.hubs) but never
 -- writes it: device records stay owned by control.lua, including cleanup of
@@ -48,14 +57,20 @@ local ROW_ORDER = {OUTLET_NAME, INLET_NAME, FLUID_OUTLET_NAME, FLUID_INLET_NAME,
 local ROW_RANK = {}
 for rank, name in ipairs(ROW_ORDER) do ROW_RANK[name] = rank end
 
+-- Tables are ensured on every read, never assumed to have been created by a
+-- migration: on_configuration_changed does not run when a save is reloaded
+-- with a rebuild of the same mod version, which cost the teleporter module a
+-- crash in 0.22.0.
 local function terminal_data()
     local data = storage.etech_factory_terminal
     if not data then
-        data = { open = {}, remote = {} }
+        data = {}
         storage.etech_factory_terminal = data
     end
     data.open = data.open or {}
-    data.remote = data.remote or {}
+    -- Reach bonus held per player while a device GUI is open through the
+    -- terminal, so it can be restored to exactly what it was.
+    data.reach = data.reach or {}
     return data
 end
 
@@ -65,9 +80,8 @@ local function device_records()
     return (hub and hub.hubs) or {}
 end
 
--- The player's factory link, or nil. Read from the PHYSICAL character on
--- purpose: the whole point is that the suit you are wearing powers this, and
--- player.character stays valid while in remote view.
+-- The player's factory link, or nil. Read from the character on purpose: the
+-- whole point is that the suit you are wearing powers this.
 local function find_link(player)
     local character = player.character
     local grid = character and character.valid and character.grid
@@ -245,28 +259,46 @@ local function open_terminal(player)
     terminal_data().open[player.index] = true
 end
 
--- Remote View at the device, then open it. Returns the player to their body
--- when the device GUI closes (see on_gui_closed).
+-- Open the device from where the player is standing, by TEMPORARILY EXTENDING
+-- THEIR REACH rather than putting them in Remote View.
+--
+-- Remote View was the first implementation and it worked, but it swaps the
+-- player's inventory panel for the ghost-cursor palette - so the window that
+-- opened next to the device's contents was not the inventory you wanted to
+-- drag things into, which is most of the point of opening a chest. Staying in
+-- your body keeps the normal inventory panel, and with reach extended the
+-- engine allows the ordinary transfers (click, shift-click, drag) as well.
+--
+-- Only reach distance is raised, not build or resource reach: this is meant to
+-- let you handle a distant chest's contents, not to build or mine across the
+-- base. The bonus is restored the moment the device GUI closes.
 local function open_device(player, entity)
-    local data = terminal_data()
-    if player.controller_type == defines.controllers.character then
-        player.set_controller{
-            type = defines.controllers.remote,
-            position = entity.position,
-            surface = entity.surface,
-        }
-        data.remote[player.index] = true
+    local character = player.character
+    if not (character and character.valid) then
+        player.print({"gui-etech-terminal.no-character"})
+        return
     end
+    -- Same surface is guaranteed by the list (physical surface only), so a
+    -- plain distance is all the reach that is needed, plus a margin.
+    local dx = entity.position.x - character.position.x
+    local dy = entity.position.y - character.position.y
+    local distance = math.sqrt(dx * dx + dy * dy)
+    local data = terminal_data()
+    data.reach[player.index] = character.character_reach_distance_bonus
+    character.character_reach_distance_bonus = math.ceil(distance) + 8
     player.opened = entity
 end
 
-local function return_from_remote(player)
+-- Put the reach bonus back exactly as it was. Anything else (another mod's
+-- armor bonus, say) would be quietly stolen by writing a constant here.
+local function restore_reach(player)
     local data = terminal_data()
-    if not data.remote[player.index] then return end
-    data.remote[player.index] = nil
+    local previous = data.reach[player.index]
+    if previous == nil then return end
+    data.reach[player.index] = nil
     local character = player.character
-    if character and character.valid and player.controller_type == defines.controllers.remote then
-        player.set_controller{type = defines.controllers.character, character = character}
+    if character and character.valid then
+        character.character_reach_distance_bonus = previous
     end
 end
 
@@ -307,8 +339,9 @@ local function on_gui_closed(event)
         close_terminal(player)
         return
     end
-    -- The device GUI we opened remotely was closed: put the player back.
-    if event.entity then return_from_remote(player) end
+    -- The device GUI we reached across the base for was closed: hand the
+    -- player's reach back.
+    if event.entity then restore_reach(player) end
 end
 
 -- While a terminal is open: refresh the rows (rates move) and bill the link.
