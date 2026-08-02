@@ -70,6 +70,40 @@ local script_data =
 
 local RETURN_SLOTS = 3
 
+-- Every sub-table script_data is expected to have. on_configuration_changed
+-- backfills these, but it does NOT run when a save is reloaded with a rebuild
+-- of the SAME mod version - and during development that is the normal case.
+-- A save that had been opened with an earlier 0.22.0 build therefore came back
+-- without the tables that build did not have, and the first GUI open crashed
+-- on "attempt to index field 'express_pending' (a nil value)".
+--
+-- So the tables are ensured on every event instead of trusting a migration to
+-- have run. It is a handful of nil checks per event; the alternative is a
+-- crash that only shows up on someone else's save.
+local SCRIPT_DATA_TABLES = {
+  "networks", "rename_frames", "button_actions", "teleporter_map",
+  "teleporter_frames", "player_linked_teleporter", "to_be_removed", "tag_map",
+  "search_boxes", "recent", "surface_aliases", "surface_filter",
+  "surface_rename_frames", "remote_open", "returns", "favorites", "sort_mode",
+  "frame_locations", "search_text", "pinned_only", "home", "recall_tick",
+  "express_block", "express_pending",
+}
+
+local ensure_script_data = function()
+  for _, key in ipairs(SCRIPT_DATA_TABLES) do
+    if script_data[key] == nil then script_data[key] = {} end
+  end
+end
+
+-- Wraps an event handler so the tables above exist before it runs. Applied to
+-- every entry in teleporters.events / on_nth_tick at the bottom of the file.
+local guarded = function(handler)
+  return function(event)
+    ensure_script_data()
+    return handler(event)
+  end
+end
+
 -- The teleport sound the player themselves hears. The world flash's own
 -- sound plays at the destination BEFORE the player arrives, so it's
 -- inaudible cross-surface — this one follows the player.
@@ -178,6 +212,20 @@ local get_favorites = function(player)
   if not favorites then
     favorites = {}
     script_data.favorites[player.index] = favorites
+  end
+  -- Boolean entries from before ranks existed are converted HERE rather than
+  -- only in on_configuration_changed, because that does not run when a save is
+  -- reloaded with a rebuild of the same version. Ranks follow unit_number,
+  -- which is the order those pads were displayed in anyway.
+  local booleans = {}
+  for unit_number, value in pairs (favorites) do
+    if value == true then booleans[#booleans + 1] = unit_number end
+  end
+  if #booleans > 0 then
+    table.sort(booleans)
+    for index, unit_number in ipairs(booleans) do
+      favorites[unit_number] = index
+    end
   end
   return favorites
 end
@@ -2245,8 +2293,21 @@ teleporters.on_nth_tick =
   [601] = check_pad_alerts,
 }
 
+-- Every handler above goes through `guarded`, which makes sure script_data has
+-- all of its sub-tables before the handler touches one. See the comment on
+-- SCRIPT_DATA_TABLES: a same-version rebuild does not fire
+-- on_configuration_changed, so a save can come back missing whatever tables
+-- the build that last saved it did not have.
+for event_id, handler in pairs (teleporters.events) do
+  teleporters.events[event_id] = guarded(handler)
+end
+for tick, handler in pairs (teleporters.on_nth_tick) do
+  teleporters.on_nth_tick[tick] = guarded(handler)
+end
+
 teleporters.on_init = function()
   storage.etech_teleporters = storage.etech_teleporters or script_data
+  ensure_script_data()
 end
 
 teleporters.on_load = function()
@@ -2258,21 +2319,11 @@ teleporters.on_configuration_changed = function()
     storage.etech_teleporters = script_data
   end
   local stored = storage.etech_teleporters
-  stored.surface_aliases = stored.surface_aliases or {}
-  stored.surface_filter = stored.surface_filter or {}
-  stored.surface_rename_frames = stored.surface_rename_frames or {}
-  stored.remote_open = stored.remote_open or {}
-  stored.returns = stored.returns or {}
-  stored.favorites = stored.favorites or {}
-  stored.recent = stored.recent or {}
-  stored.sort_mode = stored.sort_mode or {}
-  stored.frame_locations = stored.frame_locations or {}
-  stored.search_text = stored.search_text or {}
-  stored.pinned_only = stored.pinned_only or {}
-  stored.home = stored.home or {}
-  stored.recall_tick = stored.recall_tick or {}
-  stored.express_block = stored.express_block or {}
-  stored.express_pending = stored.express_pending or {}
+  -- The per-table backfill that used to be written out one line at a time
+  -- lives in SCRIPT_DATA_TABLES now, so adding a table cannot leave the
+  -- migration behind again.
+  script_data = stored
+  ensure_script_data()
   -- 0.10.0: returns went from a single slot to a newest-first array.
   for player_index, ret in pairs (stored.returns) do
     if ret.surface_index then

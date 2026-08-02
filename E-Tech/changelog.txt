@@ -94,6 +94,17 @@ Date: 2026-08-02
       base with dozens of pads is the short list you actually travel between.
       Remembered per player.
   Bugfixes:
+    - FIXED A CRASH opening the teleporter list: "attempt to index field
+      'express_pending' (a nil value)". Every table this version added to the
+      teleporter module was created by the migration that runs on a mod-set
+      change - and that migration does NOT run when a save is reloaded with a
+      rebuild carrying the same version number, which is exactly what a save
+      played during 0.22.0's development hits. The tables are now ensured at
+      the start of every event instead of being trusted to exist, and the
+      one-line-per-table backfill is a list, so adding a table can no longer
+      leave the migration behind. Starred pads that predate this version are
+      converted to ranked favorites when they are next read, for the same
+      reason.
     - The Factory terminal technology, the Factory link and the Personal
       teleporter had no names in locale, so they showed up in-game as
       Unknown key: "technology-name.etech-factory-terminal" and the like.
