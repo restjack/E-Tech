@@ -20,6 +20,30 @@ Date: 2026-08-02
       and a flat link closes it. Startup toggle "Factory terminal
       (Factorissimo)", on by default. Its art is the base game's battery
       equipment, tinted - placeholder until real art exists.
+    - Teleporters: teleporting to a TEAMMATE now asks them first. They answer
+      "Yes, once", "Yes, always", "No, once" or "No, always"; the two standing
+      answers are remembered per person and can be taken back at any time in
+      the new settings window - the gear button in either teleport window -
+      which also decides what happens to requests from anyone you have not
+      answered for (ask, always allow, always refuse). No answer within 30
+      seconds counts as a refusal, so nobody is left waiting on a window
+      someone alt-tabbed away from. New map setting "Teleporter: ask before
+      someone teleports to you", on by default; turn it off for the old
+      land-on-each-other-unannounced behavior. Single-player is unaffected.
+    - Teleporters: SHIFT + R jumps straight to the pad you used last, with no
+      window at all. Same cost and same gates as a wireless-remote jump, and
+      since the pad you leave becomes the most recent one, the key alternates
+      between two pads - which is what going back and forth actually is.
+    - Teleporters: ENTER in the destination list's search box teleports to the
+      first pad still showing. Type three letters, press Enter, gone.
+    - Teleporters: pad QUALITY now means something. Every level adds 50% to
+      the pad's energy buffer (a legendary pad holds 700 MJ instead of 200 and
+      rides out a brownout that would strand a normal one) and takes 10% off
+      the cost of jumping to it, to a floor of half price. Does nothing
+      without the Quality mod.
+    - Teleporters: a tips-and-tricks entry, because starring, renaming,
+      sorting, the remote and the jump-back key were all invisible unless you
+      read the mod page.
     - Teleporters: "Starred + recent only" tick box above the pad list. Shows
       just the pads you starred plus the up-to-8 you used recently, which on a
       base with dozens of pads is the short list you actually travel between.

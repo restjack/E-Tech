@@ -270,6 +270,18 @@ local get_energy_interface = function(teleporter_data, entity)
   }
   if eei then
     eei.destructible = false
+    -- Quality on the pad buys buffer: +50% per level over the prototype's
+    -- 200 MJ, so a legendary pad holds 700 MJ and rides out a brownout that
+    -- would strand a normal one. electric_buffer_size is writable per entity,
+    -- so no extra prototypes are needed.
+    local quality = entity.quality
+    local level = quality and quality.level or 0
+    if level > 0 then
+      local source = eei.prototype.electric_energy_source_prototype
+      if source then
+        eei.electric_buffer_size = source.buffer_capacity * (1 + 0.5 * level)
+      end
+    end
     teleporter_data.energy_interface = eei
   end
   return eei
@@ -312,6 +324,15 @@ local get_teleport_cost = function(source, destination, player, cfg)
     elseif cfg.per_100 > 0 then
       cost = cost + cfg.per_100 * (util.distance(from_position, destination.position) / 100)
     end
+  end
+  -- Quality on the DESTINATION pad discounts the jump: -10% per level, so a
+  -- legendary pad (level 5) costs half. Matches E-Tech's other quality rule
+  -- (quality adds module slots) - a better pad should be worth crafting.
+  -- Quality-less games report level 0, so this is a no-op without the mod.
+  local quality = destination.quality
+  local level = quality and quality.level or 0
+  if level > 0 then
+    cost = cost * math.max(0.5, 1 - 0.1 * level)
   end
   return cost * 1000000
 end
@@ -435,6 +456,9 @@ local make_teleporter_gui = function(player, source)
   local saved_search = script_data.search_text[player.index] or ""
   local search_box = title_flow.add{type = "textfield", visible = saved_search ~= "", text = saved_search}
   local search_button = title_flow.add{type = "sprite-button", style = "frame_action_button", sprite = "utility/search", tooltip = {"gui.search-with-focus", {"etech-tp-search"}}}
+  local settings_button = title_flow.add{type = "sprite-button", style = "frame_action_button",
+    sprite = "utility/preset", tooltip = {"etech-tp-consent-settings-tooltip"}}
+  util.register_gui(script_data.button_actions, settings_button, {type = "consent_settings"})
   script_data.search_boxes[player.index] = search_box
   local recent = script_data.recent[player.index] or {}
   local favorites = get_favorites(player)
@@ -915,7 +939,11 @@ local apply_pad_rename = function(event, param)
   rename_teleporter(player.force, old_name, new_name)
 end
 
-local gui_actions =
+-- Forward-declared, then assigned: handlers inside the table reach other
+-- handlers through it (Enter-to-teleport reuses teleport_button), and a local
+-- is not in scope inside its own initializer.
+local gui_actions
+gui_actions =
 {
   rename_button = function(event, param)
     make_rename_frame(game.get_player(event.player_index), param.caption)
@@ -1079,20 +1107,34 @@ local gui_actions =
       check_player_linked_teleporter(player)
       return
     end
-    local surface = target.physical_surface or target.surface
-    local position = target.physical_position or target.position
-    local from_surface = player.surface
-    local from_position = player.position
-    local ok, result = common.teleport_player(player, surface, position)
-    if not ok then
-      player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    -- The target decides (unless consent is off or they already answered
+    -- "always" for this player). A pending ask closes the window: the jump
+    -- happens from their answer, minutes later if they are slow.
+    local verdict = common.request_teleport(player, target)
+    if verdict == "busy" then
+      player.print({"etech-tp-consent-busy", target.name})
       return
     end
-    create_flash(from_surface, from_position)
-    create_flash(surface, result)
-    play_teleport_sound(player)
+    if verdict == "denied" then
+      player.print({"etech-tp-consent-refused", target.name})
+      check_player_linked_teleporter(player)
+      return
+    end
+    if verdict == "pending" then
+      player.print({"etech-tp-consent-asked", target.name})
+      unlink_teleporter(player)
+      return
+    end
+    local from_surface = player.surface
+    local from_position = player.position
+    if not common.do_player_teleport(player, target) then return end
     add_recent_pad_at(player, from_surface, from_position)
     unlink_teleporter(player)
+  end,
+  consent_settings = function(event, param)
+    if event.name ~= defines.events.on_gui_click then return end
+    local player = game.get_player(event.player_index)
+    if player then common.open_consent_settings(player) end
   end,
 
   surface_filter = function(event, param)
@@ -1131,6 +1173,27 @@ local gui_actions =
 
   search_text_changed = function(event, param)
     local box = event.element
+    -- Enter teleports to the first pad still showing: type three letters,
+    -- press Enter, gone. Goes through the button's own registered action, so
+    -- energy cost, cross-surface rules and recents behave exactly as if it
+    -- had been clicked.
+    if event.name == defines.events.on_gui_confirmed then
+      local actions = script_data.button_actions[event.player_index] or {}
+      for _, child in pairs (param.parent.children) do
+        local action = actions[child.index]
+        if child.visible and child.enabled and action and action.type == "teleport_button" then
+          gui_actions.teleport_button({
+            name = defines.events.on_gui_click,
+            player_index = event.player_index,
+            element = child,
+            button = defines.mouse_button_type.left,
+            shift = false,
+          }, action)
+          return
+        end
+      end
+      return
+    end
     script_data.search_text[event.player_index] = (box.text ~= "") and box.text or nil
     apply_search_filter(param.parent, box.text)
   end,
@@ -1419,6 +1482,81 @@ local on_remote_hotkey = function(event)
   open_remote(game.get_player(event.player_index))
 end
 
+-- Jump straight to the pad used most recently, no window. Same gates as the
+-- remote (it IS a remote jump), same energy cost, and the pad you leave
+-- becomes the new most-recent one - so the hotkey alternates between two
+-- pads, which is what going back and forth actually looks like.
+local on_jump_back_hotkey = function(event)
+  local player = game.get_player(event.player_index)
+  if not (player and player.valid) then return end
+  if not settings.global["etech-teleporter-remote"].value then
+    player.print({"etech-tp-remote-disabled"})
+    return
+  end
+  local tech = player.force.technologies[teleporter_name]
+  if tech and not tech.researched then
+    player.print({"etech-tp-remote-not-researched"})
+    return
+  end
+  local recent = script_data.recent[player.index]
+  if not recent then
+    player.print({"etech-tp-jump-back-none"})
+    return
+  end
+  -- Newest recent entry that still exists, is on a reachable surface, and
+  -- isn't the pad we are standing on.
+  local here = player.physical_surface or player.surface
+  local cross_surface = settings.global["etech-teleporter-cross-surface"].value
+  local network = script_data.networks[player.force.name] or {}
+  local best, best_tick, best_data
+  for name, teleporter_data in pairs (network) do
+    local entity = teleporter_data.teleporter
+    if entity and entity.valid then
+      local tick = recent[entity.unit_number]
+      local reachable = cross_surface or entity.surface == here
+      local elsewhere = util.distance(entity.position, player.physical_position or player.position) > 2
+        or entity.surface ~= here
+      if tick and reachable and elsewhere and (not best_tick or tick > best_tick) then
+        best, best_tick, best_data = entity, tick, teleporter_data
+      end
+    end
+    -- `name` is only in scope for the network iteration; nothing to do with it.
+  end
+  if not best then
+    player.print({"etech-tp-jump-back-none"})
+    return
+  end
+  local cost = get_teleport_cost(nil, best, player)
+  local eei
+  if cost > 0 then
+    eei = get_energy_interface(best_data, best)
+    local stored = (eei and eei.valid and eei.energy) or 0
+    if stored < cost then
+      player.print({"etech-tp-not-enough-energy"})
+      return
+    end
+  end
+  local from_surface = player.surface
+  local from_position = player.position
+  local ok, result = common.teleport_player(player, best.surface, best.position, {exact = true})
+  if not ok then
+    player.print(result == "train" and {"etech-tp-in-train"} or {"etech-tp-player-teleport-failed"})
+    return
+  end
+  if cost > 0 and eei and eei.valid then
+    eei.energy = eei.energy - cost
+  end
+  best.timeout = best.prototype.timeout
+  create_flash(best.surface, best.position)
+  create_flash(from_surface, from_position)
+  play_teleport_sound(player)
+  add_recent(player, best)
+  add_recent_pad_at(player, from_surface, from_position, best)
+  if settings.global["etech-teleporter-return-enabled"].value then
+    push_return(player, from_surface.index, from_position)
+  end
+end
+
 -- Unpowered-pad alert: a pad with an empty energy buffer can't be teleported
 -- to, and you only find out by opening the GUI. Raise a custom alert for the
 -- owning force while a pad sits at zero (only when teleports actually cost
@@ -1677,6 +1815,7 @@ teleporters.events =
   [defines.events.on_forces_merged] = on_forces_merged,
   [defines.events.on_lua_shortcut] = on_lua_shortcut,
   [names.hotkeys.open_remote] = on_remote_hotkey,
+  [names.hotkeys.jump_back] = on_jump_back_hotkey,
 
   [defines.events.on_trigger_created_entity] = on_trigger_created_entity,
   [defines.events.on_player_setup_blueprint] = on_player_setup_blueprint,

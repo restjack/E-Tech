@@ -443,6 +443,13 @@ data:extend({
   },
   {
     type = "bool-setting",
+    name = "etech-teleporter-consent",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "ti1",
+  },
+  {
+    type = "bool-setting",
     name = "etech-teleporter-alerts",
     setting_type = "runtime-global",
     default_value = true,

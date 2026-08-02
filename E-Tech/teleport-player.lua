@@ -25,34 +25,23 @@ local BTN_PREFIX = "etech-tp-player-"
 local BODY = "etech-tp-body-button"
 local CANCEL = "etech-tp-cancel"
 local CLOSE = "etech-tp-close"
+local SETTINGS = "etech-tp-settings"
 
--- Teleport flash at both ends, when the explosion prototypes exist (they're
--- part of the teleporter-pads toggle; this shortcut can be enabled alone).
-local FLASH = "etech-teleporter-explosion"
-local function flash_at(surface, position)
-  if prototypes.entity[FLASH] then
-    surface.create_entity{name = FLASH, position = position}
-  end
-end
+local flash_at = common.flash_at
 
--- Teleport `player` next to `target`. Uses the target's physical position and
--- surface so it works while the target is in remote view or on another
--- surface (character cross-surface teleport is supported since 2.0).
+-- Ask the target first (unless consent is off or they already answered
+-- "always"), then jump. The teleport itself lives in teleport-common so the
+-- deferred "yes" from the prompt runs exactly the same code.
 local function teleport_to(player, target)
-  local surface = target.physical_surface or target.surface
-  local pos = target.physical_position or target.position
-  local from_surface = player.physical_surface or player.surface
-  local from_position = player.physical_position or player.position
-  local ok, result = common.teleport_player(player, surface, pos)
-  if ok then
-    flash_at(from_surface, from_position)
-    flash_at(surface, result)
-    common.play_sound(player)
-    player.print({"etech-tp2p-done", target.name})
-  elseif result == "train" then
-    player.print({"etech-tp-in-train"})
+  local verdict = common.request_teleport(player, target)
+  if verdict == "allowed" then
+    common.do_player_teleport(player, target)
+  elseif verdict == "pending" then
+    player.print({"etech-tp-consent-asked", target.name})
+  elseif verdict == "busy" then
+    player.print({"etech-tp-consent-busy", target.name})
   else
-    player.print({"etech-tp2p-failed"})
+    player.print({"etech-tp-consent-refused", target.name})
   end
 end
 
@@ -102,6 +91,8 @@ local function open_picker(player, others, body)
   pusher.style.horizontally_stretchable = true
   pusher.style.vertically_stretchable = true
   pusher.drag_target = frame
+  title_flow.add{type = "sprite-button", name = SETTINGS, style = "frame_action_button",
+    sprite = "utility/preset", tooltip = {"etech-tp-consent-settings-tooltip"}}
   title_flow.add{type = "sprite-button", name = CLOSE, style = "frame_action_button", sprite = "utility/close"}
   if body then
     frame.add{
@@ -148,7 +139,12 @@ local function on_gui_click(event)
   if not (el and el.valid) then return end
   local player = game.get_player(event.player_index)
   if not player then return end
-  if el.name == CANCEL or el.name == CLOSE then
+  -- Consent prompt / settings windows first: they belong to teleport-common
+  -- and are shown to players who never opened this picker.
+  if common.handle_gui_click(player, el) then return end
+  if el.name == SETTINGS then
+    common.open_consent_settings(player)
+  elseif el.name == CANCEL or el.name == CLOSE then
     close_picker(player)
   elseif el.name == BODY then
     close_picker(player)
@@ -166,7 +162,20 @@ end
 
 local function on_gui_closed(event)
   local el = event.element
-  if el and el.valid and el.name == FRAME then el.destroy() end
+  if not (el and el.valid) then return end
+  if el.name == FRAME then
+    el.destroy()
+    return
+  end
+  local player = game.get_player(event.player_index)
+  if player then common.handle_gui_closed(player, el) end
+end
+
+local function on_gui_selection_state_changed(event)
+  local el = event.element
+  if not (el and el.valid) then return end
+  local player = game.get_player(event.player_index)
+  if player then common.handle_gui_selection(player, el) end
 end
 
 local lib = {}
@@ -176,10 +185,16 @@ lib.events =
   [defines.events.on_lua_shortcut] = on_lua_shortcut,
   [defines.events.on_gui_click] = on_gui_click,
   [defines.events.on_gui_closed] = on_gui_closed,
-  -- Death bookkeeping for BOTH teleport features (see the header): this lib is
-  -- the only one registered unconditionally.
+  [defines.events.on_gui_selection_state_changed] = on_gui_selection_state_changed,
+  -- Death bookkeeping and teleport consent for BOTH teleport features (see the
+  -- header): this lib is the only one registered unconditionally.
   [defines.events.on_player_died] = common.on_player_died,
   [defines.events.on_character_corpse_expired] = common.on_character_corpse_expired,
+}
+
+lib.on_nth_tick =
+{
+  [60] = common.expire_consent_prompts,
 }
 
 return lib

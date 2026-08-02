@@ -190,6 +190,18 @@ local remote_hotkey =
   localised_description = {"etech-tp-remote-hotkey-description"},
 }
 
+-- One key, no window: straight to the pad you used last. The list is the
+-- right tool for picking a destination; going back where you just came from
+-- is not a choice worth a window.
+local jump_back_hotkey =
+{
+  type = "custom-input",
+  name = names.hotkeys.jump_back,
+  key_sequence = "SHIFT + R",
+  localised_name = {"etech-tp-jump-back-hotkey-name"},
+  localised_description = {"etech-tp-jump-back-hotkey-description"},
+}
+
 -- Invisible electric buffer placed on top of each pad by the control stage.
 -- Teleporting drains the DESTINATION pad's buffer, so an unpowered pad can't
 -- be teleported to (when an energy cost is configured). No collision, not
@@ -252,6 +264,18 @@ data:extend
   technology,
   hotkey,
   remote_hotkey,
+  jump_back_hotkey,
+  -- Everything the destination window can do that nothing on screen says:
+  -- starring, renaming, sorting, the remote and jump-back keys.
+  {
+    type = "tips-and-tricks-item",
+    name = "etech-teleporters",
+    tag = "[entity=" .. name .. "]",
+    category = "etech",
+    order = "c",
+    indent = 1,
+    trigger = { type = "research", technology = name },
+  },
   sticker,
   energy_interface,
   remote_shortcut
