@@ -105,6 +105,13 @@ Date: 2026-08-02
       leave the migration behind. Starred pads that predate this version are
       converted to ranked favorites when they are next read, for the same
       reason.
+    - Teleporters: the recently-used clock on a pad is an icon again. It was
+      drawn with "[img=quantity-time]", a sprite that has not existed since
+      2.0 - and an invalid sprite path does not error, it silently draws a
+      placeholder glyph, so a small mystery circle had been sitting in the pad
+      list looking deliberate. The clock, the home-pad flag and the express
+      arrow now come from sprites checked against what is actually loaded,
+      and fall back to plain text if one ever disappears again.
     - Factory terminal: opening a device through it no longer puts you in
       remote view. Remote view replaces your inventory panel with the
       ghost-cursor palette, so the window that opened next to a factory's

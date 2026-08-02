@@ -474,6 +474,28 @@ end
 -- ship name ("Icarus", not "platform-1"), then the planet prototype's
 -- localised name ("Nauvis", not "nauvis"), then the engine's localised
 -- name, then the raw name.
+-- Caption markers for the pad list. Every one is checked against the loaded
+-- sprites: "[img=quantity-time]" - inherited from the 1.1-era mod and used
+-- for the recently-used clock - has NOT existed since 2.0, and an invalid
+-- sprite path does not error, it draws a placeholder glyph. That placeholder
+-- sat in the list looking like a deliberate symbol until someone asked why
+-- the recent icon was missing (0.22.0). Anything unavailable falls back to
+-- text rather than to a mystery circle.
+local marker_cache
+local marker = function(sprite, fallback)
+  if not marker_cache then marker_cache = {} end
+  local cached = marker_cache[sprite]
+  if cached == nil then
+    cached = helpers.is_valid_sprite_path(sprite) and ("[img=" .. sprite .. "]") or fallback
+    marker_cache[sprite] = cached
+  end
+  return cached
+end
+
+local recent_marker = function() return marker("utility/clock", "~") end
+local home_marker = function() return marker("utility/spawn_flag", "H") end
+local express_marker = function() return marker("utility/go_to_arrow", "=>") end
+
 -- Is this one of Factorissimo's interior surfaces? Those are named
 -- "factory-floor-N" and carry dozens of unrelated factories, so "Nauvis" is
 -- the wrong answer and the raw name is no answer at all.
@@ -961,7 +983,7 @@ local make_teleporter_gui = function(player, source)
       map.style.vertically_stretchable = true
       local caption = name
       if recent[teleporter_entity.unit_number] then
-        caption = "[img=quantity-time] "..name
+        caption = recent_marker() .. " " .. name
       end
       if favorites[teleporter_entity.unit_number] then
         -- Number the stars by their place in the starred order, so the list
@@ -972,10 +994,10 @@ local make_teleporter_gui = function(player, source)
       -- and this pad's express target (CONTROL-click, only while standing on
       -- the pad that would send you there).
       if script_data.home[player.index] == teleporter_entity.unit_number then
-        caption = "⌂ "..caption
+        caption = home_marker() .. " " .. caption
       end
       if source_record and source_record.express == teleporter_entity.unit_number then
-        caption = "⇒ "..caption
+        caption = express_marker() .. " " .. caption
       end
       local label = inner_flow.add{type = "label", caption = caption}
       label.style.horizontally_stretchable = true
