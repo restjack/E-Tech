@@ -89,10 +89,9 @@ Date: 2026-08-02
     - Teleporters: a tips-and-tricks entry, because starring, renaming,
       sorting, the remote and the jump-back key were all invisible unless you
       read the mod page.
-    - Teleporters: "Starred + recent only" tick box above the pad list. Shows
-      just the pads you starred plus the up-to-8 you used recently, which on a
-      base with dozens of pads is the short list you actually travel between.
-      Remembered per player.
+    - Teleporters: "Starred only" tick box above the pad list, for bases where
+      the full list runs to dozens of pads. Starred pads plus the Return and
+      Body entries, nothing else. Remembered per player.
   Bugfixes:
     - FIXED A CRASH opening the teleporter list: "attempt to index field
       'express_pending' (a nil value)". Every table this version added to the
@@ -116,13 +115,19 @@ Date: 2026-08-02
       pad click-hint tooltips. Six lines of click actions are what you want
       once and clutter afterwards; the "not enough energy" explanation still
       shows on pads that are greyed out. Remembered per player.
-    - Teleporters: the recently-used clock on a pad is an icon again. It was
+    - Teleporters: the recently-used clock is gone from the pad list. It was
       drawn with "[img=quantity-time]", a sprite that has not existed since
       2.0 - and an invalid sprite path does not error, it silently draws a
       placeholder glyph, so a small mystery circle had been sitting in the pad
-      list looking deliberate. The clock, the home-pad flag and the express
-      arrow now come from sprites checked against what is actually loaded,
-      and fall back to plain text if one ever disappears again.
+      list looking deliberate. Rather than fix the icon, the marker is
+      retired: the list already sorts by recency, so a clock on half the tiles
+      said nothing the order did not. The home-pad flag and the express arrow
+      that remain are checked against the sprites actually loaded, and fall
+      back to plain text if one ever disappears.
+    - Teleporters: the Return and Body previews now actually show their
+      surface line. Buttons clip their children, so the line was being laid
+      out below the button's own edge and never drawn - which looked exactly
+      like the feature not working.
     - Factory terminal: opening a device through it no longer puts you in
       remote view. Remote view replaces your inventory panel with the
       ghost-cursor palette, so the window that opened next to a factory's

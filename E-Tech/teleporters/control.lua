@@ -494,7 +494,8 @@ local marker = function(sprite, fallback)
   return cached
 end
 
-local recent_marker = function() return marker("utility/clock", "~") end
+-- No recent marker: the list already sorts by recency, and a clock on half
+-- the tiles said nothing the order did not.
 local home_marker = function() return marker("utility/spawn_flag", "H") end
 local express_marker = function() return marker("utility/go_to_arrow", "=>") end
 
@@ -780,7 +781,12 @@ local make_teleporter_gui = function(player, source)
 
   local add_preview_button = function(parent, view_spec, caption, tooltip, action, subcaption)
     local button = parent.add{type = "button"}
-    button.style.height = special_size + 32 + 8
+    -- Buttons CLIP their children, so the height has to account for every row
+    -- that goes inside: view + caption, plus the surface line when there is
+    -- one. Without the extra 22 the surface line was added, laid out below the
+    -- button's edge, and simply never drawn - which looked exactly like the
+    -- code not running.
+    button.style.height = special_size + 32 + 8 + (subcaption and 22 or 0)
     button.style.width = special_size + 8
     button.style.left_padding = 0
     button.style.right_padding = 0
@@ -956,8 +962,7 @@ local make_teleporter_gui = function(player, source)
         show = not (hide_platforms and pad_surface.platform)
       end
       if show and pinned_only then
-        local unit_number = teleporter_entity.unit_number
-        show = (favorites[unit_number] or recent[unit_number]) and true or false
+        show = favorites[teleporter_entity.unit_number] and true or false
       end
       if show then
       local position = teleporter_entity.position
@@ -1006,9 +1011,6 @@ local make_teleporter_gui = function(player, source)
       map.style.horizontally_stretchable = true
       map.style.vertically_stretchable = true
       local caption = name
-      if recent[teleporter_entity.unit_number] then
-        caption = recent_marker() .. " " .. name
-      end
       if favorites[teleporter_entity.unit_number] then
         -- Number the stars by their place in the starred order, so the list
         -- says WHICH favorite this is rather than just that it is one.
