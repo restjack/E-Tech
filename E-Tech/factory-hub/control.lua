@@ -37,6 +37,7 @@ local SENSOR_NAME = "etech-factory-sensor"
 local FLUID_OUTLET_NAME = "etech-factory-fluid-outlet"
 local FLUID_INLET_NAME = "etech-factory-fluid-inlet"
 local FLUID_SENSOR_NAME = "etech-factory-fluid-sensor"
+local EXPORT_FILTER_NAME = "etech-factory-export-filter"
 local PANEL_NAME = "etech-hub-panel"
 local INLET_PANEL_NAME = "etech-inlet-panel"
 local AUTO_GROUP = "etech-inlet-auto"
@@ -104,6 +105,7 @@ local KINDS = {
     [FLUID_OUTLET_NAME] = "fluid-outlet",
     [FLUID_INLET_NAME] = "fluid-inlet",
     [FLUID_SENSOR_NAME] = "fluid-sensor",
+    [EXPORT_FILTER_NAME] = "export-filter",
 }
 
 -- item|quality key convention used across caches, wants tables and GUI tags
@@ -208,7 +210,17 @@ local function register_device(entity, copy_from)
     local record = {
         entity = entity,
         kind = KINDS[entity.name],
-        filters = { mode = 1, items = {}, match_quality = false },
+        -- Mode 1 is "no filtering" for every device except the export filter,
+        -- whose whole reason to exist is to restrict something: a freshly
+        -- placed one defaults to "these never leave", so listing an item in it
+        -- does what it looks like it does without a second step. Shipping the
+        -- shared default here meant the device silently did nothing until you
+        -- opened it and changed the dropdown.
+        filters = {
+            mode = (KINDS[entity.name] == "export-filter") and 3 or 1,
+            items = {},
+            match_quality = false,
+        },
         guards = {},
         pins = {},
     }
@@ -727,24 +739,81 @@ end
 --
 -- Kept in hub_data keyed by factory id, not on the device, for the same reason:
 -- rebuild or replace the outlet and the factory's own rule survives.
-local function factory_filters(id)
-    local data = hub_data()
-    data.factory_filters = data.factory_filters or {}
-    local filters = data.factory_filters[id]
-    if not filters then
-        filters = { mode = 1, items = {}, match_quality = false }
-        data.factory_filters[id] = filters
+-- The rule is carried by a Factory export filter built INSIDE the factory, not
+-- by a list on the outlet. It belongs to the factory: replace the outlet, or
+-- have two of them, and the factory's own rule should not move or vanish.
+--
+-- The device is a constant combinator and its OWN signal list is the item list.
+-- That hands the whole item-picking problem to the game - logistic groups,
+-- quality on each entry, copy-paste between combinators, blueprints - and
+-- leaves E-Tech to add only the two things the vanilla window has nowhere for:
+-- whitelist vs blacklist, and whether quality is binding.
+local function combinator_filter_set(entity, match_quality)
+    local behavior = entity.get_or_create_control_behavior()
+    local set, seen = { names = {}, any = {}, keys = {} }, false
+    for _, section in pairs(behavior and behavior.sections or {}) do
+        if section.active then
+            for _, filter in pairs(section.filters) do
+                local value = filter.value
+                if value and value.name
+                    and (value.type == nil or value.type == "item") then
+                    seen = true
+                    add_to_set(set, value.name, match_quality and value.quality or nil)
+                end
+            end
+        end
     end
-    return filters
+    return seen and set or nil
 end
 
--- nil when a factory has no rule, so the pull pass skips the work entirely
--- instead of evaluating a permissive filter once per stack.
-local function factory_filter_active(id)
-    local data = hub_data()
-    local filters = data.factory_filters and data.factory_filters[id]
-    if not filters or (filters.mode or 1) == 1 then return nil end
-    return filters, filter_set_of(filters)
+-- Which factory each export filter belongs to. Resolved from the DEVICE side -
+-- walk the handful of registered filters and ask Factorissimo which factory
+-- surrounds each one - rather than by looking for a filter inside every factory
+-- while the chest cache rebuilds. The chest cache is deliberately allowed to be
+-- stale (see ensure_chest_cache), which is fine for chests because every entry
+-- is re-validated on use, and NOT fine for a rule: a stale cache means a filter
+-- you just placed silently does nothing, which is indistinguishable from a bug.
+-- There are never many of these, so resolving them per pass costs nothing.
+local function export_filters_by_factory()
+    local out = {}
+    for unit, device in pairs(hub_data().hubs) do
+        if device.kind == "export-filter" and device.entity and device.entity.valid then
+            local entity = device.entity
+            local factory = factorissimo_call("find_surrounding_factory_by_surface_index",
+                entity.surface.index, entity.position)
+            if factory and factory.id then out[factory.id] = unit end
+        end
+    end
+    return out
+end
+
+-- nil when a factory has no filter device, or has one with an empty list, so the
+-- pull pass skips the work rather than evaluating a permissive filter once per
+-- stack. `cache` memoises for one pass: one factory's rule is consulted for
+-- every chest in it.
+local function factory_filter_active(record, factory_id, cache)
+    if cache.by_factory == nil then cache.by_factory = export_filters_by_factory() end
+    local hit = cache[factory_id]
+    if hit ~= nil then
+        if hit == false then return nil end
+        return hit.filters, hit.set
+    end
+    local device = hub_data().hubs[cache.by_factory[factory_id] or 0]
+    if not (device and device.entity and device.entity.valid) then
+        cache[factory_id] = false
+        return nil
+    end
+    local filters = {
+        mode = device.filters.mode or 3,
+        match_quality = device.filters.match_quality,
+    }
+    local set = combinator_filter_set(device.entity, filters.match_quality)
+    if not set then
+        cache[factory_id] = false
+        return nil
+    end
+    cache[factory_id] = { filters = filters, set = set }
+    return filters, set
 end
 
 -- Timestamped lockout tables (record.pull_cooldown / record.storage_cooldown).
@@ -1620,6 +1689,7 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
     end
     if next(need) == nil then return 0, by_key end
 
+    local policy_cache = {}
     for _, entry in pairs(chests) do
         if next(need) == nil then break end
         local chest = entry.chest
@@ -1629,7 +1699,8 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
             local storage_gated = g.no_storage_repull and entry.mode == "storage"
             -- resolved per chest, but only costs anything for factories that
             -- actually have a rule set
-            local ffilters, fset = factory_filter_active(entry.factory.id)
+            local ffilters, fset =
+                factory_filter_active(record, entry.factory.id, policy_cache)
             if inv and holds_any(inv, need) then
                 for i = 1, #inv do
                     local stack = inv[i]
@@ -2717,22 +2788,6 @@ local function build_panel(player)
     fscroll.style.maximal_height = 260
     fscroll.add {type = "table", name = "frows", column_count = 2}
 
-    factories.add {type = "line", name = "ffilter_sep"}
-    factories.add {type = "label", name = "ffilter_label",
-        caption = {"gui-etech-hub.factory-filter"},
-        tooltip = {"gui-etech-hub.factory-filter-help"}}
-    factories.add {type = "drop-down", name = "etech-hub-ffilter-factory",
-        tooltip = {"gui-etech-hub.factory-filter-help"}}
-    factories.add {type = "drop-down", name = "etech-hub-ffilter-mode", items = MODE_ITEMS}
-    local fslots = factories.add {type = "table", name = "ffilter_slots",
-        column_count = FILTER_COLUMNS}
-    for i = 1, FILTER_SLOTS do
-        fslots.add {type = "choose-elem-button", name = "etech-hub-ffilter-" .. i,
-            elem_type = "item-with-quality"}
-    end
-    factories.add {type = "checkbox", name = "etech-hub-ffilter-quality", state = false,
-        caption = {"gui-etech-hub.match-quality"},
-        tooltip = {"gui-etech-hub.match-quality-tooltip"}}
     return panel
 end
 
@@ -2821,30 +2876,6 @@ local function load_panel_settings(player, record)
     picker.selected_index = selected
     tabs.contents.views["etech-hub-sort"].selected_index = record.grid_sort or 1
 
-    -- Per-factory filter block: the same id list, and the selected factory is
-    -- remembered on the record so reopening the panel lands where you left off.
-    local flabels = {{"gui-etech-hub.factory-filter-pick"}}
-    for i, id in ipairs(ids) do flabels[i + 1] = labels[i + 1] end
-    local fpicker = factories["etech-hub-ffilter-factory"]
-    fpicker.items = flabels
-    local fchosen = 1
-    for i, id in ipairs(ids) do
-        if id == record.ffilter_id then fchosen = i + 1 end
-    end
-    if fchosen == 1 then record.ffilter_id = nil end
-    fpicker.selected_index = fchosen
-    local editing = record.ffilter_id and factory_filters(record.ffilter_id)
-        or { mode = 1, items = {}, match_quality = false }
-    factories["etech-hub-ffilter-mode"].selected_index = editing.mode or 1
-    factories["etech-hub-ffilter-mode"].enabled = record.ffilter_id ~= nil
-    factories["etech-hub-ffilter-quality"].state = editing.match_quality == true
-    factories["etech-hub-ffilter-quality"].enabled = record.ffilter_id ~= nil
-    for i = 1, FILTER_SLOTS do
-        local btn = factories.ffilter_slots["etech-hub-ffilter-" .. i]
-        btn.elem_value = filter_elem_value(editing.items[i])
-        btn.tooltip = filter_slot_tooltip(editing.items[i])
-        btn.enabled = record.ffilter_id ~= nil
-    end
     for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do
         local factory = usable[i]
         local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
@@ -3191,6 +3222,56 @@ local function build_sensor_panel(player, record)
         tooltip = {"gui-etech-hub.match-quality-tooltip"}}
 end
 
+-- GUI: export filter panel -----------------------------------------------------
+-- Deliberately tiny. The item list is the combinator's own signal list, edited
+-- in the vanilla window this panel sits beside, so all that is needed here is
+-- the part the vanilla window has nowhere to put: whether that list is a
+-- whitelist or a blacklist, and whether the quality on each entry is binding.
+
+local EXPORT_PANEL_NAME = "etech-export-filter-panel"
+
+local EXPORT_MODE_ITEMS = {
+    {"gui-etech-hub.export-mode-off"},
+    {"gui-etech-hub.export-mode-only"},
+    {"gui-etech-hub.export-mode-block"},
+}
+
+local function build_export_panel(player, record)
+    local old_panel = player.gui.relative[EXPORT_PANEL_NAME]
+    if old_panel then old_panel.destroy() end
+    local panel = player.gui.relative.add {
+        type = "frame",
+        name = EXPORT_PANEL_NAME,
+        direction = "vertical",
+        caption = {"gui-etech-hub.export-title"},
+        anchor = {
+            gui = defines.relative_gui_type.constant_combinator_gui,
+            position = defines.relative_gui_position.right,
+            names = {EXPORT_FILTER_NAME},
+        },
+    }
+    local inner = panel.add {
+        type = "frame",
+        name = "inner",
+        style = "inside_shallow_frame_with_padding",
+        direction = "vertical",
+    }
+    local label = inner.add {type = "label", name = "export_help",
+        caption = {"gui-etech-hub.export-help"}}
+    label.style.single_line = false
+    label.style.maximal_width = 300
+    local mode = inner.add {type = "drop-down", name = "etech-hub-export-mode",
+        items = EXPORT_MODE_ITEMS,
+        tooltip = {"gui-etech-hub.export-mode-tooltip"}}
+    -- 3 (blacklist) is the default because "things I listed stay in here" is
+    -- how a box you drop into a factory and fill with item names reads.
+    mode.selected_index = record.filters.mode or 3
+    inner.add {type = "checkbox", name = "etech-hub-match-quality",
+        state = record.filters.match_quality == true,
+        caption = {"gui-etech-hub.match-quality"},
+        tooltip = {"gui-etech-hub.match-quality-tooltip"}}
+end
+
 -- GUI: fluid outlet panel --------------------------------------------------------
 
 local FLUID_PANEL_NAME = "etech-fluid-panel"
@@ -3300,7 +3381,7 @@ local function on_gui_opened(event)
     if not (entity and entity.valid) then return end
     local kind = KINDS[entity.name]
     if not (kind == "outlet" or kind == "inlet" or kind == "sensor"
-        or kind == "fluid-outlet") then return end
+        or kind == "fluid-outlet" or kind == "export-filter") then return end
     if not factorissimo_available() then return end
     local player = game.get_player(event.player_index)
     if not player then return end
@@ -3318,6 +3399,8 @@ local function on_gui_opened(event)
         refresh_inlet_panel(player, record)
     elseif kind == "sensor" then
         build_sensor_panel(player, record)
+    elseif kind == "export-filter" then
+        build_export_panel(player, record)
     else
         build_fluid_panel(player, record)
     end
@@ -3349,21 +3432,9 @@ local function on_gui_selection_state_changed(event)
         refresh_grid(player, record)
         return
     end
-    if name == "etech-hub-ffilter-factory" or name == "etech-hub-ffilter-mode" then
+    if name == "etech-hub-export-mode" then
         local record = open_record(event.player_index)
-        local player = game.get_player(event.player_index)
-        if not (record and player) then return end
-        if name == "etech-hub-ffilter-mode" then
-            if record.ffilter_id then
-                factory_filters(record.ffilter_id).mode = event.element.selected_index
-            end
-            return
-        end
-        local index = event.element.selected_index
-        record.ffilter_id = index > 1 and (record.grid_factory_ids or {})[index - 1] or nil
-        -- rebuild so the slots load that factory's list (invalidates the element)
-        load_panel_settings(player, record)
-        refresh_grid(player, record)
+        if record then record.filters.mode = event.element.selected_index end
         return
     end
     if name == "etech-hub-min-quality" then
@@ -3393,13 +3464,6 @@ local function on_gui_elem_changed(event)
         if player then refresh_fluid_panel(player, record) end
         return
     end
-    local fslot = event.element.name:match("^etech%-hub%-ffilter%-(%d+)$")
-    if fslot then
-        if record.ffilter_id then
-            factory_filters(record.ffilter_id).items[tonumber(fslot)] = event.element.elem_value
-        end
-        return
-    end
     local slot = event.element.name:match("^etech%-hub%-filter%-(%d+)$")
     if slot then
         record.filters.items[tonumber(slot)] = event.element.elem_value
@@ -3414,10 +3478,6 @@ local function on_gui_checked_state_changed(event)
     if not record then return end
     if name == "etech-hub-storage" then
         record.pull_storage = event.element.state
-    elseif name == "etech-hub-ffilter-quality" then
-        if record.ffilter_id then
-            factory_filters(record.ffilter_id).match_quality = event.element.state
-        end
     elseif name == "etech-hub-match-quality" then
         record.filters.match_quality = event.element.state
         record.sensor_snapshot = nil
@@ -3588,7 +3648,15 @@ local function collect_records()
             elseif record.kind == "fluid-outlet" or record.kind == "fluid-inlet"
                 or record.kind == "fluid-sensor" then
                 fluids[#fluids + 1] = record
-            else sensors[#sensors + 1] = record end
+            elseif record.kind == "sensor" then
+                sensors[#sensors + 1] = record
+            end
+            -- Anything else (the export filter) is passive configuration and
+            -- gets no work pass at all. This used to be an `else` that swept
+            -- every unrecognised kind into the sensor list, so the export
+            -- filter was run as a sensor and had the player's item list
+            -- overwritten with interior stock totals every two seconds - the
+            -- rule looked empty no matter what you put in it.
         else
             data.hubs[unit_number] = nil
         end
@@ -3839,7 +3907,7 @@ local function adopt_existing()
     end
     for _, player in pairs(game.players) do
         for _, panel_name in pairs({PANEL_NAME, INLET_PANEL_NAME, "etech-sensor-panel",
-                                    "etech-fluid-panel"}) do
+                                    "etech-fluid-panel", "etech-export-filter-panel"}) do
             local panel = player.gui.relative[panel_name]
             if panel then panel.destroy() end
         end

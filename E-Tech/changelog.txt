@@ -1,4 +1,34 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.0
+Date: 2026-08-09
+  Features:
+    - Factory export filter: a new device built INSIDE a Factorissimo factory
+      that says what may leave it. This replaces the per-factory filter list
+      that briefly lived on the outlet's Factories tab in 0.26.0. The rule
+      belongs to the factory, not to whichever outlet happens to be reading it,
+      so it should be set at the factory - replace the outlet, or blueprint a
+      new one, and the rule still applies.
+      It is a constant combinator, and its OWN signal list is the item list.
+      That hands item picking back to the game - logistic groups, quality on
+      each entry, copy-paste between combinators, blueprints - and leaves E-Tech
+      to add only what the vanilla window has nowhere to put: whether the list
+      is "only these may leave" or "these never leave", and whether the quality
+      on each entry is binding. Blacklist is the default, since a box you drop
+      into a factory and fill with item names reads as "these stay here".
+      It applies on top of the outlet's own filters and the minimum quality, so
+      an item has to pass all of them - which is the point: one factory can hold
+      on to its recycler feedstock while every other factory on the surface goes
+      on exporting the same item freely.
+      Because the list lives on the combinator rather than in E-Tech's private
+      storage, this is also the first GUI-driven feature the runtime harness can
+      actually test: the suite now asserts that a listed item stays inside while
+      an unlisted one in the same chest still leaves. That test earned its keep
+      immediately - it caught the device being run as a SENSOR (every
+      unrecognised device kind fell through to the sensor list, so the player's
+      item list was overwritten with interior stock totals every two seconds and
+      the rule looked empty whatever you put in it) and a freshly placed one
+      defaulting to "no restriction" instead of blacklist.
+---------------------------------------------------------------------------------------------------
 Version: 0.26.1
 Date: 2026-08-09
   Bugfixes:

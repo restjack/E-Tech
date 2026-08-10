@@ -43,6 +43,8 @@ local OUT_WANT = 60    -- what the outside requester asks for
 local IN_WANT = 40     -- what the interior requester asks for
 local SPARE_COUNT = 50 -- unwanted items pushed into the outlet, to be given back
 local CONN_STOCK = 100 -- iron parked in the connection chest inside the factory
+local KEPT = "copper-plate" -- listed in the export filter, so it must NOT leave
+local KEPT_STOCK = 150
 
 local SETTLE_TICK = 300  -- world is built and running by here
 local ASSERT_TICK = 1500 -- 12.5 s: ~12 hub passes plus bot flight time
@@ -156,6 +158,15 @@ local function build_world()
         force = force, raise_built = true,
     }
     request_for(t.out_requester, IRON, OUT_WANT)
+    -- something outside genuinely wants the kept item: without the filter the
+    -- outlet would happily supply it, which is what makes the assertion mean
+    -- something
+    local kept_requester = surface.create_entity {
+        name = "requester-chest", position = {OUT_REQUESTER[1], OUT_REQUESTER[2] + 3},
+        force = force, raise_built = true,
+    }
+    t.kept_requester = kept_requester
+    if kept_requester then request_for(kept_requester, KEPT, 50) end
 
     t.outlet = surface.create_entity {
         name = "etech-factory-provider-hub", position = OUTLET,
@@ -170,6 +181,31 @@ local function build_world()
         name = "etech-factory-sensor", position = SENSOR,
         force = force, raise_built = true,
     }
+
+    -- Export filter: the rule lives inside the factory, on a combinator whose
+    -- own signal list is the item list - which is precisely why this is
+    -- testable at all. Everything else E-Tech gates behind a GUI lives in its
+    -- private storage and cannot be driven from here.
+    t.export_filter = inside.create_entity {
+        name = "etech-factory-export-filter", position = {ix - 4, iy},
+        force = force, raise_built = true,
+    }
+    if t.export_filter then
+        local behavior = t.export_filter.get_or_create_control_behavior()
+        local section = behavior.get_section(1) or behavior.add_section()
+        section.set_slot(1, {
+            value = { type = "item", name = KEPT, quality = "normal", comparator = "=" },
+            min = 1,
+        })
+    end
+    -- A provider chest holding the kept item AND an item that may still leave,
+    -- so a pass means "one item held back", not "the factory stopped
+    -- exporting".
+    t.mixed = inside.create_entity {
+        name = "passive-provider-chest", position = {ix, iy - 3},
+        force = force, raise_built = true,
+    }
+    if t.mixed then t.mixed.insert {name = KEPT, count = KEPT_STOCK} end
 
     -- Fluid half: a plain storage tank inside with something in it, and a fluid
     -- sensor outside that should end up broadcasting it. A plain storage tank is
@@ -213,7 +249,8 @@ local function build_world()
             name = "requester-chest", position = outside_position,
             force = force, raise_built = true,
         }
-        if t.conn_inside then t.conn_inside.insert {name = IRON, count = CONN_STOCK} end
+
+    if t.conn_inside then t.conn_inside.insert {name = IRON, count = CONN_STOCK} end
         if t.conn_outside then request_for(t.conn_outside, IRON, OUT_WANT) end
     end
 
@@ -288,6 +325,22 @@ local function diagnostics(t)
     log("[ETECH-TEST] DIAG outlet network=" .. tostring(net ~= nil) ..
         (net and (" robots=" .. #net.robots ..
                   " iron=" .. net.get_item_count(IRON)) or ""))
+    if t.export_filter and t.export_filter.valid then
+        local behavior = t.export_filter.get_or_create_control_behavior()
+        local sections = behavior and behavior.sections or {}
+        local n, first = 0, "none"
+        for _, section in pairs(sections) do
+            for _, filter in pairs(section.filters) do
+                n = n + 1
+                if filter.value and first == "none" then
+                    first = tostring(filter.value.name) .. "/" .. tostring(filter.value.type)
+                        .. " active=" .. tostring(section.active)
+                end
+            end
+        end
+        log("[ETECH-TEST] DIAG export filter sections=" .. #sections ..
+            " filters=" .. n .. " first=" .. first)
+    end
     if t.sensor and t.sensor.valid then
         local behavior = t.sensor.get_control_behavior()
         local section = behavior and behavior.get_section(1)
@@ -341,6 +394,17 @@ assert_all = function(t)
     end
     check("fluid sensor broadcasts the interior tanks", fluid_signal > 0,
         FLUID .. " signal reads " .. fluid_signal)
+
+        if t.export_filter and t.mixed then
+        local held = count(t.mixed, KEPT)
+        local delivered = count(t.kept_requester, KEPT)
+        check("export filter kept its item inside the factory",
+            held >= KEPT_STOCK and delivered <= 0,
+            held .. " of " .. KEPT_STOCK .. " left inside, " .. delivered ..
+            " reached the outside requester")
+    else
+        check("export filter placed", false)
+    end
 
     if t.conn_inside then
         local left = count(t.conn_inside, IRON)

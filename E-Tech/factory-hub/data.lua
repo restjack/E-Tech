@@ -22,6 +22,9 @@ local hubTint = { r = 1, g = 0.6, b = 0.15, a = 1 }
 -- needs a tint of its own or the two are indistinguishable once placed. Cyan
 -- against the hub's amber.
 local fluidTint = { r = 0.25, g = 0.75, b = 1, a = 1 }
+-- The export filter lives INSIDE a factory, where the hub's amber would read as
+-- "one of the outside devices got in here somehow". Green.
+local filterTint = { r = 0.35, g = 0.9, b = 0.4, a = 1 }
 
 local function tinted_icons(icon, tint)
     return {{ icon = icon, icon_size = 64, tint = tint or hubTint }}
@@ -126,6 +129,26 @@ fluid_sensor_item.place_result = "etech-factory-fluid-sensor"
 fluid_sensor_item.order = fluid_sensor_item.order .. "-fluid"
 fluid_sensor_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", fluidTint)
 
+-- Factory export filter -------------------------------------------------------
+-- Placed INSIDE a factory. Its own constant-combinator signal list is the
+-- filter, which means the item list gets the game's native UI - logistic groups,
+-- quality picking, copy-paste between combinators - for free, and E-Tech only
+-- has to add the two things the vanilla window has nowhere to put: whether the
+-- list is a whitelist or a blacklist, and whether quality is binding.
+local export_filter = table.deepcopy(sensor)
+export_filter.name = "etech-factory-export-filter"
+export_filter.minable.result = "etech-factory-export-filter"
+export_filter.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", filterTint)
+for _, direction in pairs({"north", "east", "south", "west"}) do
+    export_filter.sprites[direction].layers[1].tint = filterTint
+end
+
+local export_filter_item = table.deepcopy(sensor_item)
+export_filter_item.name = "etech-factory-export-filter"
+export_filter_item.place_result = "etech-factory-export-filter"
+export_filter_item.order = export_filter_item.order .. "-export"
+export_filter_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", filterTint)
+
 -- Recipes + technology --------------------------------------------------------
 -- (the hidden "etech-hub-energy" buffer entity from the removed
 -- energy-per-item setting is gone; the engine deletes any leftovers in old
@@ -154,6 +177,7 @@ data:extend({
     inlet, inlet_item,
     sensor, sensor_item,
     fluid_sensor, fluid_sensor_item,
+    export_filter, export_filter_item,
     fluid_outlet, fluid_outlet_item,
     fluid_inlet, fluid_inlet_item,
     {
@@ -226,6 +250,17 @@ data:extend({
     },
     {
         type = "recipe",
+        name = "etech-factory-export-filter",
+        enabled = false,
+        energy_required = 5,
+        ingredients = {
+            {type = "item", name = "constant-combinator", amount = 1},
+            {type = "item", name = "electronic-circuit", amount = 5},
+        },
+        results = {{type = "item", name = "etech-factory-export-filter", amount = 1}},
+    },
+    {
+        type = "recipe",
         name = "etech-factory-fluid-sensor",
         enabled = false,
         energy_required = 5,
@@ -246,6 +281,7 @@ data:extend({
             { type = "unlock-recipe", recipe = "etech-factory-inlet" },
             { type = "unlock-recipe", recipe = "etech-factory-sensor" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-sensor" },
+            { type = "unlock-recipe", recipe = "etech-factory-export-filter" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-outlet" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-inlet" },
         },
