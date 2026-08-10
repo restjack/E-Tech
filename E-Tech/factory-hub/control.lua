@@ -842,6 +842,9 @@ local function ensure_export_filter(factory)
     entity.destructible = false
     entity.rotatable = false
     register_device(entity)
+    -- known here for free; saves the lookup above ever running for this one
+    local record = hub_data().hubs[entity.unit_number]
+    if record then record.factory_id = factory.id end
     return entity
 end
 
@@ -855,10 +858,20 @@ local function export_filters_by_factory()
     local out = {}
     for unit, device in pairs(hub_data().hubs) do
         if device.kind == "export-filter" and device.entity and device.entity.valid then
-            local entity = device.entity
-            local factory = factorissimo_call("find_surrounding_factory_by_surface_index",
-                entity.surface.index, entity.position)
-            if factory and factory.id then out[factory.id] = unit end
+            -- Resolved ONCE and remembered on the record. A filter cannot move
+            -- between factories, so re-asking Factorissimo every pass is a
+            -- remote call per filter per pass that always returns the same
+            -- answer: on a base with 150 factories that is ~300 calls every two
+            -- seconds, forever, for information that never changes.
+            local id = device.factory_id
+            if not id then
+                local entity = device.entity
+                local factory = factorissimo_call("find_surrounding_factory_by_surface_index",
+                    entity.surface.index, entity.position)
+                id = factory and factory.id
+                device.factory_id = id
+            end
+            if id then out[id] = unit end
         end
     end
     return out

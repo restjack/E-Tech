@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.31.2
+Date: 2026-08-09
+  Optimizations:
+    - Each export filter's factory is resolved once and remembered, instead of
+      asking Factorissimo which factory surrounds it on every pass. The lookup
+      ran once per filter per maintenance pass AND once per filter per outlet
+      pull pass, so a base with 150 factories was making roughly 300 remote
+      calls every two seconds, forever, for an answer that cannot change - a
+      filter is built inside one factory and stays there. Same shape as the
+      network_wants scan the 2026-07-31 audit cut.
+---------------------------------------------------------------------------------------------------
 Version: 0.31.1
 Date: 2026-08-09
   Bugfixes:
