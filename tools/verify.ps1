@@ -122,6 +122,13 @@ write-data=$($userData -replace '\\', '/')
             New-Item -ItemType Directory -Force -Path $liveOutput | Out-Null
             Copy-Item $dump $liveOutput -Force
         }
+        # Same reasoning as verify-matrix.ps1: a silent non-load looks exactly
+        # like a clean run. Prove the mod was actually in the dump.
+        $info = Get-Content (Join-Path $mod "info.json") -Raw | ConvertFrom-Json
+        if (-not (Select-String -Path $log -Pattern "Loading mod E-Tech $($info.version)" -Quiet)) {
+            Write-Host "dump-data did NOT load E-Tech $($info.version) - is it disabled in the live mods folder?"
+            $fail++
+        }
         $errors = Select-String -Path $log -Pattern "^\s*[\d.]+ Error" -CaseSensitive
         if ($errors) {
             Write-Host "dump-data ERRORS:"; $errors | ForEach-Object Line; $fail++

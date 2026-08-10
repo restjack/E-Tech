@@ -152,7 +152,20 @@ foreach ($name in $selected) {
         # take a few lines of trailing context or the reason is invisible.
         $errors = Select-String -Path $log -Pattern "^\s*[\d.]+ Error" -CaseSensitive -Context 0, 4
     }
-    if ($errors) {
+    # "No errors" is not "it loaded". A mod that is present but disabled - which
+    # is what a mod-list.json slip produces - loads nothing and logs nothing,
+    # and this check would have called that a clean pass. Assert E-Tech's own
+    # load line is actually in the log. (Class of bug found by the Memory
+    # Storage session, which lost half an hour to two valid zips sitting
+    # ignored because mod-list.json said enabled:false.)
+    $loaded = $false
+    if (Test-Path $log) {
+        $loaded = [bool](Select-String -Path $log -Pattern "Loading mod E-Tech $($info.version)" -Quiet)
+    }
+    if (-not $loaded -and -not $errors) {
+        Write-Host "  FAILED: E-Tech $($info.version) never loaded (no errors either - disabled?)"
+        $failed += $name
+    } elseif ($errors) {
         Write-Host "  FAILED:"
         foreach ($e in $errors) {
             Write-Host "    $($e.Line)"
