@@ -1,4 +1,26 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.31.0
+Date: 2026-08-09
+  Changes:
+    - The export rule moves back onto a device of E-Tech's own, built into every
+      factory beside the interior power pole. Riding on Factorissimo's overlay
+      controller removed the placement question and added two of its own: the
+      controller only exists once the interior display upgrade is researched,
+      and anything in an active section of it is painted on the outside of the
+      building. Our own entity has neither - nothing else reads its sections, so
+      there is nothing to leak, and every factory has one regardless of research.
+      Placement is solved rather than avoided: no collision box and one fixed
+      tile beside the pole, so it cannot be blocked, cannot block, and is never
+      in a doorway. The searching versions in 0.28.1 and 0.29.0 were what put it
+      in odd places; that approach is gone for good.
+      Its own signal list is still the item list, so item picking stays the
+      game's job. Default is still "No restriction", and quality still always
+      binds.
+    - The panel text is three lines shorter. It explained quality-per-signal,
+      which is a standard part of the game and visible in the picker, and it
+      explained a ticked/unticked distinction that only existed while the rule
+      lived on somebody else's combinator.
+---------------------------------------------------------------------------------------------------
 Version: 0.30.2
 Date: 2026-08-09
   Changes:

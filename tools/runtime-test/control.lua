@@ -211,7 +211,7 @@ local function build_world()
     force.technologies["factory-connection-type-chest"].researched = true
     -- The export rule rides on Factorissimo's overlay controller, which only
     -- exists once this upgrade is researched.
-    force.technologies["factory-interior-upgrade-display"].researched = true
+    force.technologies["factory-interior-upgrade-display"].researched = true -- overlay icons
     local port
     for _, connection in pairs(factory.layout.connections or {}) do
         -- plain connections only; the quality-gated ports need the quality
@@ -265,17 +265,12 @@ script.on_nth_tick(60, function()
     if not t.rule_set then
         local found = t.inside_surface and t.inside_surface.valid
             and t.inside_surface.find_entities_filtered {
-                name = "factory-overlay-controller", limit = 1 }[1]
+                name = "etech-factory-export-filter", limit = 1 }[1]
         if found then
             local behavior = found.get_or_create_control_behavior()
-            -- The rule lives in its own section, created INACTIVE so
-            -- Factorissimo does not paint it on the building's exterior.
-            local section
-            for _, existing in pairs(behavior.sections or {}) do
-                if existing.group == "etech-export" then section = existing end
-            end
-            section = section or behavior.add_section("etech-export")
-            section.active = false
+            -- The device is E-Tech's own now, so its sections are ours alone -
+            -- no group name to agree on and nothing else reading them.
+            local section = behavior.get_section(1) or behavior.add_section()
             section.set_slot(1, {
                 value = { type = "item", name = KEPT, quality = "normal", comparator = "=" },
                 min = 1,
