@@ -18,14 +18,23 @@ $version = $info.version
 $root = "$name`_$version"
 $mods = Join-Path $env:APPDATA "Factorio\mods"
 $zip = Join-Path $mods "$root.zip"
+# Built to a temp name in the same folder and renamed into place at the end.
+# Writing the zip directly under its real name leaves a window - seconds, but
+# real - where the mods folder holds a half-written archive, and a Factorio
+# launched in that window fails with "Reading file info in package ... failed".
+# Watched exactly that happen to another mod being rebuilt while Eli launched.
+# A rename within one volume is atomic, so the game only ever sees the old
+# complete zip or the new complete one.
+$zipTemp = Join-Path $mods "$root.zip.building"
 
+if (Test-Path $zipTemp) { Remove-Item -Force $zipTemp }
 if (Test-Path $zip) { Remove-Item -Force $zip }
 
 # Files to package. Excludes build script, docs, and the releases archive.
 $excludeFiles = @("build.ps1", "AAI-CHANGE-INVENTORY.md")
 $excludeDirs = @("releases")
 
-$fs = [System.IO.File]::Open($zip, [System.IO.FileMode]::CreateNew)
+$fs = [System.IO.File]::Open($zipTemp, [System.IO.FileMode]::CreateNew)
 $arch = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
 Get-ChildItem $src -File -Recurse | Where-Object {
   $rel = $_.FullName.Substring($src.Length + 1)
@@ -42,6 +51,7 @@ Get-ChildItem $src -File -Recurse | Where-Object {
 }
 $arch.Dispose()
 $fs.Close()
+Move-Item -LiteralPath $zipTemp -Destination $zip -Force
 Write-Host "Built $zip"
 
 # Archive a copy of every built version in the project folder so old
