@@ -51,6 +51,22 @@ Get-ChildItem $src -File -Recurse | Where-Object {
 }
 $arch.Dispose()
 $fs.Close()
+
+# Prove the archive opens and carries info.json BEFORE it takes the real name.
+# The atomic rename guarantees a reader never sees a half-written file; it does
+# not guarantee the finished file is any good. Publishing a structurally broken
+# zip fails at load with the same unhelpful "Reading file info in package ...
+# failed" as the race did. Idea taken from the Memory Storage session, which
+# added the same gate to its installer today.
+$check = [System.IO.Compression.ZipFile]::OpenRead($zipTemp)
+$entryCount = $check.Entries.Count
+$hasInfo = @($check.Entries | Where-Object { $_.FullName -eq "$root/info.json" }).Count -eq 1
+$check.Dispose()
+if (-not $hasInfo -or $entryCount -lt 2) {
+    Remove-Item -Force $zipTemp
+    throw "Built archive failed its integrity check ($entryCount entries, info.json present: $hasInfo) - not published"
+}
+
 Move-Item -LiteralPath $zipTemp -Destination $zip -Force
 Write-Host "Built $zip"
 
