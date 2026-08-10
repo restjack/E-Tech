@@ -18,15 +18,20 @@ Full feature list and design notes: **[E-Tech/README.md](E-Tech/README.md)**
 | [`E-Tech/build.ps1`](E-Tech/build.ps1) | Build script: packages `E-Tech_<version>.zip` into the Factorio mods folder and archives a copy in `E-Tech/releases/` |
 | [`E-Tech/AAI-CHANGE-INVENTORY.md`](E-Tech/AAI-CHANGE-INVENTORY.md) | Full audit of everything AAI Industry changes, classified by revert difficulty |
 | [`absorbed-mods/`](absorbed-mods/) | Original zips of abandoned mods whose features were merged INTO E-Tech (void chest, map settings editor, copy-paste modules, …) — kept for reference and license provenance |
-| [`patched-mods/`](patched-mods/) | Distribution set: third-party mods locally patched for the current Factorio version, plus `install-mods.bat` for friends/family. Zips and the per-mod manifest are untracked (local bookkeeping only); the process is documented in [`docs/PATCHED-MODS.md`](docs/PATCHED-MODS.md) |
 | [`tools/`](tools/) | Verification and release tooling, kept outside `E-Tech/` because the mod portal rejects zips containing scripts. [`verify.ps1`](tools/verify.ps1) runs everything before a build; [`verify-matrix.ps1`](tools/verify-matrix.ps1) loads the mod under six mod combinations in throwaway mod directories; [`lint-locale.py`](tools/lint-locale.py) and [`lint-changelog.py`](tools/lint-changelog.py) also run in CI |
-| [`docs/`](docs/) | Project docs: [portal page source](docs/PORTAL-PAGE.md), [portal FAQ](docs/PORTAL-FAQ.md), [patched-mods notes](docs/PATCHED-MODS.md), plus untracked session notes/handoffs/audits |
+| [`docs/`](docs/) | Project docs: [portal page source](docs/PORTAL-PAGE.md), [portal FAQ](docs/PORTAL-FAQ.md), plus untracked session notes/handoffs/audits. [`docs/archive/`](docs/archive/) holds superseded docs kept for history |
 
 Release zips are not tracked here — they're built by `build.ps1` and published on the [mod portal](https://mods.factorio.com/mod/E-Tech). `E-Tech/releases/` keeps only the last few versions; older ones are archived outside the synced folder, and every version is on the portal anyway.
 
-`mods-replaced/` is local bookkeeping (superseded third-party zips) and is not tracked — same reasoning as `patched-mods/`. `absorbed-mods/` **is** tracked: those are the originals of mods whose code was merged into E-Tech, so they're the licence paper trail.
+`absorbed-mods/` **is** tracked: those are the originals of mods whose code was merged into E-Tech, so they're the licence paper trail.
 
-Related local folder (not in git): `Projects\Factorio (ModUpdateCode)` — the 2.0→2.1 mod-set migration archive: original 2.0.77 mods, dated snapshots, superseded patched zips (`mods-replaced/`), and the README with the full API fix catalog.
+### Related local folders (not in git)
+
+This repo is E-Tech and only E-Tech. The third-party mod work that used to live here moved out on 2026-08-10:
+
+- `Projects\patched-mods\` — the distribution set handed to friends/family: third-party mods locally patched for the current Factorio version, plus `install-mods.bat`, `mod-list.json` and `mod-settings.dat`. Shared as a folder, which is why it is no longer nested inside this repo.
+- `Projects\Factorio Mod Pack\` — the bookkeeping behind that set: `PATCHED-MODS.md` (process), `LOCAL-PATCHED-MODS.md` (per-mod manifest), the mod audit, the server-update notes, and `mods-replaced/` (superseded zips).
+- `Projects\Archive\Factorio (ModUpdateCode)\` — the 2.0→2.1 mod-set migration archive: original 2.0.77 mods, dated snapshots, and the README with the full API fix catalog.
 
 ## Useful reading if you're here to learn
 

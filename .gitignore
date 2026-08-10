@@ -1,16 +1,13 @@
 # Build artifacts — zips rebuilt by build.ps1, archived in Nextcloud
 E-Tech/releases/*.zip
 
-# Third-party patched mod zips — local bookkeeping only, never published
-patched-mods/*.zip
-
-# Superseded third-party zips kept as a local archive. Same reasoning as
-# patched-mods/: nothing here is E-Tech's code, nothing here ships with the
-# mod, and a public repo has no business redistributing other people's mods
-# just because we happened to replace them. absorbed-mods/ is the exception
-# and stays tracked — those are the originals of mods whose code was merged
-# INTO E-Tech, so they are the licence paper trail.
-mods-replaced/*.zip
+# patched-mods/ and mods-replaced/ moved OUT of this repo on 2026-08-10:
+#   Projects\patched-mods\        the set shared with players
+#   Projects\Factorio Mod Pack\   superseded zips + the pack's own docs
+# Neither is under git. This project is now only E-Tech and what ships to
+# GitHub with it. absorbed-mods/ deliberately stayed and is still TRACKED —
+# those are the originals of mods whose code was merged INTO E-Tech, so they
+# are the licence paper trail rather than redistribution.
 
 # OS / editor noise
 Thumbs.db
@@ -30,9 +27,3 @@ LOCAL-PATCHED-MODS.md
 
 # Server upload staging folders - big mod zip bundles, distributed via Nextcloud
 server-upload-*/
-
-# Local Factorio machine state — this folder is local bookkeeping only, and
-# these two change on every launch. The *.zip rule above already covers the
-# mods themselves.
-patched-mods/mod-settings.dat
-patched-mods/mod-list.json

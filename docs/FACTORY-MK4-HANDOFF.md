@@ -1,4 +1,4 @@
-# Handoff — adding a Factorissimo tier-4 factory ("Mk4")
+﻿# Handoff â€” adding a Factorissimo tier-4 factory ("Mk4")
 
 **Written:** 2026-07-30. Researched against **Factorissimo 3.12.2** (`factorissimo-2-notnotmelon`), Factorio 2.1.
 Everything below was read out of the mod's own source; nothing here is guessed.
@@ -7,23 +7,23 @@ Everything below was read out of the mod's own source; nothing here is guessed.
 record, not a plan. The tier exists, `dump-data` is clean and every prototype
 was confirmed present in the dump. What is *not* yet done is an in-game test:
 the layout registration and the interior itself are control-stage and cannot be
-verified headlessly. See §8 for what to check on first launch.
+verified headlessly. See Â§8 for what to check on first launch.
 
 Three claims in the original version of this doc were wrong and have been
-corrected in place — the interior ceiling (§3), the registration risk (§3), and
-a missed roboport problem (§8).
+corrected in place â€” the interior ceiling (Â§3), the registration risk (Â§3), and
+a missed roboport problem (Â§8).
 
 ---
 
-## 1. The decision — SETTLED 2026-07-30
+## 1. The decision â€” SETTLED 2026-07-30
 
 **Option B, plus a visual marker.** Eli's call: *"keep the exterior footprint the
 same as the one before it, but some visual marks outside that it's larger."*
 
 | | value | notes |
 |---|---|---|
-| interior | **120×120** | 4× factory-3's area; his original "double the last one" |
-| exterior | **16×16** | identical to factory-3 (`collision_box` ±7.8) |
+| interior | **120Ã—120** | 4Ã— factory-3's area; his original "double the last one" |
+| exterior | **16Ã—16** | identical to factory-3 (`collision_box` Â±7.8) |
 | base ports | **32** | factory-3's connection table copied verbatim |
 | quality ports | **14** | inherited with the copy |
 | ratio | 7.5 | deliberately off-pattern; see below |
@@ -33,24 +33,24 @@ This trades the 3.75 interior/exterior ratio for a same-footprint drop-in. That'
 the point: the Mk4 must be placeable in a slot already built for a factory-3.
 Consequences, accepted knowingly:
 
-- **Port density falls.** 32 base ports feed 4× the floor. Interiors will want
+- **Port density falls.** 32 base ports feed 4Ã— the floor. Interiors will want
   more internal bussing per port than a factory-3 does.
 - **A future Mk5 has no room on this pattern.** Whoever wants one goes back to
-  the 20×20 exterior track (the old option A: 76×76 interior, 40 ports,
-  `factory-power-input-20` — kept in §2 in case it's ever revived).
+  the 20Ã—20 exterior track (the old option A: 76Ã—76 interior, 40 ports,
+  `factory-power-input-20` â€” kept in Â§2 in case it's ever revived).
 
-Rejected: pattern-consistent 76×76 / 20×20 / 40 ports / 1.6× area.
+Rejected: pattern-consistent 76Ã—76 / 20Ã—20 / 40 ports / 1.6Ã— area.
 
 ### The visual marker
 
 Without one this is indistinguishable from a factory-3 on the map, in inventory,
-and on the ground — the one real cost of B, so this part is not optional.
+and on the ground â€” the one real cost of B, so this part is not optional.
 
 Factorissimo's **own precedent**: `space-factory-1/2/3` reuse each tier's shadow
-layer verbatim and swap only the main png (`prototypes/factory.lua:277–290`).
+layer verbatim and swap only the main png (`prototypes/factory.lua:277â€“290`).
 Same-footprint visual variants are already how this mod works.
 
-factory-3's exterior is a plain static two-layer sprite — no masks, no runtime
+factory-3's exterior is a plain static two-layer sprite â€” no masks, no runtime
 tint, no animation:
 
 ```lua
@@ -65,49 +65,49 @@ pictures = {picture = {layers = {
 Four ways to mark it, cheapest first. Do 1+2 immediately; 3 or 4 when there's
 appetite.
 
-1. **`map_color`** — one line. All six existing factories share
+1. **`map_color`** â€” one line. All six existing factories share
    `{r = 0.8, g = 0.7, b = 0.55}`, so any change makes the Mk4 unmistakable on
    the map. Free.
 2. **`tint` on the main layer** (shadow layer untinted). Sprite `tint` multiplies,
-   so it can only darken or shift hue — a deeper/cooler body reads as
+   so it can only darken or shift hue â€” a deeper/cooler body reads as
    "heavier tier" and needs zero art. Tint the icon layer to match so inventory
    agrees with the ground.
-3. **Runtime marker via `rendering.draw_sprite` / `draw_text`** on build — a "IV"
+3. **Runtime marker via `rendering.draw_sprite` / `draw_text`** on build â€” a "IV"
    or a badge floating on the building. Control-stage, zero art, but it's one
    render object per building that must be recreated on load and cleaned up on
    destroy. Only worth it if 1+2 read too subtly.
-4. **A real recolored `factory-4.png`** (1408×1216, drawn at `scale = 0.5`) plus
+4. **A real recolored `factory-4.png`** (1408Ã—1216, drawn at `scale = 0.5`) plus
    a matching 64px icon. Reuse `factory-3-shadow.png` unchanged, exactly as the
    space variants do. The clean answer; the only one needing art.
 
 Icon note: the item, the `-instantiated` item-with-tags, and the entity all point
-at the same icon path — change all three or the packed factory in a player's
+at the same icon path â€” change all three or the packed factory in a player's
 inventory still looks like a Mk3.
 
 ## 2. How the existing tiers scale
 
 | layout | interior | exterior | ratio | area | connections |
 |---|---|---|---|---|---|
-| `factory-1` | 30×30 | 8×8 | 3.75 | 900 | 26 (16 base + 10 quality-gated) |
-| `factory-2` | 46×46 | 12×12 | 3.83 | 2,116 | 34 (24 + 10) |
-| `factory-3` | 60×60 | 16×16 | 3.75 | 3,600 | 46 (32 + 14) |
+| `factory-1` | 30Ã—30 | 8Ã—8 | 3.75 | 900 | 26 (16 base + 10 quality-gated) |
+| `factory-2` | 46Ã—46 | 12Ã—12 | 3.83 | 2,116 | 34 (24 + 10) |
+| `factory-3` | 60Ã—60 | 16Ã—16 | 3.75 | 3,600 | 46 (32 + 14) |
 
 Invariants that actually hold:
 
-- **Exterior grows exactly +4 per tier** → tier 4 = 20
-- **interior/exterior ratio is 3.75–3.83** → tier 4 interior ≈ 75–77 (use an even
-  number; rectangles are symmetric `±n`, so **76** is the natural pick)
-- **Base connections +8 per tier** (16 → 24 → 32), which equals one per 2 perimeter
-  tiles → tier 4 = **40**
-- Interior deltas are +16 then +14 (decreasing), which would argue 72–74 instead.
+- **Exterior grows exactly +4 per tier** â†’ tier 4 = 20
+- **interior/exterior ratio is 3.75â€“3.83** â†’ tier 4 interior â‰ˆ 75â€“77 (use an even
+  number; rectangles are symmetric `Â±n`, so **76** is the natural pick)
+- **Base connections +8 per tier** (16 â†’ 24 â†’ 32), which equals one per 2 perimeter
+  tiles â†’ tier 4 = **40**
+- Interior deltas are +16 then +14 (decreasing), which would argue 72â€“74 instead.
   The ratio is the more stable signal.
 
 Source: `script/layout.lua`.
 
-**This section is now reference only** — it describes the rejected
-pattern-consistent track (76×76 / 20×20 / 40 ports). Kept because it's the
+**This section is now reference only** â€” it describes the rejected
+pattern-consistent track (76Ã—76 / 20Ã—20 / 40 ports). Kept because it's the
 recipe for any later tier that goes back on-pattern. The Mk4 being built ignores
-all three invariants by design; see §1.
+all three invariants by design; see Â§1.
 
 ## 3. The layout system
 
@@ -139,24 +139,24 @@ Args are `(id, outside_x, outside_y, inside_x, inside_y, direction_out[, quality
 `(connection.quality or 0) <= quality.level`, so quality tiers unlock extra ports.
 Copying factory-3's connection table inherits that behaviour.
 
-**The actual work, given §1:** copy factory-3's whole connection table, leave
+**The actual work, given Â§1:** copy factory-3's whole connection table, leave
 every `outside_x`/`outside_y` untouched, and move only the interior endpoints out
-to the 120×120 wall — i.e. every `±30.5` becomes `±60.5`, with the along-wall
+to the 120Ã—120 wall â€” i.e. every `Â±30.5` becomes `Â±60.5`, with the along-wall
 coordinates respaced across the longer run. Quality gating comes along free.
 
 `remote_api.add_layout` writes straight into `storage.layout_generators`, and
 `has_layout(name)` is what gates the rest of the mod, so a properly registered
-layout behaves like a native tier — no fork needed.
+layout behaves like a native tier â€” no fork needed.
 
-### Interior size ceiling — 120 is the maximum. CORRECTED.
+### Interior size ceiling â€” 120 is the maximum. CORRECTED.
 
-The original version of this doc said interiors up to ~240×240 fit and that
+The original version of this doc said interiors up to ~240Ã—240 fit and that
 size was not a blocker. **That was wrong**, and it was luck that the chosen
 size is exactly the largest that works.
 
-The 512-tile cell spacing is real — `find_surrounding_factory`
+The 512-tile cell spacing is real â€” `find_surrounding_factory`
 (`script/remote-api.lua`) divides by `16 * 32` and caps at 8 columns, so each
-interior owns a 512×512 cell, 64 per surface. But cell *spacing* is not what
+interior owns a 512Ã—512 cell, 64 per surface. But cell *spacing* is not what
 limits interior *size*. Two things do, both in `script/factory-buildings.lua`:
 
 ```lua
@@ -171,15 +171,15 @@ for xx = -2, 2 do
 local xmin = factory.inside_x - 64
 ```
 
-±2 chunks = **±64 tiles**, and the hidden-tile rect matches. A 120×120 interior
-puts its walls at ±61 and runs its door corridor to y = 63 — one tile inside
+Â±2 chunks = **Â±64 tiles**, and the hidden-tile rect matches. A 120Ã—120 interior
+puts its walls at Â±61 and runs its door corridor to y = 63 â€” one tile inside
 the limit. **122 would not fit.** Anything larger needs Factorissimo itself
 patched, not just a new layout.
 
 `cleanup_factory_interior` agrees: it works over `(inside_size + 8) / 2`, which
 at 120 is exactly 64.
 
-### Registration — there is a public API, and the risk was overstated. CORRECTED.
+### Registration â€” there is a public API, and the risk was overstated. CORRECTED.
 
 ```lua
 remote.call("factorissimo", "add_layout", layout_table)
@@ -196,7 +196,7 @@ _G.reload_layouts = function()
     end
 ```
 
-It never clears the table — it writes its own names into whatever is there. A
+It never clears the table â€” it writes its own names into whatever is there. A
 foreign entry survives. `add_layout` is equally defensive
 (`storage.layout_generators or {}`), so call order against Factorissimo's
 `on_init` does not matter.
@@ -212,7 +212,7 @@ elseif event == factorissimo.events.on_init() then
     script.on_configuration_changed(f)
 ```
 
-Not `on_load` — writing `storage` there desyncs multiplayer, and it is
+Not `on_load` â€” writing `storage` there desyncs multiplayer, and it is
 unnecessary since the registration lives in the save.
 
 `factory-mk4/control.lua` registers on both and then verifies with
@@ -227,35 +227,35 @@ Factorissimo's own debug hook, useful while iterating:
 
 ## 4. Prototypes a new tier needs
 
-`BUILDING_TYPE = "storage-tank"` (`script/remote-api.lua:3`) — factory buildings
+`BUILDING_TYPE = "storage-tank"` (`script/remote-api.lua:3`) â€” factory buildings
 are storage-tank prototypes.
 
-1. **Entity** `factory-4` — deepcopy `data.raw["storage-tank"]["factory-3"]`,
-   rename, keep `collision_box`/`selection_box` at ±7.8. Apply the §1 visual
+1. **Entity** `factory-4` â€” deepcopy `data.raw["storage-tank"]["factory-3"]`,
+   rename, keep `collision_box`/`selection_box` at Â±7.8. Apply the Â§1 visual
    marker here (`map_color`, layer `tint`). Bump `max_health` past 5000 to match
    the tier.
-2. **Item + `item-with-tags`** — `factory-4` and `factory-4-instantiated`, both
+2. **Item + `item-with-tags`** â€” `factory-4` and `factory-4-instantiated`, both
    with the marked icon, `order = "b-d"`, and `+ recipe` (natural progression is
    factory-3 + ingredients).
 3. **Technology** unlock.
-4. **`factory-requester-chest-factory-4` and `factory-eject-chest-factory-4`** —
+4. **`factory-requester-chest-factory-4` and `factory-eject-chest-factory-4`** â€”
    Factorissimo generates these in a hardcoded loop
    `for _, factory_name in pairs {"factory-1", "factory-2", "factory-3"}`
    in `prototypes/roboport.lua`. A fourth tier needs its own pair.
-5. **Power input interface** — **none needed.** `factory-power-input-16` is
-   reused as-is, since the exterior is unchanged. (For the record, a 20×20
+5. **Power input interface** â€” **none needed.** `factory-power-input-16` is
+   reused as-is, since the exterior is unchanged. (For the record, a 20Ã—20
    exterior would have needed `factory-power-input-20` via
-   `create_energy_interfaces(size, icon)` in `prototypes/component.lua` — an
+   `create_energy_interfaces(size, icon)` in `prototypes/component.lua` â€” an
    all-zeros `electric-energy-interface` used purely to read `electric_network_id`.)
 6. Tiles reuse `factory-wall-3` / `factory-floor` unchanged.
 
 ### Other hardcoded tier lists to check
 
-- `prototypes/factory.lua` — entity/item/recipe per tier
-- `prototypes/quality-tooltips.lua` — `add_quality_factoriopedia_info` per tier
-- `compat/picker-dollies.lua` — blacklist names
-- `compat/pyanodon.lua` — recipe overrides
-- `script/layout.lua` `make_space_layout()` — builds `space-factory-1/2/3`; a Mk4
+- `prototypes/factory.lua` â€” entity/item/recipe per tier
+- `prototypes/quality-tooltips.lua` â€” `add_quality_factoriopedia_info` per tier
+- `compat/picker-dollies.lua` â€” blacklist names
+- `compat/pyanodon.lua` â€” recipe overrides
+- `script/layout.lua` `make_space_layout()` â€” builds `space-factory-1/2/3`; a Mk4
   usable on space platforms needs the same treatment
 
 ## 5. Power, for reference
@@ -263,7 +263,7 @@ are storage-tank prototypes.
 Factorissimo 3 does **not** meter factory power. `script/electricity.lua`
 `connect_power()` wires the interior `factory-power-pole` (supply_area_distance 63)
 directly to an exterior pole with copper wire, and nested factories connect to
-their *parent's* interior pole — so a factory at any nesting depth is on the same
+their *parent's* interior pole â€” so a factory at any nesting depth is on the same
 electric network as the base. There is no per-factory power budget, no transfer
 limit, no loss. A Mk4 inherits this for free.
 
@@ -272,11 +272,11 @@ limit, no loss. A Mk4 inherits this for free.
 Build target is **E-Tech**, not a fork:
 `C:\Users\Eli Tellez\Nextcloud\Projects\Factorio (E-Tech)\E-Tech\`
 
-- Data-stage prototypes → new file, required from `data.lua` behind a startup toggle
-  (follow the `factory-hub/` pattern — it already guards on
+- Data-stage prototypes â†’ new file, required from `data.lua` behind a startup toggle
+  (follow the `factory-hub/` pattern â€” it already guards on
   `mods["factorissimo-2-notnotmelon"]`)
-- Layout registration → control stage, `handler.add_lib` in `control.lua`
-- Settings → `settings.lua` + `locale/en/settings.cfg` (every setting needs both a
+- Layout registration â†’ control stage, `handler.add_lib` in `control.lua`
+- Settings â†’ `settings.lua` + `locale/en/settings.cfg` (every setting needs both a
   name and a description; they are cross-checked)
 
 Build and verify:
@@ -289,7 +289,7 @@ powershell -File "E-Tech\build.ps1"
 powershell -File "tools\verify.ps1"
 ```
 
-`build.ps1` writes straight into `%APPDATA%\Factorio\mods` — **Factorio must be
+`build.ps1` writes straight into `%APPDATA%\Factorio\mods` â€” **Factorio must be
 closed or the zip is locked.** `verify.ps1` does Lua syntax (luaparser),
 changelog lint, and `factorio --dump-data` against the live mod set. The dump
 catches prototype errors headlessly and has already caught two real ones in this
@@ -310,7 +310,7 @@ written `true` into `mod-settings.dat`, and the Mk4 kept building locally.
 
 | file | role |
 |---|---|
-| `E-Tech/factory-mk4/layout.lua` | the layout table — geometry, 46 ports, floor logo |
+| `E-Tech/factory-mk4/layout.lua` | the layout table â€” geometry, 46 ports, floor logo |
 | `E-Tech/factory-mk4/data.lua` | entity, item, packed item, recipe, tech, hidden chests, factoriopedia rows |
 | `E-Tech/factory-mk4/control.lua` | `add_layout` registration + verification + Picker Dollies blacklist |
 
@@ -326,8 +326,8 @@ Factorissimo builds the interior roboport at the factory's **door**
 
 | tier | roboport y | reach | far wall | covered? |
 |---|---|---|---|---|
-| factory-3 | +32 | −32 | −31 | yes |
-| factory-4 | +62 | −2 | −61 | **no — northern half dead** |
+| factory-3 | +32 | âˆ’32 | âˆ’31 | yes |
+| factory-4 | +62 | âˆ’2 | âˆ’61 | **no â€” northern half dead** |
 
 E-Tech now raises both `logistics_radius` and `construction_radius` to **128**
 whenever the Mk4 setting is on (`misc-tweaks.lua`,
@@ -352,25 +352,25 @@ this. Third real error the dump has caught in this project.
 
 ### Verified headlessly
 
-`VERIFY OK` — Lua syntax, changelog lint, `dump-data` clean. Confirmed present
-in `data-raw-dump.json`: `factory-4` (collision box ±7.8 = unchanged 16×16,
+`VERIFY OK` â€” Lua syntax, changelog lint, `dump-data` clean. Confirmed present
+in `data-raw-dump.json`: `factory-4` (collision box Â±7.8 = unchanged 16Ã—16,
 max_health 8000, tinted body layer, own map colour), `factory-4` item,
 `factory-4-instantiated`, the recipe (factory-3 + 5000 refined concrete +
 4000 steel + 200 substations + 500 processing units), tech
-`etech-factory-architecture-t4` (4000×90s, inherited science mix +
+`etech-factory-architecture-t4` (4000Ã—90s, inherited science mix +
 utility, prereqs `factory-architecture-t3` + `utility-science-pack`),
 `factory-requester-chest-factory-4`, `factory-eject-chest-factory-4`, the
-factoriopedia rows (32 ports normal → 46 legendary), and the roboport at
+factoriopedia rows (32 ports normal â†’ 46 legendary), and the roboport at
 128/128/128.
 
 The derive-cost-from-t3 trick paid off: in this modpack t3 had already been
 rewritten to space + utility + metallurgic science, and t4 inherited it rather
 than hardcoding a vanilla mix that doesn't exist here.
 
-### In-game test 2026-07-30 — two real failures, both fixed in 0.20.1
+### In-game test 2026-07-30 â€” two real failures, both fixed in 0.20.1
 
 **1. Half the floor had no electricity.** Machines in the northern half sat at
-"No power" with nothing to trace — the pole that feeds a factory interior is
+"No power" with nothing to trace â€” the pole that feeds a factory interior is
 hidden and has no wire.
 
 `get_or_create_inside_power_pole` (`script/electricity.lua:56`) places
@@ -379,19 +379,19 @@ hidden and has no wire.
 
 | tier | pole y | reaches | far wall | powered? |
 |---|---|---|---|---|
-| factory-3 | +32 | −31 | −31 | yes, exactly |
-| factory-4 | +62 | −1 | −61 | **no — 59 tiles dead** |
+| factory-3 | +32 | âˆ’31 | âˆ’31 | yes, exactly |
+| factory-4 | +62 | âˆ’1 | âˆ’61 | **no â€” 59 tiles dead** |
 
 **The engine caps `supply_area_distance` at 64 for every electric pole
-prototype**, so unlike the roboport this cannot be fixed by raising a number —
+prototype**, so unlike the roboport this cannot be fixed by raising a number â€”
 and a custom pole prototype does not help either. From the door, *no* pole can
 reach the far side of a 120-wide floor.
 
-Screenshot evidence: the factory power monitor read **Supply area 126×126**
-(= 2×63) on a 120-wide floor.
+Screenshot evidence: the factory power monitor read **Supply area 126Ã—126**
+(= 2Ã—63) on a 120-wide floor.
 
-Two ways out. The first attempt moved `inside_energy` to `(-4, 0)` — the middle
-of the floor. It works (63 covers ±63) and fixes the roboport for free, but
+Two ways out. The first attempt moved `inside_energy` to `(-4, 0)` â€” the middle
+of the floor. It works (63 covers Â±63) and fixes the roboport for free, but
 `inside_energy` positions *both* the pole and the roboport
 (`script/roboport/roboport.lua:287` reads it as `(-x, y)`), so it parks both in
 the middle of the player's build area.
@@ -401,7 +401,7 @@ does the work.** `inside_energy` is back at `(-4, 62)`. An invisible,
 uncollidable, unselectable `etech-factory-mk4-power-relay` (empty sprite, no
 wires drawn, `supply_area_distance = 64`) is built at the interior centre and
 script-wired to Factorissimo's door pole, putting the whole floor on one
-network. The roboport needs nothing — the 128 reach bump already covers a
+network. The roboport needs nothing â€” the 128 reach bump already covers a
 120-wide floor from the door.
 
 ### The extension point that made it clean: `layout.upgrades`
@@ -409,7 +409,7 @@ network. The roboport needs nothing — the 128 reach bump already covers a
 No event handlers, no polling, no migration. `build_factory_upgrades`
 (`script/factory-buildings.lua:156`) walks `factory.layout.upgrades` and, for
 any entry whose first element is **not** `"factorissimo"`, calls
-`remote.call(mod, function, factory)` with the live factory table — giving
+`remote.call(mod, function, factory)` with the live factory table â€” giving
 direct access to `inside_surface`, `inside_x/y`, `force` and
 `_inside_power_pole`.
 
@@ -421,26 +421,26 @@ It runs in three places, which is what makes it self-healing:
 | `activate_factories` (:173) | `on_init` **and** `on_configuration_changed`, for every existing factory |
 | research handler (:184) | every research finish |
 
-So the handler must be **idempotent** — it checks the surface for an existing
-relay rather than keeping bookkeeping — and existing Mk4s repair themselves on
+So the handler must be **idempotent** â€” it checks the surface for an existing
+relay rather than keeping bookkeeping â€” and existing Mk4s repair themselves on
 the next config change instead of needing a migration.
 
-⚠ Setting `upgrades` **replaces** `DEFAULT_FACTORY_UPGRADES`, so all four
+âš  Setting `upgrades` **replaces** `DEFAULT_FACTORY_UPGRADES`, so all four
 Factorissimo defaults (lights, greenhouse, display, roboport) have to be listed
 again or the tier silently loses them.
 
-`connect_to(other, false, defines.wire_origin.script)` ignores wire reach —
+`connect_to(other, false, defines.wire_origin.script)` ignores wire reach â€”
 that is the same call Factorissimo uses to bridge an interior to a *different
 surface*, so `maximum_wire_distance = 1` on both poles is irrelevant.
 
-**2. The visual marker didn't work.** The prototype `tint` is a multiply — it
-can only darken — so in game the Mk4 still read as a brown Mk3, and no tint can
+**2. The visual marker didn't work.** The prototype `tint` is a multiply â€” it
+can only darken â€” so in game the Mk4 still read as a brown Mk3, and no tint can
 do anything about the **"03" painted on the facade**. Reusing the Mk3 exterior
 is the whole reason the marker exists, so a weak marker is a failed feature.
 
 Replaced with real artwork: `tools/make-mk4-art.py` reads Factorissimo's
 `factory-3.png`, repaints the "3" into a "4", and maps every non-paint pixel to
-its own luminance tinted cold — corrugation and grime survive, the siding
+its own luminance tinted cold â€” corrugation and grime survive, the siding
 becomes steel blue. Icon and technology icon get the same treatment. The
 **shadow is Factorissimo's, referenced unchanged**, exactly as its own
 `space-factory` variants do.
@@ -452,7 +452,7 @@ Four things that cost time, worth knowing before touching that script:
   and produced a solid blob. It now inpaints per row from the nearest
   non-paint pixel in a clean strip to the right.
 - The "4" was first drawn from hand-built polygons and looked crude in game.
-  The facade font is a **heavy rounded grotesque** — measured off the "0":
+  The facade font is a **heavy rounded grotesque** â€” measured off the "0":
   136 wide, 151 tall, uniform **~42px stroke**, far heavier than the 34 guessed.
   It is now a real **Arial Black** glyph scaled to the "0"'s height, blended by
   the glyph's own antialiasing.
@@ -469,15 +469,15 @@ Four things that cost time, worth knowing before touching that script:
 Re-run the script if Factorissimo ever redraws factory-3. It needs Pillow and
 `C:/Windows/Fonts/ariblk.ttf`.
 
-### Still untested — needs an actual launch
+### Still untested â€” needs an actual launch
 
 Everything above is data stage. These are control stage and cannot be checked
 by `dump-data`:
 
-Confirmed working in the 2026-07-30 test: registration, the 120×120 interior
-with closed walls and the "F4" floor logo, the factoriopedia rows (120×120,
-32 ports, 12000/s), the tech at 4000×90s, the packed item, and the roboport
-reach fix (256×256 supply/construction, up from 128×128).
+Confirmed working in the 2026-07-30 test: registration, the 120Ã—120 interior
+with closed walls and the "F4" floor logo, the factoriopedia rows (120Ã—120,
+32 ports, 12000/s), the tech at 4000Ã—90s, the packed item, and the roboport
+reach fix (256Ã—256 supply/construction, up from 128Ã—128).
 
 Left to check after 0.20.1:
 
@@ -494,22 +494,22 @@ Left to check after 0.20.1:
 - **Space platforms.** `make_space_layout()` builds `space-factory-1/2/3` from
   a hardcoded list; a Mk4 there would need its own tile-mapped twin.
 - **Deregistration.** Factorissimo exposes `add_layout` but no remove. Turning
-  the setting off leaves the layout in the save with no prototype behind it —
+  the setting off leaves the layout in the save with no prototype behind it â€”
   so treat enabling it as a one-way choice per save, which the setting
   description says.
 
 ## 7. Context from the session this came out of
 
-The interior roboport work is **finished and shipped in E-Tech 0.19.7** — separate
+The interior roboport work is **finished and shipped in E-Tech 0.19.7** â€” separate
 feature, but it's why the Factorissimo source was read in the first place.
 
 Headline finding, in case it matters for Mk4: Factorissimo's
 `factory-construction-roboport` runs on a `{type = "void"}` energy source, and
 because robot charging is paid from a roboport's *stored* energy, that roboport
 **cannot charge robots at all**. E-Tech now gives it a real electric source.
-Measured cost ~1–2 MW per busy factory, ~29 MW across 16. Full writeup:
+Measured cost ~1â€“2 MW per busy factory, ~29 MW across 16. Full writeup:
 `docs/FACTORISSIMO-ROBOPORT-BUG-REPORT.md` (drafted for upstream) and the
-`factorissimo-roboport-buff` row in `docs/LOCAL-PATCHED-MODS.md`.
+`factorissimo-roboport-buff` row in ``Projects\Factorio Mod Pack\LOCAL-PATCHED-MODS.md``.
 
 Related trap worth knowing if Mk4 touches roboports: **Krastorio 2 deep-copies
 every `data.raw.roboport` entry in data-updates** to build its logistic-only /
@@ -524,28 +524,28 @@ too. E-Tech already does this for the factory roboport.
 ## 9. Polish pass (0.20.2)
 
 Twelve items, all shipped. One was investigated and deliberately **not**
-shipped — see the end.
+shipped â€” see the end.
 
 ### Matching the stock tiers
 
 | | was | now |
 |---|---|---|
-| tech name | "Factory architecture 4" | **"Architecture 4"** — Factorissimo names its own "Architecture 2/3" |
-| tech order | `c-k-a-d` | **`p-q-a-c-m`** — theirs are `p-q-a-a/b/c` and space architecture takes `p-q-a-d`, so this slots between |
-| entity description | our prose only | Factorissimo's own control lines first (`__CONTROL__factory-rotate__`, `…-open-outside-surface-to-remote-view__`, `__CONTROL__cut__`), then ours |
+| tech name | "Factory architecture 4" | **"Architecture 4"** â€” Factorissimo names its own "Architecture 2/3" |
+| tech order | `c-k-a-d` | **`p-q-a-c-m`** â€” theirs are `p-q-a-a/b/c` and space architecture takes `p-q-a-d`, so this slots between |
+| entity description | our prose only | Factorissimo's own control lines first (`__CONTROL__factory-rotate__`, `â€¦-open-outside-surface-to-remote-view__`, `__CONTROL__cut__`), then ours |
 | tech icon | still read **"03"** | repainted to "04" in place |
-| item icon | — | no digit is legible at 64px; recolour only. Nothing to fix. |
+| item icon | â€” | no digit is legible at 64px; recolour only. Nothing to fix. |
 
 The tech icon is an isometric render with the digits on a **tilted** face,
 straddling the yellow band and the grey wall. Both problems are solved by
 working along the **face axis** (`FACE_SLOPE = 0.39`, measured from the 0/3
-baselines) instead of screen rows — a horizontal fill smears band colour up
+baselines) instead of screen rows â€” a horizontal fill smears band colour up
 over wall. The replacement "4" is squashed to `X_SQUASH = 0.41` and rotated
-21°, derived by un-rotating the "3"'s 30×49 on-screen box to ~14×47.
+21Â°, derived by un-rotating the "3"'s 30Ã—49 on-screen box to ~14Ã—47.
 
 ### Interior identity
 
-`factory-wall-4` / `factory-pattern-4`, **teal** — the stock tiers are orange,
+`factory-wall-4` / `factory-pattern-4`, **teal** â€” the stock tiers are orange,
 blue, yellow, and teal stays clear of factory-2's blue. Deepcopied from
 Factorissimo's tiles rather than rebuilt, because those carry transition
 spritesheets, sounds, collision masks and a **frozen twin** (Aquilo) that needs
@@ -553,7 +553,7 @@ its own copy and back-link, or a frozen Mk4 floor shows the Mk3's.
 
 ### Space platforms
 
-`space-factory-4` — entity, item, packed item, recipe, layout, and its own
+`space-factory-4` â€” entity, item, packed item, recipe, layout, and its own
 tiles. Unlocked from Factorissimo's existing `factory-space-architecture`
 rather than a second research, with `etech-factory-architecture-t4` added as a
 prerequisite since the recipe eats a Mk4.
@@ -565,39 +565,39 @@ Space Exploration vs Space Age, and copying works under either.
 The space skin is blue paint on grey at **half** the ground resolution, so the
 art generator takes every measured box halved and a different paint detector
 (`b - r > 30` instead of `b < r * 0.68`). All three stock space tiers already
-share one blue-grey look, so recolouring the *wall* would not separate a Mk4 —
+share one blue-grey look, so recolouring the *wall* would not separate a Mk4 â€”
 the **paint** goes amber instead, tiles included.
 
 ### Smaller items
 
-- **Cerys radiative towers 4 → 9.** Four suits a 60-wide floor; over four times
+- **Cerys radiative towers 4 â†’ 9.** Four suits a 60-wide floor; over four times
   the area it left the middle and edges cold.
-- **"Floor tiles per connection" factoriopedia row** — 450 vs a Mk3's 112. The
+- **"Floor tiles per connection" factoriopedia row** â€” 450 vs a Mk3's 112. The
   ports did not grow with the floor, and a tooltip is a cheaper place to learn
   that than a finished build.
 - **Relay pole has its own locale key** instead of borrowing the building's.
 
-### Overhaul compatibility — generalised instead of per-mod
+### Overhaul compatibility â€” generalised instead of per-mod
 
 `factory-mk4/data-final-fixes.lua` re-derives the Mk4's research cost from the
 Mk3's and drops retired recipe ingredients, **after** everyone else has run.
 Factorissimo's own `compat/pyanodon.lua` rewrites the factory technologies in
-`data-updates` — later than our data stage — so a snapshot taken at data time
+`data-updates` â€” later than our data stage â€” so a snapshot taken at data time
 was already stale. Reading the tier below at final-fixes never goes stale,
 which is why there is no per-overhaul compat file here.
 
-### NOT shipped: `next_upgrade` Mk3 → Mk4
+### NOT shipped: `next_upgrade` Mk3 â†’ Mk4
 
 Investigated and rejected. **Factorissimo has no upgrade or fast-replace
-handling for factory buildings at all** — no `on_marked_for_upgrade`, no
+handling for factory buildings at all** â€” no `on_marked_for_upgrade`, no
 `fast_replaceable_group`, nothing. An upgrade planner would therefore:
 
-1. have a bot mine the Mk3 → the player gets a `factory-3-instantiated` item
+1. have a bot mine the Mk3 â†’ the player gets a `factory-3-instantiated` item
    with the interior intact, and
 2. build an **empty** Mk4 in its place.
 
 Nothing is destroyed, but the machines are now inside a packed item in someone's
-inventory rather than in the new building — which is not what "upgrade" means
+inventory rather than in the new building â€” which is not what "upgrade" means
 to anyone using the planner. One line to enable (`next_upgrade` on `factory-3`)
 if that trade is ever wanted.
 
@@ -617,33 +617,33 @@ max_distance_of_nearby_sector_revealed = 1,   -- live area = 3x3 chunks
 
 `create_factory_position` sets `inside_x = 32 * cx` with `cx = 16 * (n % 8)`, so
 the origin is a chunk **corner**, not a chunk centre. The radar's own chunk is
-local `[0,32)`, and one chunk of reach gives a live box of local **−32 … +63** —
-96×96, offset a chunk south-east.
+local `[0,32)`, and one chunk of reach gives a live box of local **âˆ’32 â€¦ +63** â€”
+96Ã—96, offset a chunk south-east.
 
 | tier | floor | door corridor | live box | covered |
 |---|---|---|---|---|
-| factory-3 | −30…+30 | to +33 | −32…+63 | all of it, 1 tile spare |
-| factory-4 | −60…+60 | to +63 | −32…+63 | 93×93 of 121×121 — **~41% dark** |
+| factory-3 | âˆ’30â€¦+30 | to +33 | âˆ’32â€¦+63 | all of it, 1 tile spare |
+| factory-4 | âˆ’60â€¦+60 | to +63 | âˆ’32â€¦+63 | 93Ã—93 of 121Ã—121 â€” **~41% dark** |
 
-Mk3 clearing that box by a single tile is luck, the same kind as the ±64
-chunk-generation ceiling in §3.
+Mk3 clearing that box by a single tile is luck, the same kind as the Â±64
+chunk-generation ceiling in Â§3.
 
 Two non-fixes, both checked first:
 
 - **The interior roboport.** `radar_range = 0` (`prototypes/roboport.lua:43,134`),
   so the 128 logistics/construction bump from 0.20.0 buys no map vision at all.
 - **`force.chart()`.** A charted chunk with no radar over it renders as a static
-  map snapshot — tiles, no live entities. Charting once would not have made the
+  map snapshot â€” tiles, no live entities. Charting once would not have made the
   corner *live*.
 
 **Shipped: a per-tier radar.** `etech-factory-mk4-radar` is a deepcopy of
-`factory-hidden-radar` with `max_distance_of_nearby_sector_revealed = 2` → local
-−64…+95. That 5×5 chunk box is exactly the set of chunks Factorissimo marks
+`factory-hidden-radar` with `max_distance_of_nearby_sector_revealed = 2` â†’ local
+âˆ’64â€¦+95. That 5Ã—5 chunk box is exactly the set of chunks Factorissimo marks
 generated for a cell (`for xx = -2, 2`), and cells are 512 apart, so nothing
 bleeds into a neighbour.
 
 Swapped in a new `upgrade_radar` entry on `layout.upgrades`, alongside
-`build_power_relay` — same self-healing extension point (§ "The extension point
+`build_power_relay` â€” same self-healing extension point (Â§ "The extension point
 that made it clean"), so existing Mk4s fix themselves on the next configuration
 change. It builds ours first and only then destroys the stock radar, so a
 failure leaves the partial radar rather than none.
