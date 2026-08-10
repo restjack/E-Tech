@@ -1,4 +1,25 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.29.1
+Date: 2026-08-09
+  Bugfixes:
+    - The export filter now has no collision box and sits on one fixed tile,
+      immediately left of the factory's power pole. Position stops being
+      something to think about: it cannot be blocked by whatever is already
+      built there, it cannot block the player, it is never in the doorway, and
+      it is in the same place in every factory so you learn where to look once.
+      Searching for a free tile was the wrong shape twice over - anchored on the
+      door it landed in the entrance, dead centre of a Mk4's wider one, and
+      anchored on the power pole it still put the device somewhere different in
+      every factory depending on what happened to be free. The same
+      no-collision trick already carries E-Tech's hidden Mk4 power relay.
+      Filters placed anywhere else by an earlier version move onto the fixed
+      spot on the next maintenance pass, teleported rather than rebuilt so the
+      signal list - which is the rule - survives.
+      Considered and rejected: hanging the rule off Factorissimo's overlay
+      controller instead. That entity only exists once the interior display
+      upgrade is researched, so every factory without it would have had nowhere
+      to keep a rule.
+---------------------------------------------------------------------------------------------------
 Version: 0.29.0
 Date: 2026-08-09
   Features:

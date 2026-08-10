@@ -818,26 +818,23 @@ local function interior_fittings_position(factory)
     return { x = factory.inside_x, y = factory.inside_y }
 end
 
--- Far enough from the door that the device is never standing in the way in or
--- out. The doorway runs along one axis, so distance on both is what matters.
-local function blocks_doorway(factory, position)
-    local door_x = factory.inside_door_x
-    local door_y = factory.inside_door_y
-    if not (door_x and door_y) then return false end
-    return math.abs(position.x - door_x) <= 3 and math.abs(position.y - door_y) <= 3
-end
+-- One fixed tile, immediately left of the factory's power pole. No search, so
+-- every factory puts it in the same place and you learn where to look once; and
+-- because the prototype has no collision it cannot be blocked by whatever is
+-- already built there, nor block anything itself.
+--
+-- The search this replaces was the wrong shape twice over: anchored on the door
+-- it landed in the entrance (dead centre of a Mk4's wider one), and anchored on
+-- the pole it still put the device somewhere different in every factory
+-- depending on what happened to be free.
+local EXPORT_FILTER_OFFSET = { x = -1, y = 0 }
 
 local function export_filter_position(factory)
-    local inside = factory.inside_surface
     local fittings = interior_fittings_position(factory)
-    -- Try one side of the pole, then the other, then let the search widen; take
-    -- the first spot that is both free and out of the doorway.
-    for _, offset in ipairs({ {-2, 0}, {2, 0}, {0, -2}, {-4, 0}, {4, 0} }) do
-        local position = inside.find_non_colliding_position(EXPORT_FILTER_NAME,
-            { x = fittings.x + offset[1], y = fittings.y + offset[2] }, 6, 0.5)
-        if position and not blocks_doorway(factory, position) then return position end
-    end
-    return nil
+    return {
+        x = fittings.x + EXPORT_FILTER_OFFSET.x,
+        y = fittings.y + EXPORT_FILTER_OFFSET.y,
+    }
 end
 
 -- The icons Factorissimo paints on the OUTSIDE of the factory building come
@@ -868,7 +865,6 @@ local function ensure_export_filter(factory)
     local inside = factory.inside_surface
     if not (inside and inside.valid) then return end
     local position = export_filter_position(factory)
-    if not position then return end
     local entity = inside.create_entity {
         name = EXPORT_FILTER_NAME,
         position = position,
@@ -3867,16 +3863,18 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
                 if not unit then
                     if ensure_export_filter(factory) then budget = budget - 1 end
                 else
-                    -- Rescue one built in the doorway by an earlier version.
-                    -- Teleporting rather than replacing keeps the signal list,
-                    -- which is the whole rule - rebuilding it would silently
-                    -- wipe what the player set.
+                    -- Move any filter an earlier version scattered elsewhere
+                    -- (the doorway, or wherever the old search happened to
+                    -- land) onto the fixed spot. TELEPORTED, never rebuilt:
+                    -- the combinator's signal list is the rule itself, so
+                    -- replacing the entity would silently wipe it.
                     local device = hub_data().hubs[unit]
                     local entity = device and device.entity
-                    if entity and entity.valid and blocks_doorway(factory, entity.position) then
-                        local position = export_filter_position(factory)
-                        if position then
-                            entity.teleport(position)
+                    if entity and entity.valid then
+                        local want = export_filter_position(factory)
+                        local at = entity.position
+                        if math.abs(at.x - want.x) > 0.01 or math.abs(at.y - want.y) > 0.01 then
+                            entity.teleport(want)
                             budget = budget - 1
                         end
                     end

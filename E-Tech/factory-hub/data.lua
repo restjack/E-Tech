@@ -144,7 +144,16 @@ export_filter.name = "etech-factory-export-filter"
 -- otherwise end up with a rule you cannot get back without console commands.
 export_filter.minable = nil
 export_filter.flags = {"player-creation", "not-blueprintable", "not-deconstructable"}
-export_filter.selection_priority = 60
+-- NO COLLISION. This is what makes the position a non-problem: it can sit at a
+-- fixed spot beside the factory's power pole without ever being blocked by what
+-- the player has built, without blocking them, and without standing in the
+-- doorway. Searching for a free tile was the wrong answer - it moved the device
+-- somewhere different in every factory, and in a Mk4's wide entrance it found
+-- the middle of the doorway. Same trick E-Tech already uses for the Mk4's
+-- hidden power relay.
+export_filter.collision_mask = {layers = {}}
+-- Still clickable, and wins the pick against the pole it stands next to.
+export_filter.selection_priority = 80
 export_filter.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", filterTint)
 for _, direction in pairs({"north", "east", "south", "west"}) do
     export_filter.sprites[direction].layers[1].tint = filterTint
