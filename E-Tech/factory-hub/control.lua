@@ -220,6 +220,7 @@ local function register_device(entity, copy_from)
         record.pull_storage = copy_from.pull_storage
         record.auto_request = copy_from.auto_request
         record.fluid_filter = copy_from.fluid_filter
+        record.min_quality = copy_from.min_quality
     end
     -- Spread this device's pull across the four slot ticks of a PULL_TICKS
     -- cycle, deterministically from its unit_number. Two outlets built in the
@@ -647,10 +648,11 @@ local function circuit_filter_set(record)
     return seen and set or nil
 end
 
-local function filter_set(record)
-    if guards(record).circuit_filters then return circuit_filter_set(record) end
+-- Generalised over a plain {mode, items, match_quality} table so the same
+-- machinery drives the device's own filter and the per-factory ones below.
+local function filter_set_of(filters)
     local set = nil
-    for _, value in pairs(record.filters.items) do
+    for _, value in pairs(filters.items or {}) do
         local name, quality = filter_entry(value)
         if name then
             set = set or { names = {}, any = {}, keys = {} }
@@ -660,21 +662,89 @@ local function filter_set(record)
     return set
 end
 
+local function filter_set(record)
+    if guards(record).circuit_filters then return circuit_filter_set(record) end
+    return filter_set_of(record.filters)
+end
+
 -- With "Match quality" off (the default, and how filters behaved before
 -- 0.23.0) a slot matches its item at every quality. With it on, a slot matches
 -- only the quality it was picked at — except a name-only slot, which has no
 -- quality to match and keeps covering all of them.
-local function item_matches(record, name, quality, set)
+local function filters_match(filters, name, quality, set)
     if not set then return false end
-    if not record.filters.match_quality then return set.names[name] == true end
+    if not filters.match_quality then return set.names[name] == true end
     return set.any[name] == true or set.keys[item_key(name, quality)] == true
 end
 
-local function item_allowed(record, name, quality, set)
-    local mode = record.filters.mode
-    if mode == 2 then return item_matches(record, name, quality, set) end
-    if mode == 3 then return not item_matches(record, name, quality, set) end
+-- Minimum quality to export.
+--
+-- Quality upcycling puts a recycler loop inside a factory: normal ore or plates
+-- go in, the same item comes back out one tier better, round and round until it
+-- is legendary. Every tier below the top is FEEDSTOCK - it has to stay inside -
+-- and the top tier is the product, which has to leave. The item filters cannot
+-- say that without a slot per item per tier, and they still would not follow you
+-- when you decide to push one tier further.
+--
+-- Quality levels come from the prototype (normal 0, uncommon 1, ...), so this
+-- works with modded tiers and with no quality mod at all. Session-local cache:
+-- derived from prototypes, never from storage, so it is not a desync risk.
+local quality_levels = {}
+local function quality_level(name)
+    local level = quality_levels[name]
+    if level == nil then
+        local proto = prototypes.quality[name]
+        level = proto and proto.level or 0
+        quality_levels[name] = level
+    end
+    return level
+end
+
+local function quality_allowed(record, quality)
+    local minimum = record.min_quality
+    if not minimum then return true end
+    return quality_level(quality) >= quality_level(minimum)
+end
+
+local function filters_allow(filters, name, quality, set)
+    local mode = filters.mode
+    if mode == 2 then return filters_match(filters, name, quality, set) end
+    if mode == 3 then return not filters_match(filters, name, quality, set) end
     return true
+end
+
+local function item_allowed(record, name, quality, set)
+    return filters_allow(record.filters, name, quality, set)
+end
+
+-- Per-FACTORY export filters. The device filter answers "what may this outlet
+-- pull"; this answers "what may leave THIS factory", which is a different
+-- question and belongs to the factory rather than to whichever device happens to
+-- be reading it. A factory running a recycler upcycling loop wants its feedstock
+-- to stay put while everything else it makes still exports, and no device-wide
+-- filter says that without also blocking the same item coming out of every other
+-- factory on the surface.
+--
+-- Kept in hub_data keyed by factory id, not on the device, for the same reason:
+-- rebuild or replace the outlet and the factory's own rule survives.
+local function factory_filters(id)
+    local data = hub_data()
+    data.factory_filters = data.factory_filters or {}
+    local filters = data.factory_filters[id]
+    if not filters then
+        filters = { mode = 1, items = {}, match_quality = false }
+        data.factory_filters[id] = filters
+    end
+    return filters
+end
+
+-- nil when a factory has no rule, so the pull pass skips the work entirely
+-- instead of evaluating a permissive filter once per stack.
+local function factory_filter_active(id)
+    local data = hub_data()
+    local filters = data.factory_filters and data.factory_filters[id]
+    if not filters or (filters.mode or 1) == 1 then return nil end
+    return filters, filter_set_of(filters)
 end
 
 -- Timestamped lockout tables (record.pull_cooldown / record.storage_cooldown).
@@ -1557,11 +1627,17 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
             local inv = chest.get_inventory(defines.inventory.chest)
             -- guard 4 only ever gates the storage half of the source list
             local storage_gated = g.no_storage_repull and entry.mode == "storage"
+            -- resolved per chest, but only costs anything for factories that
+            -- actually have a rule set
+            local ffilters, fset = factory_filter_active(entry.factory.id)
             if inv and holds_any(inv, need) then
                 for i = 1, #inv do
                     local stack = inv[i]
                     if stack.valid_for_read
-                        and item_allowed(record, stack.name, stack.quality.name, set) then
+                        and item_allowed(record, stack.name, stack.quality.name, set)
+                        and quality_allowed(record, stack.quality.name)
+                        and (not ffilters or filters_allow(ffilters,
+                            stack.name, stack.quality.name, fset)) then
                         local key = item_key(stack.name, stack.quality.name)
                         local missing = need[key]
                         if storage_gated
@@ -2600,6 +2676,11 @@ local function build_panel(player)
     local checks = pull.add {type = "flow", name = "checks", direction = "vertical"}
     checks.add {type = "checkbox", name = "etech-hub-storage", state = false,
         caption = {"gui-etech-hub.storage"}, tooltip = {"gui-etech-hub.storage-tooltip"}}
+    pull.add {type = "label", name = "quality_label",
+        caption = {"gui-etech-hub.min-quality"},
+        tooltip = {"gui-etech-hub.min-quality-tooltip"}}
+    pull.add {type = "drop-down", name = "etech-hub-min-quality",
+        tooltip = {"gui-etech-hub.min-quality-tooltip"}}
     pull.add {type = "drop-down", name = "etech-hub-mode", items = MODE_ITEMS}
     local slots = pull.add {type = "table", name = "filter_slots", column_count = FILTER_COLUMNS}
     for i = 1, FILTER_SLOTS do
@@ -2630,8 +2711,25 @@ local function build_panel(player)
     factories.add {type = "label", name = "factories_label",
         caption = {"gui-etech-hub.factories"}}
     local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
-    fscroll.style.maximal_height = 400
+    fscroll.style.maximal_height = 260
     fscroll.add {type = "table", name = "frows", column_count = 2}
+
+    factories.add {type = "line", name = "ffilter_sep"}
+    factories.add {type = "label", name = "ffilter_label",
+        caption = {"gui-etech-hub.factory-filter"},
+        tooltip = {"gui-etech-hub.factory-filter-help"}}
+    factories.add {type = "drop-down", name = "etech-hub-ffilter-factory",
+        tooltip = {"gui-etech-hub.factory-filter-help"}}
+    factories.add {type = "drop-down", name = "etech-hub-ffilter-mode", items = MODE_ITEMS}
+    local fslots = factories.add {type = "table", name = "ffilter_slots",
+        column_count = FILTER_COLUMNS}
+    for i = 1, FILTER_SLOTS do
+        fslots.add {type = "choose-elem-button", name = "etech-hub-ffilter-" .. i,
+            elem_type = "item-with-quality"}
+    end
+    factories.add {type = "checkbox", name = "etech-hub-ffilter-quality", state = false,
+        caption = {"gui-etech-hub.match-quality"},
+        tooltip = {"gui-etech-hub.match-quality-tooltip"}}
     return panel
 end
 
@@ -2655,6 +2753,27 @@ local function load_panel_settings(player, record)
         -- filter list; greyed out beats silently ignored
         btn.enabled = not from_circuit
     end
+    -- Built from the prototypes rather than hardcoded, so modded tiers appear
+    -- and a game with no quality mod just shows "Any".
+    local qualities, quality_names = {{"gui-etech-hub.min-quality-any"}}, {}
+    local sorted = {}
+    for name, proto in pairs(prototypes.quality) do
+        if not proto.hidden then sorted[#sorted + 1] = {name = name, proto = proto} end
+    end
+    table.sort(sorted, function(a, b)
+        if a.proto.level ~= b.proto.level then return a.proto.level < b.proto.level end
+        return a.name < b.name
+    end)
+    local chosen = 1
+    for i, entry in ipairs(sorted) do
+        quality_names[i] = entry.name
+        qualities[i + 1] = entry.proto.localised_name
+        if entry.name == record.min_quality then chosen = i + 1 end
+    end
+    record.quality_names = quality_names
+    local quality_picker = pull["etech-hub-min-quality"]
+    quality_picker.items = qualities
+    quality_picker.selected_index = chosen
     pull["etech-hub-match-quality"].state = record.filters.match_quality == true
     pull[CIRCUIT_FILTER_OPT.element].state = from_circuit
     for _, guard in ipairs(GUARD_CHECKS) do
@@ -2698,6 +2817,31 @@ local function load_panel_settings(player, record)
     if selected == 1 then record.grid_factory = nil end
     picker.selected_index = selected
     tabs.contents.views["etech-hub-sort"].selected_index = record.grid_sort or 1
+
+    -- Per-factory filter block: the same id list, and the selected factory is
+    -- remembered on the record so reopening the panel lands where you left off.
+    local flabels = {{"gui-etech-hub.factory-filter-pick"}}
+    for i, id in ipairs(ids) do flabels[i + 1] = labels[i + 1] end
+    local fpicker = factories["etech-hub-ffilter-factory"]
+    fpicker.items = flabels
+    local fchosen = 1
+    for i, id in ipairs(ids) do
+        if id == record.ffilter_id then fchosen = i + 1 end
+    end
+    if fchosen == 1 then record.ffilter_id = nil end
+    fpicker.selected_index = fchosen
+    local editing = record.ffilter_id and factory_filters(record.ffilter_id)
+        or { mode = 1, items = {}, match_quality = false }
+    factories["etech-hub-ffilter-mode"].selected_index = editing.mode or 1
+    factories["etech-hub-ffilter-mode"].enabled = record.ffilter_id ~= nil
+    factories["etech-hub-ffilter-quality"].state = editing.match_quality == true
+    factories["etech-hub-ffilter-quality"].enabled = record.ffilter_id ~= nil
+    for i = 1, FILTER_SLOTS do
+        local btn = factories.ffilter_slots["etech-hub-ffilter-" .. i]
+        btn.elem_value = filter_elem_value(editing.items[i])
+        btn.tooltip = filter_slot_tooltip(editing.items[i])
+        btn.enabled = record.ffilter_id ~= nil
+    end
     for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do
         local factory = usable[i]
         local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
@@ -3202,6 +3346,30 @@ local function on_gui_selection_state_changed(event)
         refresh_grid(player, record)
         return
     end
+    if name == "etech-hub-ffilter-factory" or name == "etech-hub-ffilter-mode" then
+        local record = open_record(event.player_index)
+        local player = game.get_player(event.player_index)
+        if not (record and player) then return end
+        if name == "etech-hub-ffilter-mode" then
+            if record.ffilter_id then
+                factory_filters(record.ffilter_id).mode = event.element.selected_index
+            end
+            return
+        end
+        local index = event.element.selected_index
+        record.ffilter_id = index > 1 and (record.grid_factory_ids or {})[index - 1] or nil
+        -- rebuild so the slots load that factory's list (invalidates the element)
+        load_panel_settings(player, record)
+        refresh_grid(player, record)
+        return
+    end
+    if name == "etech-hub-min-quality" then
+        local record = open_record(event.player_index)
+        if not record then return end
+        local index = event.element.selected_index
+        record.min_quality = index > 1 and (record.quality_names or {})[index - 1] or nil
+        return
+    end
     if name ~= "etech-hub-mode" then return end
     local record = open_record(event.player_index)
     if record then
@@ -3222,6 +3390,13 @@ local function on_gui_elem_changed(event)
         if player then refresh_fluid_panel(player, record) end
         return
     end
+    local fslot = event.element.name:match("^etech%-hub%-ffilter%-(%d+)$")
+    if fslot then
+        if record.ffilter_id then
+            factory_filters(record.ffilter_id).items[tonumber(fslot)] = event.element.elem_value
+        end
+        return
+    end
     local slot = event.element.name:match("^etech%-hub%-filter%-(%d+)$")
     if slot then
         record.filters.items[tonumber(slot)] = event.element.elem_value
@@ -3236,6 +3411,10 @@ local function on_gui_checked_state_changed(event)
     if not record then return end
     if name == "etech-hub-storage" then
         record.pull_storage = event.element.state
+    elseif name == "etech-hub-ffilter-quality" then
+        if record.ffilter_id then
+            factory_filters(record.ffilter_id).match_quality = event.element.state
+        end
     elseif name == "etech-hub-match-quality" then
         record.filters.match_quality = event.element.state
         record.sensor_snapshot = nil
@@ -3351,6 +3530,7 @@ local function on_player_setup_blueprint(event)
                     pull_storage = record.pull_storage,
                     auto_request = record.auto_request,
                     fluid_filter = record.fluid_filter,
+                    min_quality = record.min_quality,
                 })
             end
         end
@@ -3380,6 +3560,7 @@ local function on_entity_settings_pasted(event)
     to.pull_storage = from.pull_storage
     to.auto_request = from.auto_request
     to.fluid_filter = from.fluid_filter
+    to.min_quality = from.min_quality
     -- caches keyed to the OLD settings
     to.requester_cache = nil
     to.sensor_snapshot = nil

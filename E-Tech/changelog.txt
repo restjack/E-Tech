@@ -1,4 +1,27 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.0
+Date: 2026-08-09
+  Features:
+    - Per-factory export filters, on the outlet's Factories tab. Pick a factory,
+      then set a whitelist or blacklist that governs what may leave THAT factory.
+      The device filter answers "what may this outlet pull"; this answers "what
+      may leave this factory", which is a different question - and no
+      device-wide filter can express "keep iron inside factory 3" without also
+      blocking iron from every other factory on the surface. An item has to pass
+      both filters. The rule is stored against the factory rather than the
+      device, so replacing or blueprinting the outlet does not lose it.
+    - Factory outlet: "Minimum quality to pull out". Anything below the chosen
+      tier stays inside the factories. This is for quality upcycling, where a
+      recycler loop inside a factory turns normal items into better ones a tier
+      at a time: every tier below the top is feedstock that has to stay in, and
+      only the top tier is product that should leave. The item filters could not
+      express that without a slot per item per tier, and would still need
+      redoing every time you pushed the loop one tier further. Built from the
+      quality prototypes, so modded tiers show up and a game without the quality
+      mod simply shows "Any". Applies on top of the item filters rather than
+      instead of them, and rides along in blueprints, clones and copy-paste with
+      the rest of the device's settings.
+---------------------------------------------------------------------------------------------------
 Version: 0.25.0
 Date: 2026-08-09
   Bugfixes:
