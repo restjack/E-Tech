@@ -1,4 +1,26 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.24.1
+Date: 2026-08-09
+  Changes:
+    - Factory outlet panel: split into three tabs - Stock, Settings, Factories.
+      Everything was one column, and 0.24.0 added enough to it that the bottom
+      of the panel ran off the bottom of the screen. A relative GUI does not
+      scroll as a whole, so the factory list and half the settings were simply
+      unreachable. The "pulled last minute" line stays above the tabs, since a
+      status line you can only see on one tab is a status line you miss.
+    - Factory outlet, inlet and sensor: 24 filter slots instead of 15, laid out
+      8 wide to line up with the stock grid above them rather than sitting in a
+      narrower 5-wide block. Existing filters are unaffected.
+    - The loop guard wording was written like release notes and read like it.
+      Every checkbox and tooltip is now in plain language: "Don't count inlet
+      requests as demand" rather than "Ignore factory inlet auto-requests",
+      "Wait 10 s before taking an item back" rather than "Re-pull cooldown".
+    - The factory dropdown lists each factory's map coordinates next to its
+      name. A list of backer names on its own says nothing about which building
+      you are filtering to.
+    - Removed the "Evacuate the factories" button added in 0.24.0. The panel is
+      dense enough without it and it did not earn its place.
+---------------------------------------------------------------------------------------------------
 Version: 0.24.0
 Date: 2026-08-09
   Features:

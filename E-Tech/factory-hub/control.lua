@@ -57,7 +57,11 @@ local PROXY_TICKS = 3600   -- item-request-proxy rescan, 60 s (~23 ms find
                            -- on a big map; module requests can wait a minute)
 local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-output/)
 local MAX_DEPTH = 5        -- nested-factory recursion limit
-local FILTER_SLOTS = 15    -- choose-elem filter slots in the outlet/inlet panels
+local FILTER_SLOTS = 24    -- choose-elem filter slots in the outlet/inlet/sensor
+                           -- panels. Laid out FILTER_COLUMNS wide to match the
+                           -- stock grid above it; 15 in a 5-wide block left the
+                           -- panel visibly narrower than its own contents.
+local FILTER_COLUMNS = 8
 local COOLDOWN_TICKS = 600 -- loop guard: 10 s lockout after an item is handed
                            -- back, so a want that flickers on and off between
                            -- passes can't pull the same stack out repeatedly
@@ -1543,49 +1547,6 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
     return moved, by_key
 end
 
--- Evacuation: pull whatever the factories hold regardless of demand, until they
--- are empty or the outlet is. Decommissioning a factory otherwise means standing
--- inside it moving chests by hand, which is the one job the outlet exists to
--- avoid and the one job it could not do.
---
--- This is NOT the buffer mode that was removed in 0.17.0, and the difference is
--- the point: buffer mode was a standing state that kept stock pre-staged in the
--- outlet forever. This is an action with an end. It runs while there is
--- something to take and stops on its own, and while it runs the outlet keeps
--- offering everything to the network as a normal passive provider, so the items
--- flow onward to storage instead of piling up.
-local function evacuate_pass(record, hub_inv, chests, set)
-    local moved, by_key = 0, {}
-    for _, entry in pairs(chests) do
-        local chest = entry.chest
-        if chest.valid then
-            local inv = chest.get_inventory(defines.inventory.chest)
-            if inv then
-                for i = 1, #inv do
-                    local stack = inv[i]
-                    if stack.valid_for_read
-                        and item_allowed(record, stack.name, stack.quality.name, set) then
-                        local key = item_key(stack.name, stack.quality.name)
-                        local original = stack.count
-                        -- whole stacks, so spoilage and quality ride along
-                        local inserted = hub_inv.insert(stack)
-                        if inserted > 0 then
-                            stack.count = original - inserted
-                            moved = moved + inserted
-                            by_key[key] = (by_key[key] or 0) + inserted
-                        end
-                        if inserted < original then
-                            -- outlet full: stop here, the next pass continues
-                            return moved, by_key, false
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return moved, by_key, true
-end
-
 local function pull_for_outlet(record)
     local hub = record.entity
     local hub_inv = hub.get_inventory(defines.inventory.chest)
@@ -1608,26 +1569,6 @@ local function pull_for_outlet(record)
     end
 
     local set = filter_set(record)
-
-    if record.evacuating then
-        -- Evacuation reaches storage chests too, whatever the pull-from-storage
-        -- toggle says: leaving a factory's storage full would defeat the point.
-        local all = reachable_chests(record, function(mode)
-            return provider_mode(mode) or mode == "storage"
-        end)
-        local moved, by_key, drained = evacuate_pass(record, hub_inv, all, set)
-        note_moved(record, moved, by_key)
-        -- Finished only when a whole sweep found nothing AND had room for it -
-        -- a full outlet is "come back next pass", not "done".
-        if drained and moved == 0 then
-            record.evacuating = nil
-            local force = record.entity.force
-            for _, player in pairs(force.connected_players) do
-                player.print({"gui-etech-hub.evacuate-done"})
-            end
-        end
-        return
-    end
 
     -- Snapshot the give-back candidates once for the whole pass, however many
     -- item types end up going back.
@@ -2447,92 +2388,109 @@ local function build_panel(player)
         style = "inside_shallow_frame_with_padding",
         direction = "vertical",
     }
+    -- TABS, since 0.24.1. Everything used to be one column: stock grid, then
+    -- pull settings, then filters, then loop guards, then the factory list. Each addition was small and the total went off the
+    -- bottom of the screen - a relative GUI does not scroll as a whole, so the
+    -- factory list and half the settings were simply unreachable. Three tabs
+    -- fix that permanently rather than by shaving pixels off each section.
+    --
+    -- The rate line stays OUTSIDE the tabs: it carries the pause reason, and a
+    -- status line you can only see on one tab is a status line you miss.
     inner.add {type = "label", name = "rate"}
-    local search = inner.add {type = "textfield", name = "etech-hub-search"}
+    local tabs = inner.add {type = "tabbed-pane", name = "tabs"}
+
+    local contents_tab = tabs.add {type = "tab", caption = {"gui-etech-hub.tab-contents"}}
+    local contents = tabs.add {type = "flow", name = "contents", direction = "vertical"}
+    tabs.add_tab(contents_tab, contents)
+    local search = contents.add {type = "textfield", name = "etech-hub-search"}
     search.style.horizontally_stretchable = true
     -- The grid was one flat list of everything on the surface, with the
     -- per-factory split available only by hovering each item in turn. These two
     -- make "what is in factory 7" and "what is there most of" answerable
     -- directly. Both are view state - neither changes what the outlet pulls.
-    local views = inner.add {type = "flow", name = "views", direction = "horizontal"}
+    local views = contents.add {type = "flow", name = "views", direction = "horizontal"}
     views.add {type = "drop-down", name = "etech-hub-factory",
         tooltip = {"gui-etech-hub.factory-filter-tooltip"}}
     views.add {type = "drop-down", name = "etech-hub-sort",
         items = SORT_ITEMS, selected_index = 1,
         tooltip = {"gui-etech-hub.sort-tooltip"}}
-    local scroll = inner.add {type = "scroll-pane", name = "scroll"}
+    local scroll = contents.add {type = "scroll-pane", name = "scroll"}
     -- tall enough to visually match the 200-slot chest window next to it
     scroll.style.minimal_height = 420
     scroll.style.maximal_height = 640
 
-    inner.add {type = "line", name = "sep"}
-    inner.add {type = "label", name = "settings_label",
+    local settings_tab = tabs.add {type = "tab", caption = {"gui-etech-hub.tab-settings"}}
+    local pull = tabs.add {type = "flow", name = "settings", direction = "vertical"}
+    tabs.add_tab(settings_tab, pull)
+    pull.add {type = "label", name = "settings_label",
         caption = {"gui-etech-hub.pull-settings"}}
-    local checks = inner.add {type = "flow", name = "checks", direction = "vertical"}
+    local checks = pull.add {type = "flow", name = "checks", direction = "vertical"}
     checks.add {type = "checkbox", name = "etech-hub-storage", state = false,
         caption = {"gui-etech-hub.storage"}, tooltip = {"gui-etech-hub.storage-tooltip"}}
-    inner.add {type = "drop-down", name = "etech-hub-mode", items = MODE_ITEMS}
-    local slots = inner.add {type = "table", name = "filter_slots", column_count = 5}
+    pull.add {type = "drop-down", name = "etech-hub-mode", items = MODE_ITEMS}
+    local slots = pull.add {type = "table", name = "filter_slots", column_count = FILTER_COLUMNS}
     for i = 1, FILTER_SLOTS do
         slots.add {type = "choose-elem-button", name = "etech-hub-filter-" .. i,
             elem_type = "item-with-quality"}
     end
-    inner.add {type = "checkbox", name = "etech-hub-match-quality", state = false,
+    pull.add {type = "checkbox", name = "etech-hub-match-quality", state = false,
         caption = {"gui-etech-hub.match-quality"},
         tooltip = {"gui-etech-hub.match-quality-tooltip"}}
-    inner.add {type = "checkbox", name = CIRCUIT_FILTER_OPT.element, state = false,
+    pull.add {type = "checkbox", name = CIRCUIT_FILTER_OPT.element, state = false,
         caption = {"gui-etech-hub." .. CIRCUIT_FILTER_OPT.loc},
         tooltip = {"gui-etech-hub." .. CIRCUIT_FILTER_OPT.loc .. "-tooltip"}}
 
-    inner.add {type = "line", name = "guard_sep"}
-    inner.add {type = "label", name = "guards_label",
+    pull.add {type = "line", name = "guard_sep"}
+    pull.add {type = "label", name = "guards_label",
         caption = {"gui-etech-hub.loop-guards"},
         tooltip = {"gui-etech-hub.loop-guards-tooltip"}}
-    local gchecks = inner.add {type = "flow", name = "guard_checks", direction = "vertical"}
+    local gchecks = pull.add {type = "flow", name = "guard_checks", direction = "vertical"}
     for _, guard in ipairs(GUARD_CHECKS) do
         gchecks.add {type = "checkbox", name = guard.element, state = false,
             caption = {"gui-etech-hub." .. guard.loc},
             tooltip = {"gui-etech-hub." .. guard.loc .. "-tooltip"}}
     end
 
-    inner.add {type = "button", name = "etech-hub-evacuate",
-        caption = {"gui-etech-hub.evacuate"},
-        tooltip = {"gui-etech-hub.evacuate-tooltip"}}
-
-    inner.add {type = "label", name = "factories_label",
+    local factories_tab = tabs.add {type = "tab", caption = {"gui-etech-hub.tab-factories"}}
+    local factories = tabs.add {type = "flow", name = "factories", direction = "vertical"}
+    tabs.add_tab(factories_tab, factories)
+    factories.add {type = "label", name = "factories_label",
         caption = {"gui-etech-hub.factories"}}
-    local fscroll = inner.add {type = "scroll-pane", name = "fscroll"}
-    fscroll.style.maximal_height = 220
+    local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
+    fscroll.style.maximal_height = 400
     fscroll.add {type = "table", name = "frows", column_count = 2}
     return panel
 end
 
 local function load_panel_settings(player, record)
     local panel = build_panel(player)
-    local inner = panel.inner
-    inner.checks["etech-hub-storage"].state = record.pull_storage == true
-    inner["etech-hub-mode"].selected_index = record.filters.mode or 1
+    local tabs = panel.inner.tabs
+    local pull, factories = tabs.settings, tabs.factories
+    -- The panel is rebuilt from scratch on open and whenever a toggle changes
+    -- what the other widgets should look like, so the tab has to be restored or
+    -- ticking a Settings checkbox would throw you back to the stock list.
+    tabs.selected_tab_index = math.min(record.panel_tab or 1, 3)
+    pull.checks["etech-hub-storage"].state = record.pull_storage == true
+    pull["etech-hub-mode"].selected_index = record.filters.mode or 1
     local g = guards(record)
     local from_circuit = g[CIRCUIT_FILTER_OPT.field] == true
     for i = 1, FILTER_SLOTS do
-        local btn = inner.filter_slots["etech-hub-filter-" .. i]
+        local btn = pull.filter_slots["etech-hub-filter-" .. i]
         btn.elem_value = filter_elem_value(record.filters.items[i])
         btn.tooltip = filter_slot_tooltip(record.filters.items[i])
         -- the slots are not what the outlet reads while the circuit drives the
         -- filter list; greyed out beats silently ignored
         btn.enabled = not from_circuit
     end
-    inner["etech-hub-match-quality"].state = record.filters.match_quality == true
-    inner[CIRCUIT_FILTER_OPT.element].state = from_circuit
-    inner["etech-hub-evacuate"].caption = record.evacuating
-        and {"gui-etech-hub.evacuate-stop"} or {"gui-etech-hub.evacuate"}
+    pull["etech-hub-match-quality"].state = record.filters.match_quality == true
+    pull[CIRCUIT_FILTER_OPT.element].state = from_circuit
     for _, guard in ipairs(GUARD_CHECKS) do
-        inner.guard_checks[guard.element].state = g[guard.field] == true
+        pull.guard_checks[guard.element].state = g[guard.field] == true
     end
 
     -- factory rows: locate button + rename field (rebuilt on open only, so
     -- typing a name never gets clobbered by the 2 s refresh)
-    local rows = inner.fscroll.frows
+    local rows = factories.fscroll.frows
     rows.clear()
     local usable = {}
     for _, factory in pairs(cached_factories(record)) do
@@ -2543,14 +2501,22 @@ local function load_panel_settings(player, record)
     -- is mapped back to a factory id through grid_factory_ids rather than by
     -- position: the list can change between opening the panel and clicking, and
     -- an index into a stale list would silently filter by the wrong factory.
+    -- Names alone are not enough to pick from: a list of backer names tells you
+    -- nothing about WHICH building on the map you are filtering to. The
+    -- building's coordinates do. Not a [gps=] tag - those render as a clickable
+    -- chat link, not as text, and a dropdown row is neither.
     local ids = {}
     local labels = {{"gui-etech-hub.factory-filter-all"}}
     for _, factory in ipairs(usable) do
         ids[#ids + 1] = factory.id
-        labels[#labels + 1] = factory_label(factory.id)
+        local position = factory.building.position
+        labels[#labels + 1] = {"gui-etech-hub.factory-option",
+            factory_label(factory.id),
+            string.format("%.0f", position.x),
+            string.format("%.0f", position.y)}
     end
     record.grid_factory_ids = ids
-    local picker = inner.views["etech-hub-factory"]
+    local picker = tabs.contents.views["etech-hub-factory"]
     picker.items = labels
     local selected = 1
     for i, id in ipairs(ids) do
@@ -2558,7 +2524,7 @@ local function load_panel_settings(player, record)
     end
     if selected == 1 then record.grid_factory = nil end
     picker.selected_index = selected
-    inner.views["etech-hub-sort"].selected_index = record.grid_sort or 1
+    tabs.contents.views["etech-hub-sort"].selected_index = record.grid_sort or 1
     for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do
         local factory = usable[i]
         local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
@@ -2604,8 +2570,9 @@ local function refresh_grid(player, record)
     end
     inner.rate.caption = rate_caption
 
-    local search = inner["etech-hub-search"].text:lower()
-    local scroll = inner.scroll
+    local contents = inner.tabs.contents
+    local search = contents["etech-hub-search"].text:lower()
+    local scroll = contents.scroll
 
     -- totals per item+quality with per-factory breakdown
     local reachable = reachable_chests(record, outlet_source_mode(record))
@@ -2785,7 +2752,7 @@ local function build_inlet_panel(player, record)
         caption = {"gui-etech-hub.inlet-filter"}}
     local mode = inner.add {type = "drop-down", name = "etech-hub-mode", items = MODE_ITEMS}
     mode.selected_index = record.filters and record.filters.mode or 1
-    local slots = inner.add {type = "table", name = "filter_slots", column_count = 5}
+    local slots = inner.add {type = "table", name = "filter_slots", column_count = FILTER_COLUMNS}
     for i = 1, FILTER_SLOTS do
         local btn = slots.add {type = "choose-elem-button", name = "etech-hub-filter-" .. i,
             elem_type = "item-with-quality"}
@@ -2887,7 +2854,7 @@ local function build_sensor_panel(player, record)
         caption = {"gui-etech-hub.sensor-filter"}}
     local mode = inner.add {type = "drop-down", name = "etech-hub-mode", items = MODE_ITEMS}
     mode.selected_index = record.filters and record.filters.mode or 1
-    local slots = inner.add {type = "table", name = "filter_slots", column_count = 5}
+    local slots = inner.add {type = "table", name = "filter_slots", column_count = FILTER_COLUMNS}
     for i = 1, FILTER_SLOTS do
         local btn = slots.add {type = "choose-elem-button", name = "etech-hub-filter-" .. i,
             elem_type = "item-with-quality"}
@@ -3142,21 +3109,6 @@ end
 local function on_gui_click(event)
     local element = event.element
     if not (element and element.valid) then return end
-
-    if element.name == "etech-hub-evacuate" then
-        local record = open_record(event.player_index)
-        local player = game.get_player(event.player_index)
-        if not (record and player) then return end
-        -- Second click cancels. No confirmation dialog: nothing is destroyed,
-        -- the items move to the outside network, and stopping it is one click
-        -- away - a modal here would be friction guarding nothing.
-        record.evacuating = not record.evacuating or nil
-        element.caption = record.evacuating
-            and {"gui-etech-hub.evacuate-stop"} or {"gui-etech-hub.evacuate"}
-        player.print(record.evacuating
-            and {"gui-etech-hub.evacuate-started"} or {"gui-etech-hub.evacuate-stopped"})
-        return
-    end
 
     local tags = element.tags
     if not (tags and tags.etech) then return end
