@@ -1,4 +1,26 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.29.0
+Date: 2026-08-09
+  Features:
+    - Factory outlet, Factories tab: every factory now shows the overlay icons
+      it wears on the outside, and has an Enter button that teleports you inside
+      it. The icons are read from the same combinator Factorissimo paints the
+      building's exterior from, so the list matches what you see on the map -
+      which is how anyone actually tells one factory from another. Enter lands
+      you just in from the door; walk back out through the door as usual.
+  Bugfixes:
+    - The export filter was being built in the middle of the factory's doorway.
+      It was anchored on the interior DOOR plus a couple of tiles, which lands
+      in the entrance itself - and on a Mk4, whose doorway is wider, squarely in
+      the middle of it. It is now anchored on the interior power pole (from
+      layout.inside_energy_*, which is public on the factory table, rather than
+      the private field the Mk4 code reads) and explicitly rejects any spot
+      within three tiles of the door.
+      Filters already built in a doorway are moved on the next maintenance pass.
+      They are TELEPORTED rather than rebuilt, because the signal list on the
+      combinator is the rule itself - replacing the entity would silently wipe
+      whatever had been set.
+---------------------------------------------------------------------------------------------------
 Version: 0.28.1
 Date: 2026-08-09
   Changes:

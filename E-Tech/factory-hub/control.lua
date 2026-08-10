@@ -96,6 +96,7 @@ local GHOST_RESYNC_TICKS = 3600 -- how often a coarse index is rebuilt from the
                            -- world to shed the drift coarse mode accumulates
 local MAX_SIGNALS = 1000   -- constant combinator / logistic section limit
 local MAX_FACTORY_ROWS = 20
+local FACTORY_OVERLAY_ICONS = 4 -- overlay signals shown per factory row
 local TOOLTIP_FACTORIES = 8 -- per-factory breakdown lines in an item tooltip
 
 local KINDS = {
@@ -800,14 +801,73 @@ end
 -- find_non_colliding_position rather than a fixed offset: the door surroundings
 -- are exactly where the pole and roboport already are, and on an existing
 -- factory the player may have built right up to them.
+-- Where the factory's own fittings live. Factorissimo puts the interior power
+-- pole (and the roboport with it) at layout.inside_energy_*, which is public on
+-- the factory table - no need for the private _inside_power_pole field the Mk4
+-- code reads. Anchoring here rather than on the DOOR matters: door + a couple of
+-- tiles lands in the entrance itself, and on a Mk4, whose doorway is wider,
+-- squarely in the middle of it.
+local function interior_fittings_position(factory)
+    local layout = factory.layout
+    if layout and layout.inside_energy_x and layout.inside_energy_y then
+        return {
+            x = factory.inside_x + layout.inside_energy_x,
+            y = factory.inside_y + layout.inside_energy_y,
+        }
+    end
+    return { x = factory.inside_x, y = factory.inside_y }
+end
+
+-- Far enough from the door that the device is never standing in the way in or
+-- out. The doorway runs along one axis, so distance on both is what matters.
+local function blocks_doorway(factory, position)
+    local door_x = factory.inside_door_x
+    local door_y = factory.inside_door_y
+    if not (door_x and door_y) then return false end
+    return math.abs(position.x - door_x) <= 3 and math.abs(position.y - door_y) <= 3
+end
+
+local function export_filter_position(factory)
+    local inside = factory.inside_surface
+    local fittings = interior_fittings_position(factory)
+    -- Try one side of the pole, then the other, then let the search widen; take
+    -- the first spot that is both free and out of the doorway.
+    for _, offset in ipairs({ {-2, 0}, {2, 0}, {0, -2}, {-4, 0}, {4, 0} }) do
+        local position = inside.find_non_colliding_position(EXPORT_FILTER_NAME,
+            { x = fittings.x + offset[1], y = fittings.y + offset[2] }, 6, 0.5)
+        if position and not blocks_doorway(factory, position) then return position end
+    end
+    return nil
+end
+
+-- The icons Factorissimo paints on the OUTSIDE of the factory building come
+-- from a constant combinator it builds inside (factory.inside_overlay_controller,
+-- only present once the display upgrade is researched). Reading the same signals
+-- lets the outlet's factory list show each factory the way it looks on the map,
+-- which is how anyone actually identifies one.
+local function factory_overlay_signals(factory, limit)
+    local controller = factory.inside_overlay_controller
+    if not (controller and controller.valid) then return {} end
+    local behavior = controller.get_or_create_control_behavior()
+    local out = {}
+    for _, section in pairs(behavior and behavior.sections or {}) do
+        if section.active then
+            for _, filter in pairs(section.filters) do
+                local value = filter.value
+                if value and value.name then
+                    out[#out + 1] = { type = value.type or "item", name = value.name }
+                    if #out >= limit then return out end
+                end
+            end
+        end
+    end
+    return out
+end
+
 local function ensure_export_filter(factory)
     local inside = factory.inside_surface
     if not (inside and inside.valid) then return end
-    local door_x = factory.inside_door_x or factory.inside_x
-    local door_y = factory.inside_door_y or factory.inside_y
-    local anchor = { x = door_x + 2, y = door_y }
-    local position = inside.find_non_colliding_position(
-        EXPORT_FILTER_NAME, anchor, 12, 0.5)
+    local position = export_filter_position(factory)
     if not position then return end
     local entity = inside.create_entity {
         name = EXPORT_FILTER_NAME,
@@ -2822,7 +2882,7 @@ local function build_panel(player)
         caption = {"gui-etech-hub.factories"}}
     local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
     fscroll.style.maximal_height = 260
-    fscroll.add {type = "table", name = "frows", column_count = 3}
+    fscroll.add {type = "table", name = "frows", column_count = 4}
 
     return panel
 end
@@ -2922,12 +2982,29 @@ local function load_panel_settings(player, record)
         local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
         btn.style.minimal_width = 50
         btn.tags = { etech = "factory-locate", id = factory.id }
+        local enter = rows.add {type = "button", caption = {"gui-etech-hub.enter"},
+            tooltip = {"gui-etech-hub.enter-tooltip"}}
+        enter.style.minimal_width = 50
+        enter.tags = { etech = "factory-enter", id = factory.id }
+
+        -- The overlay icons the factory wears on the outside, which is how you
+        -- know which one this is without reading anything.
+        local cell = rows.add {type = "flow", direction = "horizontal"}
+        for _, signal in ipairs(factory_overlay_signals(factory, FACTORY_OVERLAY_ICONS)) do
+            local sprite = signal.type .. "/" .. signal.name
+            if signal.type == "virtual" then sprite = "virtual-signal/" .. signal.name end
+            if helpers.is_valid_sprite_path(sprite) then
+                local icon = cell.add {type = "sprite", sprite = sprite}
+                icon.style.size = 24
+            end
+        end
         local position = factory.building.position
-        local name = rows.add {type = "label", caption = {"gui-etech-hub.factory-option",
+        local name = cell.add {type = "label", caption = {"gui-etech-hub.factory-option",
             factory_label(factory.id),
             string.format("%.0f", position.x),
             string.format("%.0f", position.y)}}
-        name.style.minimal_width = 150
+        name.style.minimal_width = 130
+
         local field = rows.add {type = "textfield",
             text = hub_data().factory_names[factory.id] or "",
             tooltip = {"gui-etech-hub.factory-rename-tooltip"}}
@@ -2936,8 +3013,7 @@ local function load_panel_settings(player, record)
     end
     if #usable > MAX_FACTORY_ROWS then
         rows.add {type = "label", caption = {"gui-etech-hub.more-factories", #usable - MAX_FACTORY_ROWS}}
-        rows.add {type = "label", caption = ""}
-        rows.add {type = "label", caption = ""}
+        for _ = 1, 3 do rows.add {type = "label", caption = ""} end
     end
 end
 
@@ -3608,6 +3684,24 @@ local function on_gui_click(event)
         else
             locate_item(player, record, tags.name, tags.quality)
         end
+    elseif tags.etech == "factory-enter" then
+        for _, factory in pairs(cached_factories(record)) do
+            if factory.id == tags.id and factory_usable(factory) then
+                -- Land just inside the door rather than on it, and let the
+                -- engine pick a free tile: the doorway has the pole and the
+                -- roboport either side of it.
+                local inside = factory.inside_surface
+                local target = inside.find_non_colliding_position("character",
+                    { x = factory.inside_door_x or factory.inside_x,
+                      y = (factory.inside_door_y or factory.inside_y) - 2 }, 8, 0.5)
+                if target and player.teleport(target, inside) then
+                    player.print({"gui-etech-hub.entered", factory_label(factory.id)})
+                else
+                    player.print({"gui-etech-hub.enter-failed"})
+                end
+                return
+            end
+        end
     elseif tags.etech == "factory-locate" then
         for _, factory in pairs(cached_factories(record)) do
             if factory.id == tags.id and factory_usable(factory) then
@@ -3768,8 +3862,25 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
         local budget = 2
         for _, factory in pairs(cached_factories(record, false)) do
             if budget <= 0 then break end
-            if factory_usable(factory) and not existing[factory.id] then
-                if ensure_export_filter(factory) then budget = budget - 1 end
+            if factory_usable(factory) then
+                local unit = existing[factory.id]
+                if not unit then
+                    if ensure_export_filter(factory) then budget = budget - 1 end
+                else
+                    -- Rescue one built in the doorway by an earlier version.
+                    -- Teleporting rather than replacing keeps the signal list,
+                    -- which is the whole rule - rebuilding it would silently
+                    -- wipe what the player set.
+                    local device = hub_data().hubs[unit]
+                    local entity = device and device.entity
+                    if entity and entity.valid and blocks_doorway(factory, entity.position) then
+                        local position = export_filter_position(factory)
+                        if position then
+                            entity.teleport(position)
+                            budget = budget - 1
+                        end
+                    end
+                end
             end
         end
     end
