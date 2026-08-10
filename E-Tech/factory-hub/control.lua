@@ -822,13 +822,14 @@ local function export_section(controller, create)
         if section.group == EXPORT_SECTION_GROUP then return section end
     end
     if not create then return nil end
-    -- Created ACTIVE. An unchecked section reads as "switched off, therefore
-    -- not working", which is exactly the wrong impression for the thing
-    -- carrying the rule. The cost is that Factorissimo paints these items on
-    -- the building's exterior along with the rest of the overlay - E-Tech reads
-    -- the section either way, so activity is now purely about whether you want
-    -- to see them outside.
-    return behavior.add_section(EXPORT_SECTION_GROUP)
+    -- Created UNTICKED. Ticked means Factorissimo paints these items on the
+    -- outside of the building, and the rule is OFF by default - so a ticked
+    -- section would add icons to every factory in exchange for nothing. E-Tech
+    -- reads the section either way; tick it only if you want the kept items
+    -- shown outside.
+    local section = behavior.add_section(EXPORT_SECTION_GROUP)
+    if section then section.active = false end
+    return section
 end
 
 -- nil when the factory has no overlay controller, no export section, or an
@@ -849,11 +850,21 @@ local function factory_filter_active(record, factory_id, cache)
         return nil
     end
     local stored = (hub_data().factory_filters or {})[factory_id] or {}
+    local mode = stored.mode or 1
+    -- Mode 1 is "no restriction", which is the default: a factory does not
+    -- acquire a rule just because it has a controller. Bail before any of the
+    -- per-stack work below.
+    if mode == 1 then
+        cache[factory_id] = false
+        return nil
+    end
     local filters = {
-        -- blacklist by default: a list of items attached to a factory reads as
-        -- "these stay here"
-        mode = stored.mode or 3,
-        match_quality = stored.match_quality,
+        mode = mode,
+        -- Quality ALWAYS binds here, and there is no toggle for it. Every
+        -- signal in a combinator section carries a quality, so listing iron
+        -- plate at normal means normal - which is the whole point when the
+        -- factory is upcycling and the higher tiers must still get out.
+        match_quality = true,
     }
     local set = nil
     for _, filter in pairs(section.filters) do
@@ -3353,8 +3364,7 @@ local function build_export_panel(player, entity)
 
     local data = hub_data()
     data.factory_filters = data.factory_filters or {}
-    local stored = data.factory_filters[factory.id]
-        or { mode = 3, match_quality = false }
+    local stored = data.factory_filters[factory.id] or { mode = 1 }
     data.factory_filters[factory.id] = stored
     data.open_overlay = data.open_overlay or {}
     data.open_overlay[player.index] = factory.id
@@ -3381,11 +3391,7 @@ local function build_export_panel(player, entity)
     local mode = inner.add {type = "drop-down", name = "etech-hub-export-mode",
         items = EXPORT_MODE_ITEMS,
         tooltip = {"gui-etech-hub.export-mode-tooltip"}}
-    mode.selected_index = stored.mode or 3
-    inner.add {type = "checkbox", name = "etech-hub-export-quality",
-        state = stored.match_quality == true,
-        caption = {"gui-etech-hub.match-quality"},
-        tooltip = {"gui-etech-hub.match-quality-tooltip"}}
+    mode.selected_index = stored.mode or 1
 end
 
 -- GUI: fluid outlet panel --------------------------------------------------------
@@ -3600,12 +3606,6 @@ local function on_gui_checked_state_changed(event)
     if not record then return end
     if name == "etech-hub-storage" then
         record.pull_storage = event.element.state
-    elseif name == "etech-hub-export-quality" then
-        local data = hub_data()
-        local id = (data.open_overlay or {})[event.player_index]
-        if id and data.factory_filters and data.factory_filters[id] then
-            data.factory_filters[id].match_quality = event.element.state
-        end
     elseif name == "etech-hub-match-quality" then
         record.filters.match_quality = event.element.state
         record.sensor_snapshot = nil

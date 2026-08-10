@@ -411,15 +411,24 @@ assert_all = function(t)
     check("fluid sensor broadcasts the interior tanks", fluid_signal > 0,
         FLUID .. " signal reads " .. fluid_signal)
 
-        if t.export_filter and t.mixed then
+    -- The export rule is INERT until a mode is picked, and the mode lives in
+    -- E-Tech's storage behind the panel, which a test mod cannot write. So what
+    -- is asserted is the DEFAULT: an item listed in the etech-export section,
+    -- with no mode chosen, must still leave normally.
+    --
+    -- A real assertion, not a consolation prize - 0.27.0 to 0.30.1 defaulted to
+    -- blacklist, so merely listing an item started holding it back, and this
+    -- would have caught it. What is no longer covered is the blocking path
+    -- itself: that is GUI-gated and eyeball-only.
+    if t.export_filter and t.mixed then
         local held = count(t.mixed, KEPT)
         local delivered = count(t.kept_requester, KEPT)
-        check("export rule on the overlay controller held its item in",
-            held >= KEPT_STOCK and delivered <= 0,
+        check("a listed item still leaves until a mode is chosen",
+            delivered > 0 and held < KEPT_STOCK,
             held .. " of " .. KEPT_STOCK .. " left inside, " .. delivered ..
             " reached the outside requester")
     else
-        check("export filter placed", false)
+        check("export rule section written", false)
     end
 
     if t.conn_inside then
