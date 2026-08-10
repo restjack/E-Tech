@@ -2822,7 +2822,7 @@ local function build_panel(player)
         caption = {"gui-etech-hub.factories"}}
     local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
     fscroll.style.maximal_height = 260
-    fscroll.add {type = "table", name = "frows", column_count = 2}
+    fscroll.add {type = "table", name = "frows", column_count = 3}
 
     return panel
 end
@@ -2912,18 +2912,31 @@ local function load_panel_settings(player, record)
     picker.selected_index = selected
     tabs.contents.views["etech-hub-sort"].selected_index = record.grid_sort or 1
 
+    -- Each row: locate button, what the factory is CALLED and where it is, then
+    -- the box that overrides the name. The rename box alone told you nothing -
+    -- it is empty until you type in it, by design, so every row looked
+    -- identical and the backer name the rest of the mod uses was invisible
+    -- here of all places.
     for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do
         local factory = usable[i]
         local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
         btn.style.minimal_width = 50
         btn.tags = { etech = "factory-locate", id = factory.id }
+        local position = factory.building.position
+        local name = rows.add {type = "label", caption = {"gui-etech-hub.factory-option",
+            factory_label(factory.id),
+            string.format("%.0f", position.x),
+            string.format("%.0f", position.y)}}
+        name.style.minimal_width = 150
         local field = rows.add {type = "textfield",
-            text = hub_data().factory_names[factory.id] or ""}
+            text = hub_data().factory_names[factory.id] or "",
+            tooltip = {"gui-etech-hub.factory-rename-tooltip"}}
         field.tags = { etech = "factory-name", id = factory.id }
         field.style.horizontally_stretchable = true
     end
     if #usable > MAX_FACTORY_ROWS then
         rows.add {type = "label", caption = {"gui-etech-hub.more-factories", #usable - MAX_FACTORY_ROWS}}
+        rows.add {type = "label", caption = ""}
         rows.add {type = "label", caption = ""}
     end
 end

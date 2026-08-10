@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.28.1
+Date: 2026-08-09
+  Changes:
+    - Factory outlet, Factories tab: each row now shows what the factory is
+      CALLED and where it is, next to the box that renames it. The row was just
+      a Map button and an empty text box - empty by design, since it only holds
+      an override - so every row looked identical and the backer name the rest
+      of the mod had started using was invisible in the one list that is
+      entirely about telling factories apart.
+---------------------------------------------------------------------------------------------------
 Version: 0.28.0
 Date: 2026-08-09
   Changes:
