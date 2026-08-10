@@ -184,6 +184,11 @@ return {
     {"factorissimo", "build_display_upgrade"},
     {"factorissimo", "build_roboport_upgrade"},
     {"etech-factory-mk4", "build_power_relay"},
+    -- Swaps Factorissimo's hidden radar for one that reveals two chunks
+    -- instead of one. The stock radar's 3x3 chunk box covers a 60-wide floor
+    -- and leaves the west and north edges of a 120-wide one dark in remote
+    -- view. See factory-mk4/data.lua for the geometry.
+    {"etech-factory-mk4", "upgrade_radar"},
   },
   overlays = {
     outside_x = 0,
