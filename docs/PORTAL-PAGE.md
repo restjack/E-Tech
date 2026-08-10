@@ -135,9 +135,14 @@ The outlet panel shows everything inside your factories:
 - Shift-click takes a stack, ctrl-click takes all you can carry, alt-click adds it to your own logistic requests.
 - Optional storage-chest draining. Reaches nested factories.
 - An automatic circuit gate: no wire means always on, a wire means it runs while any nonzero signal reaches it.
-- **Evacuate** empties a factory's chests wholesale, for decommissioning or moving a build.
+- **Minimum quality to pull out** — for factories running a recycler upcycling loop: the feedstock tiers stay in, the top tier leaves.
+- **Enter** any factory straight from the list, and see the overlay icons it wears on the outside so you can tell them apart. Unnamed factories are labelled from the game's backer names, like roboports.
 
-**Loop guards.** An inlet with auto-request on is a requester in the same network the outlet provides to, so it can ask for exactly what the outlet then pulls back out of the same factories — items in a circle, forever. Four opt-in toggles break that, and the fluid outlet has one of its own for the same trap on a shared fluid header.
+**Per-factory export rules.** Every factory gets a **Factory export filter** inside it, beside the interior power pole — nothing to craft or place. List items in its own signals and choose whether that list is the only thing allowed out or the only thing kept in. It applies to that factory alone, on top of the outlet's own filters, so one factory can hold its recycler feedstock while every other factory exports the same item freely.
+
+**Loop guards.** An inlet with auto-request on is a requester in the same network the outlet provides to, so it can ask for exactly what the outlet then pulls back out of the same factories — items in a circle, forever. The fix that ends it is *serve the factories from their own stock first*; four more opt-in toggles break the circle elsewhere, and the fluid outlet has one of its own for the same trap on a shared fluid header.
+
+The outlet also leaves Factorissimo's own chest connections alone. A requester outside feeding a provider inside is how you get ore into a factory, and without this the outlet reads that provider as stock and pulls the ore straight back out.
 
 The sensor takes the same filters, can include storage chests, and can subtract what the interior requesters are short of — a signal then reads positive for spare stock and negative for a shortfall, so one wire carries both.
 
