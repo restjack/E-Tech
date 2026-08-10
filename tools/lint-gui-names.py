@@ -27,9 +27,22 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOD = os.path.join(REPO, "E-Tech")
-DEFAULT_API = (
-    r"C:\Program Files (x86)\Steam\steamapps\common\Factorio\doc-html\runtime-api.json"
+# Both installs ship this file. The PORTABLE copy is tried first on purpose: it
+# is the one whose version can be confirmed from a script, while the Steam exe
+# runs FactorioAchievementEnabler's version.dll proxy, which prints patcher
+# output and swallows --version. (Found by the Memory Storage session hitting
+# that proxy while trying to verify a build.)
+API_CANDIDATES = (
+    os.path.join(os.path.dirname(REPO), "Factorio", "doc-html", "runtime-api.json"),
+    r"C:\Program Files (x86)\Steam\steamapps\common\Factorio\doc-html\runtime-api.json",
 )
+
+
+def find_api():
+    for candidate in API_CANDIDATES:
+        if os.path.exists(candidate):
+            return candidate
+    return None
 
 # Element creation in this codebase is always `<parent>.add { ... }`; entities go
 # through create_entity, which takes a prototype name and is not our concern.
@@ -50,9 +63,10 @@ def reserved_names(api_path):
 
 
 def main():
-    api_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_API
-    if not os.path.exists(api_path):
-        print("runtime-api.json not found - skipped (pass its path as an argument)")
+    api_path = sys.argv[1] if len(sys.argv) > 1 else find_api()
+    if not api_path or not os.path.exists(api_path):
+        print("runtime-api.json not found in any known install - skipped "
+              "(pass its path as an argument)")
         return 0
 
     reserved = reserved_names(api_path)
