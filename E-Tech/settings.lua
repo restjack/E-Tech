@@ -498,6 +498,13 @@ data:extend({
   },
   {
     type = "bool-setting",
+    name = "etech-hub-backer-names",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "bk4",
+  },
+  {
+    type = "bool-setting",
     name = "etech-hub-shortfall-alerts",
     setting_type = "runtime-global",
     default_value = true,

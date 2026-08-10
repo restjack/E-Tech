@@ -170,9 +170,32 @@ local function is_factory_building(name)
 end
 
 -- LocalisedString; custom names are plain text, the fallback is localized.
+--
+-- "Factory 7" is a label nobody remembers. Roboports, labs, locomotives, radars
+-- and train stops all get a backer name from the engine when they are placed,
+-- which is why a roboport is "Kaeya" rather than "Roboport 12" - but that is a
+-- hard-coded list of five prototype TYPES (LuaEntity.backer_name), and a
+-- Factorissimo factory building is a storage-tank. It cannot have one, and no
+-- amount of prototype work changes that.
+--
+-- What IS available is the list the engine draws from: game.backer_names. So
+-- the naming is done here instead, indexed by factory id rather than picked at
+-- random - identical on every client, no storage, and stable across saves and
+-- reloads. A player-typed name still wins, exactly like renaming a train stop.
+local function backer_name_for(id)
+    local names = game.backer_names
+    local count = #names
+    if count == 0 then return nil end
+    return names[(id - 1) % count + 1]
+end
+
 local function factory_label(id)
     local name = hub_data().factory_names[id]
     if name and name ~= "" then return name end
+    if settings.global["etech-hub-backer-names"].value then
+        local backer = backer_name_for(id)
+        if backer then return backer end
+    end
     return {"gui-etech-hub.factory-n", id}
 end
 
