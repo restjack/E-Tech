@@ -32,6 +32,11 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
 $mod = Join-Path $repo "E-Tech"
 $fail = 0
+# Every step that can skip itself records WHY here, and the summary prints them
+# next to "VERIFY OK". A green run that quietly did half the work is worse than
+# a red one: the whole value of the word OK is that it means the same thing
+# every time. Costs nothing and removes the need to read the scrollback.
+$skipped = @()
 
 Write-Host "== 1/6 Lua syntax =="
 Get-ChildItem $mod -Recurse -Filter *.lua | ForEach-Object {
@@ -79,7 +84,11 @@ if ($luacheckCmd) {
     if ($LASTEXITCODE -ne 0) { $fail++ }
 } else {
     Write-Host "luacheck not installed locally - skipped (CI runs it on push)"
+    $skipped += "luacheck (not installed locally; CI runs it on push)"
 }
+
+if ($SkipDump) { $skipped += "dump-data and the prototype-locale check (-SkipDump)" }
+if ($SkipRuntime) { $skipped += "runtime behaviour (-SkipRuntime)" }
 
 if (-not $SkipDump) {
     Write-Host "== 5/6 dump-data =="
@@ -129,6 +138,7 @@ write-data=$($userData -replace '\\', '/')
         if ($LASTEXITCODE -ne 0) { $fail++ }
     } else {
         Write-Host "factorio.exe not found - skipped dump-data"
+        $skipped += "dump-data and the prototype-locale check (factorio.exe not found)"
     }
 }
 
@@ -139,10 +149,19 @@ if (-not $SkipRuntime) {
     # the mod LOADS; this is the only step that proves it WORKS. Needs the built
     # zip (same as the dump step) and Factorissimo in the mods folder; skips
     # itself with a message when either is missing.
-    & powershell -File (Join-Path $PSScriptRoot "verify-runtime.ps1")
+    $runtime = & powershell -File (Join-Path $PSScriptRoot "verify-runtime.ps1")
+    $runtime | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { $fail++ }
+    # verify-runtime exits 0 when it cannot run at all (no factorio.exe, no
+    # Factorissimo). That is right for it and wrong for the summary here.
+    if ($runtime -match "skipped") { $skipped += "runtime behaviour (see its own message above)" }
 }
 
 if ($fail -gt 0) { Write-Host "VERIFY FAILED ($fail)"; exit 1 }
-Write-Host "VERIFY OK"
+if ($skipped.Count -gt 0) {
+    Write-Host "VERIFY OK, but $($skipped.Count) check(s) did NOT run:"
+    $skipped | ForEach-Object { Write-Host "  - $_" }
+} else {
+    Write-Host "VERIFY OK (every check ran)"
+}
 Write-Host "(mod-combination matrix: powershell -File tools\verify-matrix.ps1)"
