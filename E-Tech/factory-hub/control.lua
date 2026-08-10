@@ -484,6 +484,36 @@ local function ensure_chest_cache(record, may_rebuild)
     local force = record.entity.force
     for _, factory in pairs(cached_factories(record, may_rebuild)) do
         if factory_usable(factory) then
+            -- The interior ends of the factory's own chest connections. A
+            -- Factorissimo chest connection is not a special entity - it is an
+            -- ordinary chest you place inside on a port, paired with one
+            -- outside - so nothing about the chest itself says "Factorissimo is
+            -- already moving things through me". factory.connections does.
+            --
+            -- This matters because the pairing that reads most naturally is a
+            -- REQUESTER outside feeding a PASSIVE PROVIDER inside: that is how
+            -- you get ore from your miners into a factory. Factorissimo sees
+            -- requester-outside as an input and runs the connection inwards.
+            -- The outlet, looking only at logistic modes, sees a passive
+            -- provider full of ore and does its job - pulls it straight back
+            -- out, where the requester asks for it again. The ore never reaches
+            -- the machines and both mods are behaving exactly as designed.
+            -- Deliberately a FRESH remote lookup rather than factory.connections
+            -- off the cached table. Factory tables come across remote.call as
+            -- snapshots, and this device's copy can be up to RESCAN_TICKS old -
+            -- so a connection built since the last factory scan is simply
+            -- absent from it, the chest looks like an ordinary provider, and the
+            -- outlet drains it. Measured exactly that: 100 iron in a connection
+            -- chest went to 8. Only runs while the chest cache is being rebuilt,
+            -- which is already budgeted.
+            local fresh = factorissimo_call("get_factory_by_entity", factory.building)
+            local connected = {}
+            for _, conn in pairs((fresh and fresh.connections) or factory.connections or {}) do
+                local inside = conn.inside
+                if inside and inside.valid and inside.unit_number then
+                    connected[inside.unit_number] = true
+                end
+            end
             local found = factory.inside_surface.find_entities_filtered {
                 area = factory_interior_area(factory),
                 type = "logistic-container",
@@ -495,6 +525,7 @@ local function ensure_chest_cache(record, may_rebuild)
                         chest = chest,
                         mode = chest.prototype.logistic_mode,
                         factory = factory,
+                        connected = connected[chest.unit_number] or nil,
                     }
                 end
             end
@@ -539,7 +570,8 @@ local function reachable_chests(record, accept_mode)
     for _, entry in ipairs(ensure_chest_cache(record, false).entries) do
         if entry.chest.valid and factory_usable(entry.factory)
             and accept_mode(entry.mode) then
-            out[#out + 1] = { chest = entry.chest, factory = entry.factory, mode = entry.mode }
+            out[#out + 1] = { chest = entry.chest, factory = entry.factory,
+                mode = entry.mode, connected = entry.connected }
         end
     end
     return out
@@ -696,14 +728,14 @@ end
 -- nothing about WHICH item is flowing - and "which item stopped" is the actual
 -- question when a factory stalls. Only recorded per pass, so the memory is the
 -- same rolling window the total already used.
-local function note_moved(record, moved, by_key)
+local function note_moved(record, moved, by_key, inside)
     local tick = game.tick
     local samples = record.moved_samples
     if not samples then
         samples = {}
         record.moved_samples = samples
     end
-    samples[#samples + 1] = { tick = tick, moved = moved, by = by_key }
+    samples[#samples + 1] = { tick = tick, moved = moved, by = by_key, inside = inside }
     -- Amortized prune: only rebuild when the oldest entry actually expired
     -- (the old full copy every pass was pure allocation churn).
     if samples[1] and tick - samples[1].tick > RATE_WINDOW then
@@ -718,6 +750,14 @@ end
 local function rate_per_minute(record)
     local total = 0
     for _, s in pairs(record.moved_samples or {}) do total = total + s.moved end
+    return total
+end
+
+-- Items moved chest-to-chest INSIDE the factories, which never crossed the wall
+-- and so are not part of the pull rate above.
+local function inside_per_minute(record)
+    local total = 0
+    for _, s in pairs(record.moved_samples or {}) do total = total + (s.inside or 0) end
     return total
 end
 
@@ -1547,38 +1587,6 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
     return moved, by_key
 end
 
-local function pull_for_outlet(record)
-    local hub = record.entity
-    local hub_inv = hub.get_inventory(defines.inventory.chest)
-    if not hub_inv then return end
-    if not circuit_enabled(record) then
-        note_moved(record, 0)
-        return
-    end
-
-    local prof = hub_data().profiling and helpers.create_profiler()
-    local chests = reachable_chests(record, outlet_source_mode(record))
-    if prof then
-        prof.stop()
-        helpers.write_file(PROFILE_FILE,
-            {"", game.tick, ",reach-chests(n=", #chests, "),", prof, "\n"}, true)
-    end
-    if #chests == 0 then
-        note_moved(record, 0)
-        return
-    end
-
-    local set = filter_set(record)
-
-    -- Snapshot the give-back candidates once for the whole pass, however many
-    -- item types end up going back.
-    local moved, by_key = pull_on_demand(record, hub_inv, chests,
-        return_snapshot(reachable_chests(record, return_mode)), set)
-    note_moved(record, moved, by_key)
-end
-
--- Inlet: distribute into interior requester/buffer chests ---------------------
-
 -- Requested amounts of a chest from its logistic point sections.
 local function chest_requests(chest)
     local point = chest.get_requester_point()
@@ -1597,6 +1605,166 @@ local function chest_requests(chest)
     end
     return wants
 end
+
+-- Serve the factories' own requester chests from the factories' own provider
+-- chests, without anything leaving the wall.
+--
+-- This is the root fix for the loop the guards above only blunt. The full
+-- circle is: an interior provider holds an item, an interior requester wants it,
+-- the inlet auto-requests it from the outside network, the outlet reads that as
+-- demand and pulls the item out of the very factory that needs it, robots fly it
+-- across the base to the inlet, and the inlet pushes it back inside. Six steps
+-- to move an item between two chests on the same surface, and the loop guards
+-- deal with it by refusing to do step four - which stops the circling but still
+-- leaves the interior requester unfed.
+--
+-- Doing the transfer directly instead makes the deficit disappear at the source:
+-- with nothing missing inside, the inlet has nothing to auto-request, the outlet
+-- sees no demand, and there is no circle to break. Robots are never involved,
+-- which also means it works in a factory with no interior roboport at all.
+--
+-- Shares proportionally for the same reason distribute_for_inlet does: filling
+-- each chest to its full deficit in list order starves whatever is at the end of
+-- a stable list whenever supply is short.
+local function interior_fulfil(record, set)
+    local sources = reachable_chests(record, outlet_source_mode(record))
+    local targets = reachable_chests(record, requester_mode)
+    if #sources == 0 or #targets == 0 then return 0 end
+
+    -- what the interior still wants, and who wants it
+    local demand = {}
+    for _, entry in pairs(targets) do
+        local chest = entry.chest
+        if chest.valid then
+            local wants = chest_requests(chest)
+            if wants and next(wants) then
+                local inv = chest.get_inventory(defines.inventory.chest)
+                local current = inv and inventory_counts(inv) or {}
+                for key, want in pairs(wants) do
+                    local name, quality = split_key(key)
+                    if inv and item_allowed(record, name, quality, set) then
+                        local deficit = want - (current[key] or 0)
+                        if deficit > 0 then
+                            local d = demand[key]
+                            if not d then
+                                d = { total = 0, claims = {} }
+                                demand[key] = d
+                            end
+                            d.total = d.total + deficit
+                            d.claims[#d.claims + 1] = { inv = inv, want = deficit }
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if next(demand) == nil then return 0 end
+
+    -- what the interior can cover, per item
+    local supply = {}
+    for _, entry in pairs(sources) do
+        local chest = entry.chest
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                for _, item in pairs(inv.get_contents()) do
+                    local key = item_key(item.name, item.quality or "normal")
+                    if demand[key] then
+                        local s = supply[key]
+                        if not s then
+                            s = { total = 0, invs = {} }
+                            supply[key] = s
+                        end
+                        s.total = s.total + item.count
+                        s.invs[#s.invs + 1] = inv
+                    end
+                end
+            end
+        end
+    end
+
+    local moved = 0
+    for key, d in pairs(demand) do
+        local s = supply[key]
+        if s and s.total > 0 then
+            local name, quality = split_key(key)
+            local pool = math.min(s.total, d.total)
+            for _, claim in ipairs(d.claims) do
+                -- The supply figure is a snapshot and is not decremented as we
+                -- go: a source chest drained by an earlier claim simply returns
+                -- 0 from the transfer and the next one is tried. A claim can
+                -- therefore come up short within a pass, which the next pass
+                -- picks up - the alternative is re-reading every source chest
+                -- per claim, for an item that is about to be topped up anyway.
+                local remaining = (pool >= d.total) and claim.want
+                    or math.floor(pool * claim.want / d.total)
+                for _, source_inv in ipairs(s.invs) do
+                    if remaining < 1 then break end
+                    -- slot-level, so spoilage and quality survive the hop
+                    local put = transfer_items(source_inv, claim.inv,
+                        name, quality, remaining, true)
+                    remaining = remaining - put
+                    moved = moved + put
+                end
+            end
+        end
+    end
+    return moved
+end
+
+local function pull_for_outlet(record)
+    local hub = record.entity
+    local hub_inv = hub.get_inventory(defines.inventory.chest)
+    if not hub_inv then return end
+    if not circuit_enabled(record) then
+        note_moved(record, 0)
+        return
+    end
+
+    local prof = hub_data().profiling and helpers.create_profiler()
+    local chests = reachable_chests(record, outlet_source_mode(record))
+    -- Leave the interior ends of the factory's chest connections alone.
+    -- Factorissimo is already deciding what moves through those, and draining
+    -- one competes with it: an inward connection re-fills the chest the instant
+    -- the outlet empties it, forever. Skipping the CHEST rather than the item
+    -- or the factory is what makes this safe to have on by default - everything
+    -- else inside the same factory still exports normally, so the ore arriving
+    -- through a connection stays put while the plates made from it leave.
+    if not guards(record).pull_connection_chests then
+        local usable = {}
+        for _, entry in pairs(chests) do
+            if not entry.connected then usable[#usable + 1] = entry end
+        end
+        chests = usable
+    end
+    if prof then
+        prof.stop()
+        helpers.write_file(PROFILE_FILE,
+            {"", game.tick, ",reach-chests(n=", #chests, "),", prof, "\n"}, true)
+    end
+    if #chests == 0 then
+        note_moved(record, 0)
+        return
+    end
+
+    local set = filter_set(record)
+
+    -- Before anything leaves: fill the interior's own requests from the
+    -- interior's own stock. Done first on purpose - whatever this satisfies is
+    -- demand the pull below never has to see.
+    local inside = 0
+    if guards(record).interior_first then
+        inside = interior_fulfil(record, set)
+    end
+
+    -- Snapshot the give-back candidates once for the whole pass, however many
+    -- item types end up going back.
+    local moved, by_key = pull_on_demand(record, hub_inv, chests,
+        return_snapshot(reachable_chests(record, return_mode)), set)
+    note_moved(record, moved, by_key, inside)
+end
+
+-- Inlet: distribute into interior requester/buffer chests ---------------------
 
 -- Write the factories' remaining deficits as this inlet's own bot requests
 -- (managed section, group "etech-inlet-auto"; the player's own sections are
@@ -2340,6 +2508,11 @@ local SORT_ITEMS = {
 -- state restore and the click handler, so adding a guard is one entry plus its
 -- two locale keys.
 local GUARD_CHECKS = {
+    -- First on purpose: it is the only one that FIXES the loop rather than
+    -- refusing to take part in it, so it is what someone should try first.
+    {element = "etech-hub-interior-first", field = "interior_first",     loc = "interior-first"},
+    {element = "etech-hub-pull-connections", field = "pull_connection_chests",
+                                                                loc = "pull-connections"},
     {element = "etech-hub-guard-inlet",    field = "ignore_inlet_requests", loc = "guard-inlet"},
     {element = "etech-hub-guard-items",    field = "block_inlet_items",     loc = "guard-items"},
     {element = "etech-hub-guard-cooldown", field = "cooldown",              loc = "guard-cooldown"},
@@ -2565,6 +2738,10 @@ local function refresh_grid(player, record)
     -- rate line carries the pause reason — "0/min" with no explanation
     -- looked broken whenever a circuit gated the outlet off
     local rate_caption = {"gui-etech-hub.rate", rate_per_minute(record)}
+    local inside = inside_per_minute(record)
+    if inside > 0 then
+        rate_caption = {"", rate_caption, "  ", {"gui-etech-hub.rate-inside", inside}}
+    end
     if not circuit_enabled(record) then
         rate_caption = {"", rate_caption, " ", {"gui-etech-hub.paused-circuit"}}
     end

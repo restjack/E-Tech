@@ -1,4 +1,45 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.25.0
+Date: 2026-08-09
+  Bugfixes:
+    - Factory outlet: it drained the interior end of the factory's own chest
+      connections, fighting Factorissimo for the same chest. The pairing that
+      breaks is the ordinary one - a REQUESTER outside feeding a PASSIVE
+      PROVIDER inside, which is how ore gets from your miners into a factory.
+      Factorissimo reads requester-outside as an input and runs the connection
+      inwards; the outlet, reading logistic modes alone, saw a provider full of
+      ore and pulled it straight back out, where the requester asked for it
+      again. The ore never reached the machines and both mods were behaving
+      exactly as designed. Interior connection chests are now left alone.
+      Crucially it skips the CHEST, not the item and not the factory, so
+      everything else inside still exports normally - the ore arriving through a
+      connection stays put while the plates made from it leave. There is an
+      opt-in if you deliberately want the outlet to drain one.
+      Connections are read with a fresh lookup rather than from the cached
+      factory table: those tables are remote snapshots up to five minutes old,
+      so a connection built since the last scan was invisible and the chest
+      looked like an ordinary provider.
+  Features:
+    - Factory outlet: "Serve the factories from their own stock first". This is
+      the root fix for the loop the guards in 0.23.0 only blunt, and it is the
+      one to try first. The full circle was: an interior provider chest holds an
+      item, an interior requester chest wants it, the inlet auto-requests it from
+      the outside network, the outlet reads that as demand and pulls the item out
+      of the very factory that needs it, robots fly it across the base to the
+      inlet, and the inlet pushes it back inside. Six steps to move an item
+      between two chests on the same surface. The loop guards stop that by
+      refusing to do step four, which ends the circling but leaves the interior
+      requester unfed. With this on, the transfer happens directly inside
+      instead: interior requester and buffer chests are filled from the interior
+      provider chests before anything is pulled out at all. The deficit is gone,
+      so the inlet has nothing to auto-request and the outlet sees no demand -
+      there is no circle left to break. No robots are involved, so it works in a
+      factory with no interior roboport. Shared out proportionally when supply is
+      short, same as the inlet does, and moved stack by stack so spoilage and
+      quality survive. The outlet's rate line reports what moved inside
+      separately from what it pulled out, since those items never crossed the
+      wall.
+---------------------------------------------------------------------------------------------------
 Version: 0.24.1
 Date: 2026-08-09
   Changes:

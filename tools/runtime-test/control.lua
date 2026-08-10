@@ -42,6 +42,7 @@ local STOCK = 200      -- iron plates placed in the interior provider chest
 local OUT_WANT = 60    -- what the outside requester asks for
 local IN_WANT = 40     -- what the interior requester asks for
 local SPARE_COUNT = 50 -- unwanted items pushed into the outlet, to be given back
+local CONN_STOCK = 100 -- iron parked in the connection chest inside the factory
 
 local SETTLE_TICK = 300  -- world is built and running by here
 local ASSERT_TICK = 1500 -- 12.5 s: ~12 hub passes plus bot flight time
@@ -185,6 +186,37 @@ local function build_world()
         force = force, raise_built = true,
     }
 
+    -- A real Factorissimo chest connection, in the pairing that actually bites:
+    -- a REQUESTER outside feeding a PASSIVE PROVIDER inside, which is how ore
+    -- gets from your miners into a factory. Factorissimo runs that connection
+    -- inwards; the outlet, reading logistic modes alone, used to see a provider
+    -- full of ore and pull it straight back out for the requester to ask for
+    -- again. The chest has to be exempt without exempting the whole factory,
+    -- since everything else inside still needs to export.
+    force.technologies["factory-connection-type-chest"].researched = true
+    local port
+    for _, connection in pairs(factory.layout.connections or {}) do
+        -- plain connections only; the quality-gated ports need the quality
+        if not connection.quality then port = connection break end
+    end
+    if port then
+        t.conn_inside = inside.create_entity {
+            name = "passive-provider-chest",
+            position = {ix + port.inside_x, iy + port.inside_y},
+            force = force, raise_built = true,
+        }
+        local outside_position = {
+            t.building.position.x + port.outside_x,
+            t.building.position.y + port.outside_y,
+        }
+        t.conn_outside = surface.create_entity {
+            name = "requester-chest", position = outside_position,
+            force = force, raise_built = true,
+        }
+        if t.conn_inside then t.conn_inside.insert {name = IRON, count = CONN_STOCK} end
+        if t.conn_outside then request_for(t.conn_outside, IRON, OUT_WANT) end
+    end
+
     check("hub devices placed",
         t.outlet ~= nil and t.inlet ~= nil and t.sensor ~= nil)
 end
@@ -309,6 +341,16 @@ assert_all = function(t)
     end
     check("fluid sensor broadcasts the interior tanks", fluid_signal > 0,
         FLUID .. " signal reads " .. fluid_signal)
+
+    if t.conn_inside then
+        local left = count(t.conn_inside, IRON)
+        check("outlet left the factory connection chest alone",
+            left >= CONN_STOCK,
+            "connection chest holds " .. left .. " of " .. CONN_STOCK ..
+            " (the plain provider chest was drained to " .. count(t.provider, IRON) .. ")")
+    else
+        check("connection port found to test against", false)
+    end
 
     log("[ETECH-TEST] DONE " .. passes .. " passed, " .. failures .. " failed")
 end

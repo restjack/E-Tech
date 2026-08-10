@@ -76,8 +76,34 @@ if (-not $SkipDump) {
     Write-Host "== 5/6 dump-data =="
     $factorio = "C:\Program Files (x86)\Steam\steamapps\common\Factorio\bin\x64\factorio.exe"
     if (Test-Path $factorio) {
-        & $factorio --dump-data | Out-Null
-        $log = Join-Path $env:APPDATA "Factorio\factorio-current.log"
+        # Own write-data directory, like verify-runtime.ps1 and
+        # verify-matrix.ps1. Factorio holds an exclusive lock on its user data,
+        # so with the game open this step died on "Couldn't create lock file" -
+        # which reads like a broken script rather than "close Factorio". The
+        # MOD directory stays the live one on purpose: the whole point of this
+        # step is dumping whatever pack is actually installed.
+        $work = Join-Path $env:TEMP "etech-verify-dump"
+        $userData = Join-Path $work "userdata"
+        $config = Join-Path $work "config.ini"
+        New-Item -ItemType Directory -Force -Path $userData | Out-Null
+        @"
+[path]
+read-data=__PATH__executable__/../../data
+write-data=$($userData -replace '\\', '/')
+"@ | Out-File $config -Encoding utf8
+
+        & $factorio --dump-data --config $config `
+            --mod-directory (Join-Path $env:APPDATA "Factorio\mods") | Out-Null
+        $log = Join-Path $userData "factorio-current.log"
+
+        # lint-locale.py reads the dump from the live script-output folder, so
+        # put the fresh one where it looks.
+        $dump = Join-Path $userData "script-output\data-raw-dump.json"
+        $liveOutput = Join-Path $env:APPDATA "Factorio\script-output"
+        if (Test-Path $dump) {
+            New-Item -ItemType Directory -Force -Path $liveOutput | Out-Null
+            Copy-Item $dump $liveOutput -Force
+        }
         $errors = Select-String -Path $log -Pattern "^\s*[\d.]+ Error" -CaseSensitive
         if ($errors) {
             Write-Host "dump-data ERRORS:"; $errors | ForEach-Object Line; $fail++
