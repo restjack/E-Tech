@@ -406,6 +406,23 @@ assert_all = function(t)
     check("fluid sensor broadcasts the interior tanks", fluid_signal > 0,
         FLUID .. " signal reads " .. fluid_signal)
 
+    -- Where the filter physically IS, not just that it exists. Searching the
+    -- whole surface hid a real bug for two versions: it was being built off the
+    -- floor, out in the door band past the wall, because Factorissimo puts the
+    -- power pole it was anchored on OUTSIDE the room (factory-1: floor ends at
+    -- 15, pole sits at 17). Invisible in game, findable by this test.
+    if t.export_filter and t.export_filter.valid then
+        local factory = factory_of(t.building)
+        local half = (factory and factory.layout and factory.layout.inside_size or 30) / 2
+        local at = t.export_filter.position
+        local dx = math.abs(at.x - (factory and factory.inside_x or 0))
+        local dy = math.abs(at.y - (factory and factory.inside_y or 0))
+        check("the export filter is inside the room, not out past the wall",
+            dx < half and dy < half,
+            string.format("at %.1f,%.1f - offsets %.1f,%.1f against a half-extent of %.1f",
+                at.x, at.y, dx, dy, half))
+    end
+
     -- The export rule is INERT until a mode is picked, and the mode lives in
     -- E-Tech's storage behind the panel, which a test mod cannot write. So what
     -- is asserted is the DEFAULT: an item listed in the etech-export section,

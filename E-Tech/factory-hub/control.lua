@@ -800,27 +800,31 @@ end
 --
 -- Its own signal list is the item list, so item picking stays the game's job -
 -- logistic groups, quality per entry, copy-paste between combinators.
-local function interior_fittings_position(factory)
-    -- Factorissimo puts the interior power pole (and the roboport with it) at
-    -- layout.inside_energy_*, which is public on the factory table - no need for
-    -- the private _inside_power_pole field the Mk4 code reads.
-    local layout = factory.layout
-    if layout and layout.inside_energy_x and layout.inside_energy_y then
-        return {
-            x = factory.inside_x + layout.inside_energy_x,
-            y = factory.inside_y + layout.inside_energy_y,
-        }
-    end
-    return { x = factory.inside_x, y = factory.inside_y }
-end
-
-local EXPORT_FILTER_OFFSET = { x = -1, y = 0 }
+-- One fixed tile, just inside the room by the door.
+--
+-- MEASURED, not assumed. Factorissimo's layouts put inside_energy - the power
+-- pole and roboport - OUTSIDE the floor: factory-1 has inside_size 30, so the
+-- floor ends at 15, and the pole sits at y = 17, out in the door band past the
+-- wall. Anchoring on the pole and stepping one tile further out (which is what
+-- 0.29.1 and 0.31.0 did) put this device off the floor in the dark beside the
+-- door, where it is invisible - though still findable by a whole-surface search,
+-- which is why the headless test kept passing.
+--
+-- So it is anchored on the interior bounds instead: two tiles in from the wall
+-- the door is on, three tiles to the side of the door opening. Inside the room
+-- at every tier including a Mk4, never in the doorway, and always the same
+-- place. With no collision box it cannot be blocked or block anything.
+local EXPORT_FILTER_INSET = 2   -- tiles in from the door-side wall
+local EXPORT_FILTER_SIDE = 3    -- tiles to the side of the door opening
 
 local function export_filter_position(factory)
-    local fittings = interior_fittings_position(factory)
+    local half = (factory.layout and factory.layout.inside_size or 30) / 2
+    local door_y = (factory.layout and factory.layout.inside_door_y) or half
+    -- the door is on whichever side inside_door_y points at; come in from it
+    local sign = door_y >= 0 and 1 or -1
     return {
-        x = fittings.x + EXPORT_FILTER_OFFSET.x,
-        y = fittings.y + EXPORT_FILTER_OFFSET.y,
+        x = factory.inside_x - EXPORT_FILTER_SIDE,
+        y = factory.inside_y + sign * (half - EXPORT_FILTER_INSET),
     }
 end
 

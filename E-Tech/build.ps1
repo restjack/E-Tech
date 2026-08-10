@@ -88,7 +88,25 @@ if ($verdict) {
     throw "Built archive failed its integrity check - $verdict - not published, the installed zip is untouched"
 }
 
-Move-Item -LiteralPath $zipTemp -Destination $zip -Force
+# File.Replace is the atomic swap on Windows and overwrites; Move-Item -Force
+# does NOT reliably overwrite here (it threw "Cannot create a file when that
+# file already exists" the moment the destination stopped being pre-deleted).
+# Replace needs the destination to exist, so the first ever build falls back to
+# a plain move. No backup file is kept - $null as the third argument.
+if (Test-Path $zip) {
+    # [NullString]::Value, not $null: PowerShell marshals a bare $null into an
+    # empty string and Replace rejects it with "The path is not of a legal form".
+    try {
+        [System.IO.File]::Replace($zipTemp, $zip, [NullString]::Value)
+    } catch [System.IO.IOException] {
+        Remove-Item -Force $zipTemp -ErrorAction SilentlyContinue
+        throw ("Cannot replace $zip - Factorio has it open. Close the game, or " +
+               "bump the version so the build writes a new filename. " +
+               "The installed zip is untouched. ($($_.Exception.Message))")
+    }
+} else {
+    Move-Item -LiteralPath $zipTemp -Destination $zip
+}
 Write-Host "Built $zip"
 
 # Archive a copy of every built version in the project folder so old

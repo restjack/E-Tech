@@ -1,4 +1,26 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.31.1
+Date: 2026-08-09
+  Bugfixes:
+    - The export filter was being built OFF THE FLOOR, out in the door band past
+      the wall, where it is invisible. It was anchored on the interior power
+      pole, and the pole is not in the room: factory-1 has inside_size 30, so the
+      floor ends at 15, and Factorissimo puts the pole at y = 17. Every tier is
+      the same shape. Anchoring on the pole and stepping one tile further out put
+      the device outside the room in every factory.
+      It is now anchored on the interior bounds instead - two tiles in from the
+      wall the door is on, three to the side of the door opening - which is
+      inside the room at every tier including a Mk4, never in the doorway, and
+      the same place every time.
+      The headless test kept passing throughout, because it searched the whole
+      surface for the entity rather than checking WHERE it was. It now asserts
+      the filter is within the interior bounds, and that assertion fails against
+      0.31.0 exactly as it should.
+    - build.ps1: replacing the installed zip used Move-Item -Force, which does
+      not reliably overwrite once the destination is no longer pre-deleted. Uses
+      File.Replace now, and says plainly when the real problem is that Factorio
+      has the zip open rather than surfacing a raw IOException.
+---------------------------------------------------------------------------------------------------
 Version: 0.31.0
 Date: 2026-08-09
   Changes:
