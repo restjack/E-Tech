@@ -37,7 +37,6 @@ local SENSOR_NAME = "etech-factory-sensor"
 local FLUID_OUTLET_NAME = "etech-factory-fluid-outlet"
 local FLUID_INLET_NAME = "etech-factory-fluid-inlet"
 local FLUID_SENSOR_NAME = "etech-factory-fluid-sensor"
-local EXPORT_FILTER_NAME = "etech-factory-export-filter"
 local PANEL_NAME = "etech-hub-panel"
 local INLET_PANEL_NAME = "etech-inlet-panel"
 local AUTO_GROUP = "etech-inlet-auto"
@@ -106,7 +105,6 @@ local KINDS = {
     [FLUID_OUTLET_NAME] = "fluid-outlet",
     [FLUID_INLET_NAME] = "fluid-inlet",
     [FLUID_SENSOR_NAME] = "fluid-sensor",
-    [EXPORT_FILTER_NAME] = "export-filter",
 }
 
 -- item|quality key convention used across caches, wants tables and GUI tags
@@ -211,17 +209,7 @@ local function register_device(entity, copy_from)
     local record = {
         entity = entity,
         kind = KINDS[entity.name],
-        -- Mode 1 is "no filtering" for every device except the export filter,
-        -- whose whole reason to exist is to restrict something: a freshly
-        -- placed one defaults to "these never leave", so listing an item in it
-        -- does what it looks like it does without a second step. Shipping the
-        -- shared default here meant the device silently did nothing until you
-        -- opened it and changed the dropdown.
-        filters = {
-            mode = (KINDS[entity.name] == "export-filter") and 3 or 1,
-            items = {},
-            match_quality = false,
-        },
+        filters = { mode = 1, items = {}, match_quality = false },
         guards = {},
         pins = {},
     }
@@ -767,81 +755,11 @@ local function combinator_filter_set(entity, match_quality)
     return seen and set or nil
 end
 
--- Which factory each export filter belongs to. Resolved from the DEVICE side -
--- walk the handful of registered filters and ask Factorissimo which factory
--- surrounds each one - rather than by looking for a filter inside every factory
--- while the chest cache rebuilds. The chest cache is deliberately allowed to be
--- stale (see ensure_chest_cache), which is fine for chests because every entry
--- is re-validated on use, and NOT fine for a rule: a stale cache means a filter
--- you just placed silently does nothing, which is indistinguishable from a bug.
--- There are never many of these, so resolving them per pass costs nothing.
-local function export_filters_by_factory()
-    local out = {}
-    for unit, device in pairs(hub_data().hubs) do
-        if device.kind == "export-filter" and device.entity and device.entity.valid then
-            local entity = device.entity
-            local factory = factorissimo_call("find_surrounding_factory_by_surface_index",
-                entity.surface.index, entity.position)
-            if factory and factory.id then out[factory.id] = unit end
-        end
-    end
-    return out
-end
-
--- Build the export filter into a factory that has not got one yet.
---
--- It is part of the factory rather than something you craft and place, the same
--- way Factorissimo's interior power pole, roboport and overlay controller are:
--- every factory has one, always, and there is nothing to lose or forget to
--- build. Put beside the interior DOOR, which is where Factorissimo parks the
--- pole and roboport and therefore where players already look for the factory's
--- own fittings - a device dropped in the middle of the floor would be both
--- harder to find and in the way of the build.
---
--- find_non_colliding_position rather than a fixed offset: the door surroundings
--- are exactly where the pole and roboport already are, and on an existing
--- factory the player may have built right up to them.
--- Where the factory's own fittings live. Factorissimo puts the interior power
--- pole (and the roboport with it) at layout.inside_energy_*, which is public on
--- the factory table - no need for the private _inside_power_pole field the Mk4
--- code reads. Anchoring here rather than on the DOOR matters: door + a couple of
--- tiles lands in the entrance itself, and on a Mk4, whose doorway is wider,
--- squarely in the middle of it.
-local function interior_fittings_position(factory)
-    local layout = factory.layout
-    if layout and layout.inside_energy_x and layout.inside_energy_y then
-        return {
-            x = factory.inside_x + layout.inside_energy_x,
-            y = factory.inside_y + layout.inside_energy_y,
-        }
-    end
-    return { x = factory.inside_x, y = factory.inside_y }
-end
-
--- One fixed tile, immediately left of the factory's power pole. No search, so
--- every factory puts it in the same place and you learn where to look once; and
--- because the prototype has no collision it cannot be blocked by whatever is
--- already built there, nor block anything itself.
---
--- The search this replaces was the wrong shape twice over: anchored on the door
--- it landed in the entrance (dead centre of a Mk4's wider one), and anchored on
--- the pole it still put the device somewhere different in every factory
--- depending on what happened to be free.
-local EXPORT_FILTER_OFFSET = { x = -1, y = 0 }
-
-local function export_filter_position(factory)
-    local fittings = interior_fittings_position(factory)
-    return {
-        x = fittings.x + EXPORT_FILTER_OFFSET.x,
-        y = fittings.y + EXPORT_FILTER_OFFSET.y,
-    }
-end
-
--- The icons Factorissimo paints on the OUTSIDE of the factory building come
--- from a constant combinator it builds inside (factory.inside_overlay_controller,
--- only present once the display upgrade is researched). Reading the same signals
--- lets the outlet's factory list show each factory the way it looks on the map,
--- which is how anyone actually identifies one.
+-- The icons Factorissimo paints on the OUTSIDE of the factory come from the
+-- overlay controller's ACTIVE sections. Reading the same list lets the outlet's
+-- factory list show each factory the way it looks on the map. The export rule's
+-- own section is inactive, so it never shows up here - which is the same
+-- property that keeps it off the building.
 local function factory_overlay_signals(factory, limit)
     local controller = factory.inside_overlay_controller
     if not (controller and controller.valid) then return {} end
@@ -861,45 +779,82 @@ local function factory_overlay_signals(factory, limit)
     return out
 end
 
-local function ensure_export_filter(factory)
-    local inside = factory.inside_surface
-    if not (inside and inside.valid) then return end
-    local position = export_filter_position(factory)
-    local entity = inside.create_entity {
-        name = EXPORT_FILTER_NAME,
-        position = position,
-        force = factory.building.force,
-    }
-    if not entity then return end
-    -- Belongs to the factory, so the player cannot mine, shoot or deconstruct
-    -- it away and leave the factory unable to carry a rule.
-    entity.destructible = false
-    entity.rotatable = false
-    register_device(entity)
-    return entity
+-- The export rule lives on Factorissimo's own OVERLAY CONTROLLER, in a section
+-- of its own. No entity of E-Tech's inside the factory at all, which is what
+-- finally makes position a non-question - three attempts at placing one taught
+-- me that any spot is the wrong spot in somebody's factory.
+--
+-- The section is created INACTIVE on purpose. Factorissimo builds the exterior
+-- icons from `control_behavior.sections` and skips any section that is not
+-- active, so an inactive one is invisible to it and readable by us: the rule
+-- rides on the overlay controller without painting itself on the building.
+-- Re-activating it does no harm either - the icons simply appear outside and
+-- E-Tech reads the list the same way.
+--
+-- Keeping the list on the ENTITY rather than in E-Tech's storage is what lets
+-- it be blueprinted, copied between factories by Factorissimo's own overlay
+-- copy, and driven by the headless test - none of which is true of anything
+-- kept behind a GUI in `storage`.
+local EXPORT_SECTION_GROUP = "etech-export"
+
+-- Same snapshot trap that hid factory connections: the factory table this
+-- device cached can predate the display upgrade being researched, and then
+-- inside_overlay_controller is simply absent from it - the rule reads as "no
+-- rule" and the outlet exports everything. Re-ask when the cached copy has no
+-- controller. Measured: without this the test's kept item walked straight out.
+local function overlay_controller(factory)
+    local controller = factory.inside_overlay_controller
+    if controller and controller.valid then return controller end
+    local fresh = factorissimo_call("get_factory_by_entity", factory.building)
+    controller = fresh and fresh.inside_overlay_controller
+    if controller and controller.valid then return controller end
+    return nil
 end
 
--- nil when a factory has no filter device, or has one with an empty list, so the
--- pull pass skips the work rather than evaluating a permissive filter once per
--- stack. `cache` memoises for one pass: one factory's rule is consulted for
--- every chest in it.
+local function export_section(controller, create)
+    local behavior = controller.get_or_create_control_behavior()
+    if not behavior then return nil end
+    for _, section in pairs(behavior.sections or {}) do
+        if section.group == EXPORT_SECTION_GROUP then return section end
+    end
+    if not create then return nil end
+    local section = behavior.add_section(EXPORT_SECTION_GROUP)
+    if section then section.active = false end
+    return section
+end
+
+-- nil when the factory has no overlay controller, no export section, or an
+-- empty one - so the pull pass skips the work rather than evaluating a
+-- permissive filter once per stack. `cache` memoises for one pass, since one
+-- factory's rule is consulted for every chest in it.
 local function factory_filter_active(record, factory_id, cache)
-    if cache.by_factory == nil then cache.by_factory = export_filters_by_factory() end
     local hit = cache[factory_id]
     if hit ~= nil then
         if hit == false then return nil end
         return hit.filters, hit.set
     end
-    local device = hub_data().hubs[cache.by_factory[factory_id] or 0]
-    if not (device and device.entity and device.entity.valid) then
+    local factory = cache.factories and cache.factories[factory_id]
+    local controller = factory and overlay_controller(factory)
+    local section = controller and export_section(controller, false)
+    if not section then
         cache[factory_id] = false
         return nil
     end
+    local stored = (hub_data().factory_filters or {})[factory_id] or {}
     local filters = {
-        mode = device.filters.mode or 3,
-        match_quality = device.filters.match_quality,
+        -- blacklist by default: a list of items attached to a factory reads as
+        -- "these stay here"
+        mode = stored.mode or 3,
+        match_quality = stored.match_quality,
     }
-    local set = combinator_filter_set(device.entity, filters.match_quality)
+    local set = nil
+    for _, filter in pairs(section.filters) do
+        local value = filter.value
+        if value and value.name and (value.type == nil or value.type == "item") then
+            set = set or { names = {}, any = {}, keys = {} }
+            add_to_set(set, value.name, filters.match_quality and value.quality or nil)
+        end
+    end
     if not set then
         cache[factory_id] = false
         return nil
@@ -1781,7 +1736,10 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
     end
     if next(need) == nil then return 0, by_key end
 
-    local policy_cache = {}
+    -- factory id -> factory, so the rule resolver can reach the overlay
+    -- controller without another scan
+    local policy_cache = { factories = {} }
+    for _, entry in pairs(chests) do policy_cache.factories[entry.factory.id] = entry.factory end
     for _, entry in pairs(chests) do
         if next(need) == nil then break end
         local chest = entry.chest
@@ -3343,13 +3301,20 @@ local function build_sensor_panel(player, record)
         tooltip = {"gui-etech-hub.match-quality-tooltip"}}
 end
 
--- GUI: export filter panel -----------------------------------------------------
--- Deliberately tiny. The item list is the combinator's own signal list, edited
--- in the vanilla window this panel sits beside, so all that is needed here is
--- the part the vanilla window has nowhere to put: whether that list is a
--- whitelist or a blacklist, and whether the quality on each entry is binding.
+-- GUI: export rule panel ------------------------------------------------------
+-- Hangs off Factorissimo's OVERLAY CONTROLLER rather than any entity of ours.
+-- The item list is the "etech-export" section in that combinator's own window;
+-- this panel adds only what the vanilla window has nowhere to put - whether the
+-- list means "only these leave" or "these never leave", and whether the quality
+-- on each entry is binding.
+--
+-- Accepted cost, and it was Eli's call: the overlay controller only exists once
+-- the interior display upgrade is researched, so a factory without that
+-- research cannot carry a rule. Worth it to stop having a device of ours
+-- looking for somewhere to stand.
 
 local EXPORT_PANEL_NAME = "etech-export-filter-panel"
+local OVERLAY_CONTROLLER = "factory-overlay-controller"
 
 local EXPORT_MODE_ITEMS = {
     {"gui-etech-hub.export-mode-off"},
@@ -3357,9 +3322,30 @@ local EXPORT_MODE_ITEMS = {
     {"gui-etech-hub.export-mode-block"},
 }
 
-local function build_export_panel(player, record)
+-- Which factory's overlay controller is this? Resolved from the entity, so it
+-- works no matter how the player got to the window.
+local function factory_of_controller(entity)
+    return factorissimo_call("find_surrounding_factory_by_surface_index",
+        entity.surface.index, entity.position)
+end
+
+local function build_export_panel(player, entity)
     local old_panel = player.gui.relative[EXPORT_PANEL_NAME]
     if old_panel then old_panel.destroy() end
+    local factory = factory_of_controller(entity)
+    if not (factory and factory.id) then return end
+    -- Create the section on open so the player finds it waiting in the
+    -- combinator window rather than having to know its name.
+    export_section(entity, true)
+
+    local data = hub_data()
+    data.factory_filters = data.factory_filters or {}
+    local stored = data.factory_filters[factory.id]
+        or { mode = 3, match_quality = false }
+    data.factory_filters[factory.id] = stored
+    data.open_overlay = data.open_overlay or {}
+    data.open_overlay[player.index] = factory.id
+
     local panel = player.gui.relative.add {
         type = "frame",
         name = EXPORT_PANEL_NAME,
@@ -3368,27 +3354,23 @@ local function build_export_panel(player, record)
         anchor = {
             gui = defines.relative_gui_type.constant_combinator_gui,
             position = defines.relative_gui_position.right,
-            names = {EXPORT_FILTER_NAME},
+            names = {OVERLAY_CONTROLLER},
         },
     }
     local inner = panel.add {
-        type = "frame",
-        name = "inner",
-        style = "inside_shallow_frame_with_padding",
-        direction = "vertical",
+        type = "frame", name = "inner",
+        style = "inside_shallow_frame_with_padding", direction = "vertical",
     }
     local label = inner.add {type = "label", name = "export_help",
         caption = {"gui-etech-hub.export-help"}}
     label.style.single_line = false
-    label.style.maximal_width = 300
+    label.style.maximal_width = 320
     local mode = inner.add {type = "drop-down", name = "etech-hub-export-mode",
         items = EXPORT_MODE_ITEMS,
         tooltip = {"gui-etech-hub.export-mode-tooltip"}}
-    -- 3 (blacklist) is the default because "things I listed stay in here" is
-    -- how a box you drop into a factory and fill with item names reads.
-    mode.selected_index = record.filters.mode or 3
-    inner.add {type = "checkbox", name = "etech-hub-match-quality",
-        state = record.filters.match_quality == true,
+    mode.selected_index = stored.mode or 3
+    inner.add {type = "checkbox", name = "etech-hub-export-quality",
+        state = stored.match_quality == true,
         caption = {"gui-etech-hub.match-quality"},
         tooltip = {"gui-etech-hub.match-quality-tooltip"}}
 end
@@ -3501,8 +3483,13 @@ local function on_gui_opened(event)
     local entity = event.entity
     if not (entity and entity.valid) then return end
     local kind = KINDS[entity.name]
+    if entity.name == OVERLAY_CONTROLLER then
+        local player = game.get_player(event.player_index)
+        if player and factorissimo_available() then build_export_panel(player, entity) end
+        return
+    end
     if not (kind == "outlet" or kind == "inlet" or kind == "sensor"
-        or kind == "fluid-outlet" or kind == "export-filter") then return end
+        or kind == "fluid-outlet") then return end
     if not factorissimo_available() then return end
     local player = game.get_player(event.player_index)
     if not player then return end
@@ -3520,8 +3507,6 @@ local function on_gui_opened(event)
         refresh_inlet_panel(player, record)
     elseif kind == "sensor" then
         build_sensor_panel(player, record)
-    elseif kind == "export-filter" then
-        build_export_panel(player, record)
     else
         build_fluid_panel(player, record)
     end
@@ -3554,8 +3539,11 @@ local function on_gui_selection_state_changed(event)
         return
     end
     if name == "etech-hub-export-mode" then
-        local record = open_record(event.player_index)
-        if record then record.filters.mode = event.element.selected_index end
+        local data = hub_data()
+        local id = (data.open_overlay or {})[event.player_index]
+        if id and data.factory_filters and data.factory_filters[id] then
+            data.factory_filters[id].mode = event.element.selected_index
+        end
         return
     end
     if name == "etech-hub-min-quality" then
@@ -3599,6 +3587,12 @@ local function on_gui_checked_state_changed(event)
     if not record then return end
     if name == "etech-hub-storage" then
         record.pull_storage = event.element.state
+    elseif name == "etech-hub-export-quality" then
+        local data = hub_data()
+        local id = (data.open_overlay or {})[event.player_index]
+        if id and data.factory_filters and data.factory_filters[id] then
+            data.factory_filters[id].match_quality = event.element.state
+        end
     elseif name == "etech-hub-match-quality" then
         record.filters.match_quality = event.element.state
         record.sensor_snapshot = nil
@@ -3848,40 +3842,8 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
     for _, record in pairs(outlets) do
         surface_proxies(record.entity.surface, record.entity.force, true)
         gindex_resync(record.entity.surface, record.entity.force)
-        -- Fit any factory that has not got an export filter yet. Driven from the
-        -- OUTLET rather than from factory creation, because the outlet is the
-        -- only thing that reads the rule - a surface with no outlet gets no
-        -- devices littered through its factories. Self-healing: an existing save
-        -- fits them out on the first maintenance pass after the update, and one
-        -- removed by a script comes back.
-        local existing = export_filters_by_factory()
-        local budget = 2
-        for _, factory in pairs(cached_factories(record, false)) do
-            if budget <= 0 then break end
-            if factory_usable(factory) then
-                local unit = existing[factory.id]
-                if not unit then
-                    if ensure_export_filter(factory) then budget = budget - 1 end
-                else
-                    -- Move any filter an earlier version scattered elsewhere
-                    -- (the doorway, or wherever the old search happened to
-                    -- land) onto the fixed spot. TELEPORTED, never rebuilt:
-                    -- the combinator's signal list is the rule itself, so
-                    -- replacing the entity would silently wipe it.
-                    local device = hub_data().hubs[unit]
-                    local entity = device and device.entity
-                    if entity and entity.valid then
-                        local want = export_filter_position(factory)
-                        local at = entity.position
-                        if math.abs(at.x - want.x) > 0.01 or math.abs(at.y - want.y) > 0.01 then
-                            entity.teleport(want)
-                            budget = budget - 1
-                        end
-                    end
-                end
-            end
-        end
     end
+
     -- drop proxy caches nothing refreshed for two lifetimes (outlet gone,
     -- surface deleted) so storage doesn't accumulate dead surface entries
     if data.proxies then

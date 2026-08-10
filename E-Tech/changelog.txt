@@ -1,4 +1,31 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.30.0
+Date: 2026-08-09
+  Changes:
+    - The export rule now lives on Factorissimo's own overlay controller, and
+      E-Tech's separate export filter device is gone. Three attempts at placing
+      a device inside a factory - beside the door, beside the power pole, and
+      finally on a fixed uncollidable tile - each ended up somewhere wrong in
+      somebody's factory. Removing the device removes the question.
+      The item list is a section named "etech-export" in the overlay
+      controller's own window, created for you the first time you open it, and
+      created INACTIVE: Factorissimo builds the exterior icons only from active
+      sections, so the rule rides along without painting itself on the outside
+      of the building. Re-activating it is harmless - the icons appear and the
+      rule reads the same.
+      E-Tech's panel beside that window still carries the two things the vanilla
+      one has nowhere for: whether the list means "only these leave" or "these
+      never leave" (the default), and whether quality is binding.
+      Keeping the list on the ENTITY rather than in E-Tech's storage is what
+      lets it be blueprinted, copied between factories by Factorissimo's own
+      overlay copy, and driven by the headless test.
+      Accepted cost, deliberately: the overlay controller only exists once the
+      interior display upgrade is researched, so a factory without that research
+      cannot carry an export rule. That was the trade asked for, and it beats a
+      device hunting for somewhere to stand.
+      Export filter entities from 0.27.0-0.29.1 disappear with their prototype;
+      any rule set on one needs re-entering on the overlay controller.
+---------------------------------------------------------------------------------------------------
 Version: 0.29.1
 Date: 2026-08-09
   Bugfixes:

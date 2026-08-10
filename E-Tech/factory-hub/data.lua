@@ -22,9 +22,6 @@ local hubTint = { r = 1, g = 0.6, b = 0.15, a = 1 }
 -- needs a tint of its own or the two are indistinguishable once placed. Cyan
 -- against the hub's amber.
 local fluidTint = { r = 0.25, g = 0.75, b = 1, a = 1 }
--- The export filter lives INSIDE a factory, where the hub's amber would read as
--- "one of the outside devices got in here somehow". Green.
-local filterTint = { r = 0.35, g = 0.9, b = 0.4, a = 1 }
 
 local function tinted_icons(icon, tint)
     return {{ icon = icon, icon_size = 64, tint = tint or hubTint }}
@@ -129,37 +126,6 @@ fluid_sensor_item.place_result = "etech-factory-fluid-sensor"
 fluid_sensor_item.order = fluid_sensor_item.order .. "-fluid"
 fluid_sensor_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", fluidTint)
 
--- Factory export filter -------------------------------------------------------
--- Placed INSIDE a factory. Its own constant-combinator signal list is the
--- filter, which means the item list gets the game's native UI - logistic groups,
--- quality picking, copy-paste between combinators - for free, and E-Tech only
--- has to add the two things the vanilla window has nowhere to put: whether the
--- list is a whitelist or a blacklist, and whether quality is binding.
-local export_filter = table.deepcopy(sensor)
-export_filter.name = "etech-factory-export-filter"
--- Part of the factory, like Factorissimo's own interior power pole, roboport
--- and overlay controller: E-Tech builds one inside every factory it can see and
--- the player never crafts or places it. So it has no item and no recipe, and it
--- cannot be mined, deconstructed or blueprinted away - the factory would
--- otherwise end up with a rule you cannot get back without console commands.
-export_filter.minable = nil
-export_filter.flags = {"player-creation", "not-blueprintable", "not-deconstructable"}
--- NO COLLISION. This is what makes the position a non-problem: it can sit at a
--- fixed spot beside the factory's power pole without ever being blocked by what
--- the player has built, without blocking them, and without standing in the
--- doorway. Searching for a free tile was the wrong answer - it moved the device
--- somewhere different in every factory, and in a Mk4's wide entrance it found
--- the middle of the doorway. Same trick E-Tech already uses for the Mk4's
--- hidden power relay.
-export_filter.collision_mask = {layers = {}}
--- Still clickable, and wins the pick against the pole it stands next to.
-export_filter.selection_priority = 80
-export_filter.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", filterTint)
-for _, direction in pairs({"north", "east", "south", "west"}) do
-    export_filter.sprites[direction].layers[1].tint = filterTint
-end
-
-
 -- Recipes + technology --------------------------------------------------------
 -- (the hidden "etech-hub-energy" buffer entity from the removed
 -- energy-per-item setting is gone; the engine deletes any leftovers in old
@@ -188,7 +154,6 @@ data:extend({
     inlet, inlet_item,
     sensor, sensor_item,
     fluid_sensor, fluid_sensor_item,
-    export_filter,
     fluid_outlet, fluid_outlet_item,
     fluid_inlet, fluid_inlet_item,
     {
