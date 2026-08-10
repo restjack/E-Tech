@@ -2903,11 +2903,67 @@ local function build_panel(player)
     tabs.add_tab(factories_tab, factories)
     factories.add {type = "label", name = "factories_label",
         caption = {"gui-etech-hub.factories"}}
+    -- Scrolling 153 rows to find one factory is the real problem with listing
+    -- them all; this narrows by name or by coordinate, and narrowing also means
+    -- fewer rows get built.
+    local fsearch = factories.add {type = "textfield", name = "etech-hub-factory-search"}
+    fsearch.style.horizontally_stretchable = true
     local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
     fscroll.style.maximal_height = 420
     fscroll.add {type = "table", name = "frows", column_count = 4}
 
     return panel
+end
+
+local refresh_factory_rows
+
+-- Only the factory rows, so typing in the search box does not tear down and
+-- rebuild the whole panel on every keystroke.
+refresh_factory_rows = function(player, record)
+    local panel = player.gui.relative[PANEL_NAME]
+    if not panel then return end
+    local factories = panel.inner.etech_tabs.factories
+    local rows = factories.fscroll.frows
+    rows.clear()
+    local search = factories["etech-hub-factory-search"].text:lower()
+    for _, factory in pairs(cached_factories(record)) do
+        if factory_usable(factory) then
+            local label = factory_label(factory.id)
+            local position = factory.building.position
+            local text = (type(label) == "string" and label or "")
+                .. " " .. string.format("%.0f %.0f", position.x, position.y)
+            if search == "" or text:lower():find(search, 1, true)
+                or (type(label) ~= "string"
+                    and tostring(factory.id):find(search, 1, true)) then
+                local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
+                btn.style.minimal_width = 50
+                btn.tags = { etech = "factory-locate", id = factory.id }
+                local enter = rows.add {type = "button", caption = {"gui-etech-hub.enter"},
+                    tooltip = {"gui-etech-hub.enter-tooltip"}}
+                enter.style.minimal_width = 50
+                enter.tags = { etech = "factory-enter", id = factory.id }
+                local cell = rows.add {type = "flow", direction = "horizontal"}
+                for _, signal in ipairs(factory_overlay_signals(factory, FACTORY_OVERLAY_ICONS)) do
+                    local sprite = signal.type .. "/" .. signal.name
+                    if signal.type == "virtual" then sprite = "virtual-signal/" .. signal.name end
+                    if helpers.is_valid_sprite_path(sprite) then
+                        local icon = cell.add {type = "sprite", sprite = sprite}
+                        icon.style.size = 24
+                    end
+                end
+                local name = cell.add {type = "label", caption = {"gui-etech-hub.factory-option",
+                    label,
+                    string.format("%.0f", position.x),
+                    string.format("%.0f", position.y)}}
+                name.style.minimal_width = 130
+                local field = rows.add {type = "textfield",
+                    text = hub_data().factory_names[factory.id] or "",
+                    tooltip = {"gui-etech-hub.factory-rename-tooltip"}}
+                field.tags = { etech = "factory-name", id = factory.id }
+                field.style.horizontally_stretchable = true
+            end
+        end
+    end
 end
 
 local function load_panel_settings(player, record)
@@ -2957,16 +3013,16 @@ local function load_panel_settings(player, record)
         pull.guard_checks[guard.element].state = g[guard.field] == true
     end
 
-    -- factory rows: locate button + rename field (rebuilt on open only, so
-    -- typing a name never gets clobbered by the 2 s refresh)
-    local rows = factories.fscroll.frows
-    rows.clear()
+    refresh_factory_rows(player, record)
+
     local usable = {}
     for _, factory in pairs(cached_factories(record)) do
         if factory_usable(factory) then usable[#usable + 1] = factory end
     end
 
-    -- The factory dropdown is built from the same list, and its selected index
+    -- The factory dropdown lists every factory regardless of the row search:
+    -- it filters the STOCK grid, and narrowing that should not depend on what
+    -- happens to be typed in the Factories tab.
     -- is mapped back to a factory id through grid_factory_ids rather than by
     -- position: the list can change between opening the panel and clicking, and
     -- an index into a stale list would silently filter by the wrong factory.
@@ -2994,46 +3050,6 @@ local function load_panel_settings(player, record)
     if selected == 1 then record.grid_factory = nil end
     picker.selected_index = selected
     tabs.contents.views["etech-hub-sort"].selected_index = record.grid_sort or 1
-
-    -- Each row: locate button, what the factory is CALLED and where it is, then
-    -- the box that overrides the name. The rename box alone told you nothing -
-    -- it is empty until you type in it, by design, so every row looked
-    -- identical and the backer name the rest of the mod uses was invisible
-    -- here of all places.
-    for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do -- MAX_FACTORY_ROWS is huge
-        local factory = usable[i]
-        local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
-        btn.style.minimal_width = 50
-        btn.tags = { etech = "factory-locate", id = factory.id }
-        local enter = rows.add {type = "button", caption = {"gui-etech-hub.enter"},
-            tooltip = {"gui-etech-hub.enter-tooltip"}}
-        enter.style.minimal_width = 50
-        enter.tags = { etech = "factory-enter", id = factory.id }
-
-        -- The overlay icons the factory wears on the outside, which is how you
-        -- know which one this is without reading anything.
-        local cell = rows.add {type = "flow", direction = "horizontal"}
-        for _, signal in ipairs(factory_overlay_signals(factory, FACTORY_OVERLAY_ICONS)) do
-            local sprite = signal.type .. "/" .. signal.name
-            if signal.type == "virtual" then sprite = "virtual-signal/" .. signal.name end
-            if helpers.is_valid_sprite_path(sprite) then
-                local icon = cell.add {type = "sprite", sprite = sprite}
-                icon.style.size = 24
-            end
-        end
-        local position = factory.building.position
-        local name = cell.add {type = "label", caption = {"gui-etech-hub.factory-option",
-            factory_label(factory.id),
-            string.format("%.0f", position.x),
-            string.format("%.0f", position.y)}}
-        name.style.minimal_width = 130
-
-        local field = rows.add {type = "textfield",
-            text = hub_data().factory_names[factory.id] or "",
-            tooltip = {"gui-etech-hub.factory-rename-tooltip"}}
-        field.tags = { etech = "factory-name", id = factory.id }
-        field.style.horizontally_stretchable = true
-    end
 
 end
 
@@ -3658,6 +3674,9 @@ local function on_gui_text_changed(event)
     if element.name == "etech-hub-search" then
         local player = game.get_player(event.player_index)
         if player then refresh_grid(player, record) end
+    elseif element.name == "etech-hub-factory-search" then
+        local player = game.get_player(event.player_index)
+        if player then refresh_factory_rows(player, record) end
     end
 end
 
