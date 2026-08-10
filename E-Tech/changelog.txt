@@ -1,4 +1,26 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.28.0
+Date: 2026-08-09
+  Changes:
+    - The Factory export filter is now part of every factory instead of
+      something you craft and place. E-Tech fits one into each factory it can
+      see, beside the interior door where Factorissimo already parks the power
+      pole and the roboport - which is where players look for a factory's own
+      fittings, and out of the way of the build. It has no item and no recipe
+      any more, and it cannot be mined, shot or deconstructed away: a factory
+      that lost its filter would be one you could not give a rule back to
+      without console commands.
+      Existing saves fit themselves out on the first maintenance pass after the
+      update; no migration, and a filter removed by a script simply comes back.
+      Placement uses find_non_colliding_position rather than a fixed offset,
+      because the door surroundings are exactly where the pole and roboport are
+      and where an existing factory is most likely to be built up already.
+      Fitting is driven from the OUTLET, not from factory creation, so a surface
+      with no outlet does not get devices littered through its factories -
+      nothing would read them. Two factories are fitted per maintenance pass, so
+      a save with hundreds of factories spreads the work rather than doing it
+      all in one tick.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.0
 Date: 2026-08-09
   Features:

@@ -787,6 +787,42 @@ local function export_filters_by_factory()
     return out
 end
 
+-- Build the export filter into a factory that has not got one yet.
+--
+-- It is part of the factory rather than something you craft and place, the same
+-- way Factorissimo's interior power pole, roboport and overlay controller are:
+-- every factory has one, always, and there is nothing to lose or forget to
+-- build. Put beside the interior DOOR, which is where Factorissimo parks the
+-- pole and roboport and therefore where players already look for the factory's
+-- own fittings - a device dropped in the middle of the floor would be both
+-- harder to find and in the way of the build.
+--
+-- find_non_colliding_position rather than a fixed offset: the door surroundings
+-- are exactly where the pole and roboport already are, and on an existing
+-- factory the player may have built right up to them.
+local function ensure_export_filter(factory)
+    local inside = factory.inside_surface
+    if not (inside and inside.valid) then return end
+    local door_x = factory.inside_door_x or factory.inside_x
+    local door_y = factory.inside_door_y or factory.inside_y
+    local anchor = { x = door_x + 2, y = door_y }
+    local position = inside.find_non_colliding_position(
+        EXPORT_FILTER_NAME, anchor, 12, 0.5)
+    if not position then return end
+    local entity = inside.create_entity {
+        name = EXPORT_FILTER_NAME,
+        position = position,
+        force = factory.building.force,
+    }
+    if not entity then return end
+    -- Belongs to the factory, so the player cannot mine, shoot or deconstruct
+    -- it away and leave the factory unable to carry a rule.
+    entity.destructible = false
+    entity.rotatable = false
+    register_device(entity)
+    return entity
+end
+
 -- nil when a factory has no filter device, or has one with an empty list, so the
 -- pull pass skips the work rather than evaluating a permissive filter once per
 -- stack. `cache` memoises for one pass: one factory's rule is consulted for
@@ -3709,6 +3745,20 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
     for _, record in pairs(outlets) do
         surface_proxies(record.entity.surface, record.entity.force, true)
         gindex_resync(record.entity.surface, record.entity.force)
+        -- Fit any factory that has not got an export filter yet. Driven from the
+        -- OUTLET rather than from factory creation, because the outlet is the
+        -- only thing that reads the rule - a surface with no outlet gets no
+        -- devices littered through its factories. Self-healing: an existing save
+        -- fits them out on the first maintenance pass after the update, and one
+        -- removed by a script comes back.
+        local existing = export_filters_by_factory()
+        local budget = 2
+        for _, factory in pairs(cached_factories(record, false)) do
+            if budget <= 0 then break end
+            if factory_usable(factory) and not existing[factory.id] then
+                if ensure_export_filter(factory) then budget = budget - 1 end
+            end
+        end
     end
     -- drop proxy caches nothing refreshed for two lifetimes (outlet gone,
     -- surface deleted) so storage doesn't accumulate dead surface entries

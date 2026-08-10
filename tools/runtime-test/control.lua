@@ -158,15 +158,7 @@ local function build_world()
         force = force, raise_built = true,
     }
     request_for(t.out_requester, IRON, OUT_WANT)
-    -- something outside genuinely wants the kept item: without the filter the
-    -- outlet would happily supply it, which is what makes the assertion mean
-    -- something
-    local kept_requester = surface.create_entity {
-        name = "requester-chest", position = {OUT_REQUESTER[1], OUT_REQUESTER[2] + 3},
-        force = force, raise_built = true,
-    }
-    t.kept_requester = kept_requester
-    if kept_requester then request_for(kept_requester, KEPT, 50) end
+
 
     t.outlet = surface.create_entity {
         name = "etech-factory-provider-hub", position = OUTLET,
@@ -182,30 +174,17 @@ local function build_world()
         force = force, raise_built = true,
     }
 
-    -- Export filter: the rule lives inside the factory, on a combinator whose
-    -- own signal list is the item list - which is precisely why this is
-    -- testable at all. Everything else E-Tech gates behind a GUI lives in its
-    -- private storage and cannot be driven from here.
-    t.export_filter = inside.create_entity {
-        name = "etech-factory-export-filter", position = {ix - 4, iy},
-        force = force, raise_built = true,
-    }
-    if t.export_filter then
-        local behavior = t.export_filter.get_or_create_control_behavior()
-        local section = behavior.get_section(1) or behavior.add_section()
-        section.set_slot(1, {
-            value = { type = "item", name = KEPT, quality = "normal", comparator = "=" },
-            min = 1,
-        })
-    end
-    -- A provider chest holding the kept item AND an item that may still leave,
-    -- so a pass means "one item held back", not "the factory stopped
-    -- exporting".
+    -- The export filter is NOT placed here: E-Tech fits one into every factory
+    -- itself, the same way Factorissimo fits the interior pole and roboport.
+    -- The clock below waits for it to appear and then writes its signal list,
+    -- which is the whole reason this feature is testable - the list lives on a
+    -- combinator rather than in E-Tech's private storage.
     t.mixed = inside.create_entity {
         name = "passive-provider-chest", position = {ix, iy - 3},
         force = force, raise_built = true,
     }
     if t.mixed then t.mixed.insert {name = KEPT, count = KEPT_STOCK} end
+    t.inside_surface = inside
 
     -- Fluid half: a plain storage tank inside with something in it, and a fluid
     -- sensor outside that should end up broadcasting it. A plain storage tank is
@@ -276,7 +255,34 @@ script.on_nth_tick(60, function()
 
     if t.roboport and t.roboport.valid then t.roboport.energy = 1e9 end
 
-    local age = game.tick - t.built
+    -- Wait for E-Tech to fit the factory's export filter, write the rule into
+    -- it, and only THEN put demand for that item outside. Demanding it earlier
+    -- would let the outlet legitimately ship some before any rule existed, and
+    -- the assertion could not tell that from the rule being ignored.
+    if not t.rule_set then
+        local found = t.inside_surface and t.inside_surface.valid
+            and t.inside_surface.find_entities_filtered {
+                name = "etech-factory-export-filter", limit = 1 }[1]
+        if found then
+            local behavior = found.get_or_create_control_behavior()
+            local section = behavior.get_section(1) or behavior.add_section()
+            section.set_slot(1, {
+                value = { type = "item", name = KEPT, quality = "normal", comparator = "=" },
+                min = 1,
+            })
+            t.export_filter = found
+            t.rule_set = game.tick
+            t.kept_requester = game.surfaces[1].create_entity {
+                name = "requester-chest",
+                position = {OUT_REQUESTER[1], OUT_REQUESTER[2] + 3},
+                force = game.forces.player, raise_built = true,
+            }
+            if t.kept_requester then request_for(t.kept_requester, KEPT, 50) end
+        end
+        return
+    end
+
+    local age = game.tick - t.rule_set
     if age >= SETTLE_TICK and not t.spared and t.outlet and t.outlet.valid then
         t.spared = true
         -- Nothing in the network wants stone, so the next pull pass has to hand
@@ -398,7 +404,7 @@ assert_all = function(t)
         if t.export_filter and t.mixed then
         local held = count(t.mixed, KEPT)
         local delivered = count(t.kept_requester, KEPT)
-        check("export filter kept its item inside the factory",
+        check("factory came with an export filter, and it held its item in",
             held >= KEPT_STOCK and delivered <= 0,
             held .. " of " .. KEPT_STOCK .. " left inside, " .. delivered ..
             " reached the outside requester")

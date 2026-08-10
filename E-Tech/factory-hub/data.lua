@@ -137,17 +137,19 @@ fluid_sensor_item.icons = tinted_icons("__base__/graphics/icons/constant-combina
 -- list is a whitelist or a blacklist, and whether quality is binding.
 local export_filter = table.deepcopy(sensor)
 export_filter.name = "etech-factory-export-filter"
-export_filter.minable.result = "etech-factory-export-filter"
+-- Part of the factory, like Factorissimo's own interior power pole, roboport
+-- and overlay controller: E-Tech builds one inside every factory it can see and
+-- the player never crafts or places it. So it has no item and no recipe, and it
+-- cannot be mined, deconstructed or blueprinted away - the factory would
+-- otherwise end up with a rule you cannot get back without console commands.
+export_filter.minable = nil
+export_filter.flags = {"player-creation", "not-blueprintable", "not-deconstructable"}
+export_filter.selection_priority = 60
 export_filter.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", filterTint)
 for _, direction in pairs({"north", "east", "south", "west"}) do
     export_filter.sprites[direction].layers[1].tint = filterTint
 end
 
-local export_filter_item = table.deepcopy(sensor_item)
-export_filter_item.name = "etech-factory-export-filter"
-export_filter_item.place_result = "etech-factory-export-filter"
-export_filter_item.order = export_filter_item.order .. "-export"
-export_filter_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", filterTint)
 
 -- Recipes + technology --------------------------------------------------------
 -- (the hidden "etech-hub-energy" buffer entity from the removed
@@ -177,7 +179,7 @@ data:extend({
     inlet, inlet_item,
     sensor, sensor_item,
     fluid_sensor, fluid_sensor_item,
-    export_filter, export_filter_item,
+    export_filter,
     fluid_outlet, fluid_outlet_item,
     fluid_inlet, fluid_inlet_item,
     {
@@ -250,17 +252,6 @@ data:extend({
     },
     {
         type = "recipe",
-        name = "etech-factory-export-filter",
-        enabled = false,
-        energy_required = 5,
-        ingredients = {
-            {type = "item", name = "constant-combinator", amount = 1},
-            {type = "item", name = "electronic-circuit", amount = 5},
-        },
-        results = {{type = "item", name = "etech-factory-export-filter", amount = 1}},
-    },
-    {
-        type = "recipe",
         name = "etech-factory-fluid-sensor",
         enabled = false,
         energy_required = 5,
@@ -281,7 +272,6 @@ data:extend({
             { type = "unlock-recipe", recipe = "etech-factory-inlet" },
             { type = "unlock-recipe", recipe = "etech-factory-sensor" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-sensor" },
-            { type = "unlock-recipe", recipe = "etech-factory-export-filter" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-outlet" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-inlet" },
         },
