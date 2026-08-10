@@ -1,4 +1,20 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.1
+Date: 2026-08-09
+  Bugfixes:
+    - Opening a factory outlet threw a non-recoverable error and killed the
+      save's mod state: "Invalid name \"tabs\": LuaGuiElement contains a property
+      or method with the same name". The tabbed pane added in 0.24.1 was named
+      "tabs", which is a property LuaGuiElement already has, so the engine
+      refused to create the element at all. Renamed. Anyone on 0.24.1 to 0.26.0
+      could not open an outlet.
+    - Added tools/lint-gui-names.py, which reads LuaGuiElement's real property
+      and method list out of the game's own runtime-api.json and fails the build
+      on any GUI element named after one of them. Nothing could have caught this
+      before: verify.ps1 only proves the mod loads, and the runtime harness runs
+      under --benchmark, which has no player and so can never open a relative
+      GUI. Verified against the shipped bug - it flags it.
+---------------------------------------------------------------------------------------------------
 Version: 0.26.0
 Date: 2026-08-09
   Features:

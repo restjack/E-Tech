@@ -48,6 +48,15 @@ Write-Host "== 3/6 Locale lint =="
 python (Join-Path $PSScriptRoot "lint-locale.py")
 if ($LASTEXITCODE -ne 0) { $fail++ }
 
+Write-Host "== 3b/6 GUI element names =="
+# Naming a GUI element after one of LuaGuiElement's own properties is not a
+# warning - the engine refuses to create it, and the player gets a
+# non-recoverable mod error the moment they open the window. Shipped exactly
+# that in 0.24.1 ("tabs"). The runtime harness cannot catch it: --benchmark has
+# no player, so no relative GUI is ever opened.
+python (Join-Path $PSScriptRoot "lint-gui-names.py")
+if ($LASTEXITCODE -ne 0) { $fail++ }
+
 Write-Host "== 4/6 luacheck =="
 # Prefer whatever is on PATH. Failing that, fall back to a luarocks install
 # under the user profile - which is what `winget install DEVCOM.Lua` plus

@@ -2646,7 +2646,10 @@ local function build_panel(player)
     -- The rate line stays OUTSIDE the tabs: it carries the pause reason, and a
     -- status line you can only see on one tab is a status line you miss.
     inner.add {type = "label", name = "rate"}
-    local tabs = inner.add {type = "tabbed-pane", name = "tabs"}
+    -- NOT "tabs": LuaGuiElement already has a property of that name, and the engine
+    -- rejects the element outright ("contains a property or method with the same
+    -- name") the moment the panel is built. Cost a crash on opening an outlet.
+    local tabs = inner.add {type = "tabbed-pane", name = "etech_tabs"}
 
     local contents_tab = tabs.add {type = "tab", caption = {"gui-etech-hub.tab-contents"}}
     local contents = tabs.add {type = "flow", name = "contents", direction = "vertical"}
@@ -2735,7 +2738,7 @@ end
 
 local function load_panel_settings(player, record)
     local panel = build_panel(player)
-    local tabs = panel.inner.tabs
+    local tabs = panel.inner.etech_tabs
     local pull, factories = tabs.settings, tabs.factories
     -- The panel is rebuilt from scratch on open and whenever a toggle changes
     -- what the other widgets should look like, so the tab has to be restored or
@@ -2891,7 +2894,7 @@ local function refresh_grid(player, record)
     end
     inner.rate.caption = rate_caption
 
-    local contents = inner.tabs.contents
+    local contents = inner.etech_tabs.contents
     local search = contents["etech-hub-search"].text:lower()
     local scroll = contents.scroll
 
