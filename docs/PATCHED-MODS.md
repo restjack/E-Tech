@@ -16,6 +16,12 @@ Bookkeeping lives here in `docs/`:
 - **`LOCAL-PATCHED-MODS.md`** — the manifest: every patched mod, its portal
   baseline, what was changed, and whether it can ever be swapped for an
   official release (some hold save data and must never be removed).
+  **Local only — it is gitignored (`.gitignore:29`) and does not exist in a
+  clone.** Reading this repo on GitHub, the file above is invisible; on disk it
+  is there and current. Worth stating, because "the manifest is gone" is the
+  natural conclusion otherwise, and acting on it means striking a live document.
+  (The 2026-07-31 audit caught the same trap in the root README as finding 4.3
+  and fixed it there; this reference was missed.)
 - The zips mirror what is live in the game's mods folder. When a mod gets
   patched again, the new zip lands in `patched-mods/` and the old one is
   archived to `Projects\Factorio (ModUpdateCode)\mods-replaced\`.
