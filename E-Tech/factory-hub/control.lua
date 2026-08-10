@@ -94,7 +94,11 @@ local GHOST_INDEX_MAX = 20000   -- per surface+force: ghosts tracked precisely
 local GHOST_RESYNC_TICKS = 3600 -- how often a coarse index is rebuilt from the
                            -- world to shed the drift coarse mode accumulates
 local MAX_SIGNALS = 1000   -- constant combinator / logistic section limit
-local MAX_FACTORY_ROWS = 20
+-- Every factory is listed; the scroll pane is what makes that usable. Capping
+-- at 20 and printing "+146 more" hid 88% of Eli's factories behind a number,
+-- in the one list whose whole job is finding a factory. Cost is one row of four
+-- elements per factory, built only when the panel is opened.
+local MAX_FACTORY_ROWS = math.huge
 local FACTORY_OVERLAY_ICONS = 4 -- overlay signals shown per factory row
 local TOOLTIP_FACTORIES = 8 -- per-factory breakdown lines in an item tooltip
 
@@ -818,9 +822,13 @@ local function export_section(controller, create)
         if section.group == EXPORT_SECTION_GROUP then return section end
     end
     if not create then return nil end
-    local section = behavior.add_section(EXPORT_SECTION_GROUP)
-    if section then section.active = false end
-    return section
+    -- Created ACTIVE. An unchecked section reads as "switched off, therefore
+    -- not working", which is exactly the wrong impression for the thing
+    -- carrying the rule. The cost is that Factorissimo paints these items on
+    -- the building's exterior along with the rest of the overlay - E-Tech reads
+    -- the section either way, so activity is now purely about whether you want
+    -- to see them outside.
+    return behavior.add_section(EXPORT_SECTION_GROUP)
 end
 
 -- nil when the factory has no overlay controller, no export section, or an
@@ -2708,8 +2716,6 @@ local GUARD_CHECKS = {
     -- First on purpose: it is the only one that FIXES the loop rather than
     -- refusing to take part in it, so it is what someone should try first.
     {element = "etech-hub-interior-first", field = "interior_first",     loc = "interior-first"},
-    {element = "etech-hub-pull-connections", field = "pull_connection_chests",
-                                                                loc = "pull-connections"},
     {element = "etech-hub-guard-inlet",    field = "ignore_inlet_requests", loc = "guard-inlet"},
     {element = "etech-hub-guard-items",    field = "block_inlet_items",     loc = "guard-items"},
     {element = "etech-hub-guard-cooldown", field = "cooldown",              loc = "guard-cooldown"},
@@ -2723,6 +2729,10 @@ local FLUID_GUARD = {element = "etech-hub-guard-fluid", field = "fluid_loop", lo
 
 -- Sits with the filter widgets rather than the loop guards — it changes where
 -- the filter list comes from, it doesn't stop a loop.
+local PULL_CONNECTIONS_OPT =
+    {element = "etech-hub-pull-connections", field = "pull_connection_chests",
+     loc = "pull-connections"}
+
 local CIRCUIT_FILTER_OPT =
     {element = "etech-hub-circuit-filters", field = "circuit_filters", loc = "circuit-filters"}
 
@@ -2733,6 +2743,7 @@ local SPOILAGE_OPT =
 
 local GUARD_BY_ELEMENT = {
     [FLUID_GUARD.element] = FLUID_GUARD,
+    [PULL_CONNECTIONS_OPT.element] = PULL_CONNECTIONS_OPT,
     [CIRCUIT_FILTER_OPT.element] = CIRCUIT_FILTER_OPT,
     [SPOILAGE_OPT.element] = SPOILAGE_OPT,
 }
@@ -2800,6 +2811,11 @@ local function build_panel(player)
     local checks = pull.add {type = "flow", name = "checks", direction = "vertical"}
     checks.add {type = "checkbox", name = "etech-hub-storage", state = false,
         caption = {"gui-etech-hub.storage"}, tooltip = {"gui-etech-hub.storage-tooltip"}}
+    -- Belongs with the other "where may I pull from" options, not under Loop
+    -- guards: it does not break a loop, it opts OUT of the fix that stops one.
+    checks.add {type = "checkbox", name = PULL_CONNECTIONS_OPT.element, state = false,
+        caption = {"gui-etech-hub." .. PULL_CONNECTIONS_OPT.loc},
+        tooltip = {"gui-etech-hub." .. PULL_CONNECTIONS_OPT.loc .. "-tooltip"}}
     pull.add {type = "label", name = "quality_label",
         caption = {"gui-etech-hub.min-quality"},
         tooltip = {"gui-etech-hub.min-quality-tooltip"}}
@@ -2835,7 +2851,7 @@ local function build_panel(player)
     factories.add {type = "label", name = "factories_label",
         caption = {"gui-etech-hub.factories"}}
     local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
-    fscroll.style.maximal_height = 260
+    fscroll.style.maximal_height = 420
     fscroll.add {type = "table", name = "frows", column_count = 4}
 
     return panel
@@ -2931,7 +2947,7 @@ local function load_panel_settings(player, record)
     -- it is empty until you type in it, by design, so every row looked
     -- identical and the backer name the rest of the mod uses was invisible
     -- here of all places.
-    for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do
+    for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do -- MAX_FACTORY_ROWS is huge
         local factory = usable[i]
         local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
         btn.style.minimal_width = 50
@@ -2965,10 +2981,7 @@ local function load_panel_settings(player, record)
         field.tags = { etech = "factory-name", id = factory.id }
         field.style.horizontally_stretchable = true
     end
-    if #usable > MAX_FACTORY_ROWS then
-        rows.add {type = "label", caption = {"gui-etech-hub.more-factories", #usable - MAX_FACTORY_ROWS}}
-        for _ = 1, 3 do rows.add {type = "label", caption = ""} end
-    end
+
 end
 
 -- Search used to compare the INTERNAL name only, so "iron plate" found nothing
