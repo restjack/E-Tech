@@ -36,6 +36,7 @@ local INLET_NAME = "etech-factory-inlet"
 local SENSOR_NAME = "etech-factory-sensor"
 local FLUID_OUTLET_NAME = "etech-factory-fluid-outlet"
 local FLUID_INLET_NAME = "etech-factory-fluid-inlet"
+local FLUID_SENSOR_NAME = "etech-factory-fluid-sensor"
 local PANEL_NAME = "etech-hub-panel"
 local INLET_PANEL_NAME = "etech-inlet-panel"
 local AUTO_GROUP = "etech-inlet-auto"
@@ -57,6 +58,14 @@ local PROXY_TICKS = 3600   -- item-request-proxy rescan, 60 s (~23 ms find
 local PROFILE_FILE = "etech-profile.csv" -- /etech-hub-profile output (script-output/)
 local MAX_DEPTH = 5        -- nested-factory recursion limit
 local FILTER_SLOTS = 15    -- choose-elem filter slots in the outlet/inlet panels
+local COOLDOWN_TICKS = 600 -- loop guard: 10 s lockout after an item is handed
+                           -- back, so a want that flickers on and off between
+                           -- passes can't pull the same stack out repeatedly
+local STORAGE_LOCK_TICKS = 3600 -- loop guard: 60 s lockout on re-pulling an
+                           -- item out of an interior STORAGE chest the outlet
+                           -- itself just returned it to. Longer than
+                           -- COOLDOWN_TICKS on purpose - storage is where
+                           -- leftovers are supposed to come to rest.
 local RATE_WINDOW = 3600   -- ticks of pull history for the items/min stat
 local REQUESTER_TTL = 240  -- PULL_TICKS * 2: how long an outlet reuses its
                            -- requester-demand scan. Declared up here rather
@@ -75,6 +84,11 @@ local CELL_TTL = 1080      -- PULL_TICKS * 9: how long an outlet reuses the
                            -- REQUESTER_TTL (4.5x): a multiple would put the
                            -- two misses back on the same pass every cycle,
                            -- which is the thing being fixed.
+local GHOST_INDEX_MAX = 20000   -- per surface+force: ghosts tracked precisely
+                           -- (one storage entry + one destroy registration
+                           -- each) before the index degrades to coarse mode
+local GHOST_RESYNC_TICKS = 3600 -- how often a coarse index is rebuilt from the
+                           -- world to shed the drift coarse mode accumulates
 local MAX_SIGNALS = 1000   -- constant combinator / logistic section limit
 local MAX_FACTORY_ROWS = 20
 local TOOLTIP_FACTORIES = 8 -- per-factory breakdown lines in an item tooltip
@@ -85,11 +99,34 @@ local KINDS = {
     [SENSOR_NAME] = "sensor",
     [FLUID_OUTLET_NAME] = "fluid-outlet",
     [FLUID_INLET_NAME] = "fluid-inlet",
+    [FLUID_SENSOR_NAME] = "fluid-sensor",
 }
 
 -- item|quality key convention used across caches, wants tables and GUI tags
 local function item_key(name, quality)
     return name .. "|" .. (quality or "normal")
+end
+
+-- Per-device opt-in options: the four loop guards, the fluid outlet's guard,
+-- the sensor's two broadcast options and circuit-set filters all live in one
+-- table on the record. Every one of them is off by default, so an absent table
+-- is the correct state for a device from before any of them existed and nothing
+-- has to be migrated.
+--
+-- The loop guards are the reason this exists. An inlet with auto-request on is
+-- a REQUESTER in the same logistic network the outlet provides to: the inlet
+-- asks for whatever the factories' interior requester chests are short of, the
+-- outlet reads that as network demand and pulls those same items back out of
+-- those same factories, bots fly them to the inlet, the inlet pushes them
+-- inside. Nothing is satisfied that wasn't already satisfiable and the items
+-- ride in a circle for as long as both devices exist.
+local function guards(record)
+    local g = record.guards
+    if not g then
+        g = {}
+        record.guards = g
+    end
+    return g
 end
 
 local function hub_data()
@@ -133,9 +170,32 @@ local function is_factory_building(name)
 end
 
 -- LocalisedString; custom names are plain text, the fallback is localized.
+--
+-- "Factory 7" is a label nobody remembers. Roboports, labs, locomotives, radars
+-- and train stops all get a backer name from the engine when they are placed,
+-- which is why a roboport is "Kaeya" rather than "Roboport 12" - but that is a
+-- hard-coded list of five prototype TYPES (LuaEntity.backer_name), and a
+-- Factorissimo factory building is a storage-tank. It cannot have one, and no
+-- amount of prototype work changes that.
+--
+-- What IS available is the list the engine draws from: game.backer_names. So
+-- the naming is done here instead, indexed by factory id rather than picked at
+-- random - identical on every client, no storage, and stable across saves and
+-- reloads. A player-typed name still wins, exactly like renaming a train stop.
+local function backer_name_for(id)
+    local names = game.backer_names
+    local count = #names
+    if count == 0 then return nil end
+    return names[(id - 1) % count + 1]
+end
+
 local function factory_label(id)
     local name = hub_data().factory_names[id]
     if name and name ~= "" then return name end
+    if settings.global["etech-hub-backer-names"].value then
+        local backer = backer_name_for(id)
+        if backer then return backer end
+    end
     return {"gui-etech-hub.factory-n", id}
 end
 
@@ -144,12 +204,14 @@ local function register_device(entity, copy_from)
     local record = {
         entity = entity,
         kind = KINDS[entity.name],
-        filters = { mode = 1, items = {} },
+        filters = { mode = 1, items = {}, match_quality = false },
+        guards = {},
         pins = {},
     }
     -- clone / blueprint: carry the source device's settings over
     if copy_from then
         if copy_from.filters then record.filters = table.deepcopy(copy_from.filters) end
+        if copy_from.guards then record.guards = table.deepcopy(copy_from.guards) end
         if copy_from.pins then record.pins = table.deepcopy(copy_from.pins) end
         record.pull_storage = copy_from.pull_storage
         record.auto_request = copy_from.auto_request
@@ -481,20 +543,123 @@ end
 
 -- Per-hub item filter --------------------------------------------------------
 
+-- Filter slots hold item-with-quality picks since 0.23.0. Saves and blueprint
+-- tags written before that hold a plain item-name string in the same place, so
+-- both shapes are read here and nothing needs migrating: a name-only slot has
+-- no quality and therefore matches every quality, which is exactly what it did
+-- before the quality checkbox existed.
+local function filter_entry(value)
+    if type(value) == "string" then return value, nil end
+    if type(value) == "table" and value.name then return value.name, value.quality end
+    return nil, nil
+end
+
+-- elem_value for a filter button, whatever shape the slot was stored in.
+-- A pre-0.23.0 slot has no quality at all, and the button has nowhere to show
+-- that: it renders the normal-quality badge either way. So the value shown is a
+-- lie the moment "Match quality" is ticked - the slot LOOKS like "normal only"
+-- and still behaves as "every quality". filter_slot_tooltip below is what makes
+-- the difference visible; re-picking the slot resolves it.
+local function filter_elem_value(value)
+    local name, quality = filter_entry(value)
+    if not name then return nil end
+    return { name = name, quality = quality or "normal" }
+end
+
+local function filter_slot_tooltip(value)
+    if type(value) == "string" then return {"gui-etech-hub.legacy-slot"} end
+    return nil
+end
+
+local function add_to_set(set, name, quality)
+    set.names[name] = true
+    if quality then
+        set.keys[item_key(name, quality)] = true
+    else
+        set.any[name] = true
+    end
+end
+
+-- "Set filters from circuit network": the connected red/green signals ARE the
+-- filter slots. Every item signal with a positive count is one slot; the mode
+-- dropdown still decides whether that list is a whitelist or a blacklist. This
+-- is the vanilla-2.0 requester-chest idiom, and it is the only way to change
+-- what an outlet pulls without a player standing in front of it.
+--
+-- No item signals reaching it is an EMPTY filter list, not "no filter" — under
+-- whitelist that means the outlet pulls nothing, which is the same thing the
+-- circuit gate already does when every signal is zero. The two agree.
+local function circuit_filter_set(record)
+    local entity = record.entity
+    local set, seen = { names = {}, any = {}, keys = {} }, false
+    for _, wire in pairs({defines.wire_connector_id.circuit_red,
+                          defines.wire_connector_id.circuit_green}) do
+        local net = entity.get_circuit_network(wire)
+        for _, s in pairs(net and net.signals or {}) do
+            local signal = s.signal
+            if s.count > 0 and signal and signal.name
+                and (signal.type == nil or signal.type == "item") then
+                seen = true
+                -- a signal's quality is only binding when the device is
+                -- matching quality; otherwise it covers every quality, exactly
+                -- like a quality-less filter slot
+                add_to_set(set, signal.name,
+                    record.filters.match_quality and signal.quality or nil)
+            end
+        end
+    end
+    return seen and set or nil
+end
+
 local function filter_set(record)
+    if guards(record).circuit_filters then return circuit_filter_set(record) end
     local set = nil
-    for _, name in pairs(record.filters.items) do
-        set = set or {}
-        set[name] = true
+    for _, value in pairs(record.filters.items) do
+        local name, quality = filter_entry(value)
+        if name then
+            set = set or { names = {}, any = {}, keys = {} }
+            add_to_set(set, name, quality)
+        end
     end
     return set
 end
 
-local function item_allowed(record, name, set)
+-- With "Match quality" off (the default, and how filters behaved before
+-- 0.23.0) a slot matches its item at every quality. With it on, a slot matches
+-- only the quality it was picked at — except a name-only slot, which has no
+-- quality to match and keeps covering all of them.
+local function item_matches(record, name, quality, set)
+    if not set then return false end
+    if not record.filters.match_quality then return set.names[name] == true end
+    return set.any[name] == true or set.keys[item_key(name, quality)] == true
+end
+
+local function item_allowed(record, name, quality, set)
     local mode = record.filters.mode
-    if mode == 2 then return set ~= nil and set[name] == true end
-    if mode == 3 then return not (set and set[name]) end
+    if mode == 2 then return item_matches(record, name, quality, set) end
+    if mode == 3 then return not item_matches(record, name, quality, set) end
     return true
+end
+
+-- Timestamped lockout tables (record.pull_cooldown / record.storage_cooldown).
+-- Pruning is amortized: an expired key is dropped the next time it is asked
+-- about. The tables only ever hold keys the outlet actually handed back, so
+-- they are bounded by the number of item types passing through it.
+local function locked_out(tbl, key, tick, window)
+    local at = tbl and tbl[key]
+    if not at then return false end
+    if tick - at < window then return true end
+    tbl[key] = nil
+    return false
+end
+
+local function mark_lockout(record, field, key, tick)
+    local tbl = record[field]
+    if not tbl then
+        tbl = {}
+        record[field] = tbl
+    end
+    tbl[key] = tick
 end
 
 -- Circuit gate -----------------------------------------------------------------
@@ -522,14 +687,19 @@ end
 -- (the energy-per-item cost and its hidden companion entity were removed in
 -- 0.17.0)
 
-local function note_moved(record, moved)
+-- `by_key` is optional: item|quality -> amount moved in this pass. The panel
+-- reported one number for everything, which tells you the device is alive and
+-- nothing about WHICH item is flowing - and "which item stopped" is the actual
+-- question when a factory stalls. Only recorded per pass, so the memory is the
+-- same rolling window the total already used.
+local function note_moved(record, moved, by_key)
     local tick = game.tick
     local samples = record.moved_samples
     if not samples then
         samples = {}
         record.moved_samples = samples
     end
-    samples[#samples + 1] = { tick = tick, moved = moved }
+    samples[#samples + 1] = { tick = tick, moved = moved, by = by_key }
     -- Amortized prune: only rebuild when the oldest entry actually expired
     -- (the old full copy every pass was pure allocation churn).
     if samples[1] and tick - samples[1].tick > RATE_WINDOW then
@@ -545,6 +715,21 @@ local function rate_per_minute(record)
     local total = 0
     for _, s in pairs(record.moved_samples or {}) do total = total + s.moved end
     return total
+end
+
+-- Same window, broken out per item|quality. Read by the panel's tooltips only,
+-- deliberately NOT by the grid's dirty-check signature: a rate that ticks every
+-- pass would rebuild the whole grid every pass, which is exactly the cost the
+-- dirty check exists to avoid. Tooltip staleness of one refresh is already the
+-- accepted trade for the per-factory breakdown next to it.
+local function rates_by_key(record)
+    local out = {}
+    for _, s in pairs(record.moved_samples or {}) do
+        for key, n in pairs(s.by or {}) do
+            out[key] = (out[key] or 0) + n
+        end
+    end
+    return out
 end
 
 -- Item transfer helpers ---------------------------------------------------------
@@ -565,12 +750,26 @@ end
 -- (0.19.6). If nothing qualifies the item deliberately stays where it is
 -- (outlet buffer / mining buffer) rather than mixing into someone else's
 -- chest.
-local function storage_filter_name(chest)
+-- A storage chest's filter is an ItemFilter: name plus, since 2.0, a quality.
+-- Both halves matter. Reading only the name (which is what this did until
+-- 0.23.0) made a chest filtered for legendary iron plate read as the right home
+-- for normal iron plate, and the player's filter silently didn't hold. A filter
+-- with no quality set matches every quality, same as everywhere else in the mod.
+local function storage_filter_spec(chest)
     local filter = chest.storage_filter
     if not filter then return nil end
-    local name = filter.name or filter
-    if type(name) ~= "string" then name = name.name end
-    return name
+    if type(filter) == "string" then return { name = filter } end
+    local name = filter.name
+    if type(name) == "table" then name = name.name end
+    if type(name) ~= "string" then return nil end
+    local quality = filter.quality
+    if type(quality) == "table" then quality = quality.name end
+    return { name = name, quality = quality }
+end
+
+local function storage_filter_matches(spec, name, quality)
+    if not spec or spec.name ~= name then return false end
+    return spec.quality == nil or spec.quality == quality
 end
 
 -- Snapshot the candidate return chests ONCE: inventory handle, logistic mode,
@@ -604,7 +803,7 @@ local function return_snapshot(chests)
                     mode = entry.mode,
                     counts = counts,
                     -- storage_filter is only meaningful on storage chests
-                    filter = (entry.mode == "storage") and storage_filter_name(chest) or nil,
+                    filter = (entry.mode == "storage") and storage_filter_spec(chest) or nil,
                     empty = inv.is_empty(),
                 }
             end
@@ -629,7 +828,7 @@ local function return_buckets(snapshot, name, quality)
             if (entry.counts[key] or 0) > 0 then
                 holds[#holds + 1] = entry
             elseif entry.mode == "storage" then
-                if entry.filter == name then
+                if storage_filter_matches(entry.filter, name, quality) then
                     filtered[#filtered + 1] = entry
                 elseif entry.filter == nil then
                     if entry.empty then
@@ -664,19 +863,68 @@ end
 
 -- Insert `count` of a plain item spec in return-preference order
 -- (overflow/on-demand return; spec-based, so spoil timers restart).
--- Returns the number inserted.
+-- Returns the number inserted, plus whether any of it landed in an interior
+-- STORAGE chest — the no-storage-re-pull loop guard needs to know that, and
+-- this is the only place that can tell. Callers that don't care ignore it.
 local function insert_spec_into_chests(snapshot, name, quality, count)
     local total = 0
+    local into_storage = false
     for _, bucket in ipairs(return_buckets(snapshot, name, quality)) do
         for _, entry in ipairs(bucket) do
             local remaining = count - total
-            if remaining <= 0 then return total end
+            if remaining <= 0 then return total, into_storage end
             if entry.chest.valid then
-                total = total + entry.inv.insert({name = name, count = remaining, quality = quality})
+                local put = entry.inv.insert({name = name, count = remaining, quality = quality})
+                if put > 0 then
+                    total = total + put
+                    if entry.mode == "storage" then into_storage = true end
+                end
             end
         end
     end
-    return total
+    return total, into_storage
+end
+
+-- Move `count` of one item between two inventories.
+--
+-- `preserve` picks the mechanism, and the difference is not cosmetic. A
+-- spec-based insert ({name=, count=, quality=}) MAKES items: the ones that
+-- arrive are brand new, with a full spoilage timer. That is how the inlet
+-- distributed until 0.24.0, which meant feeding nearly-rotten Gleba produce
+-- through an inlet handed it back fresh - an inlet was a spoilage launderer, and
+-- nothing in the UI said so. Copying the source stacks slot by slot instead
+-- carries spoilage, and durability and ammo with it, at the cost of touching
+-- each stack individually.
+--
+-- Returns how many actually moved.
+local function transfer_items(from_inv, to_inv, name, quality, count, preserve)
+    if count < 1 then return 0 end
+    if not preserve then
+        local inserted = to_inv.insert({name = name, count = count, quality = quality})
+        if inserted > 0 then
+            from_inv.remove({name = name, count = inserted, quality = quality})
+        end
+        return inserted
+    end
+    local moved = 0
+    for i = 1, #from_inv do
+        if moved >= count then break end
+        local stack = from_inv[i]
+        if stack.valid_for_read and stack.name == name
+            and stack.quality.name == quality then
+            local original = stack.count
+            local take = math.min(original, count - moved)
+            -- Shrink the source stack to exactly what should move, insert the
+            -- stack itself (which carries its spoilage), then put back whatever
+            -- the destination could not take.
+            if take < original then stack.count = take end
+            local inserted = to_inv.insert(stack)
+            stack.count = original - inserted
+            moved = moved + inserted
+            if inserted < take then break end -- destination full
+        end
+    end
+    return moved
 end
 
 local function inventory_counts(inv)
@@ -824,6 +1072,25 @@ local function gindex_add(idx, key, ghost, is_tile)
         chunk.items[k] = (chunk.items[k] or 0) + n
     end
     idx.count = idx.count + 1
+    -- Coarse mode above the cap. Precise mode costs a `storage` write and a
+    -- destroy registration per ghost, which is the right trade for a normal
+    -- base and the wrong one for a 10 000-entity blueprint paste: that is
+    -- 10 000 of each, all of which have to be walked back as the ghosts revive.
+    -- Past the cap the chunk totals still get this ghost's demand (plain Lua,
+    -- no storage, no registration) and we simply lose the ability to subtract
+    -- it again. The totals then drift HIGH as those ghosts get built — the
+    -- outlet over-supplies and its own give-back pass returns the excess — until
+    -- the periodic resync rebuilds the index from the world. Bounded memory,
+    -- bounded event load, temporary over-reporting. That is the trade.
+    if idx.count > GHOST_INDEX_MAX then
+        if not idx.coarse then
+            idx.coarse = true
+            idx.resync_tick = game.tick + GHOST_RESYNC_TICKS
+            log("[E-Tech] factory hub: ghost index " .. key .. " passed " ..
+                GHOST_INDEX_MAX .. " ghosts - coarse mode until it drains")
+        end
+        return
+    end
     hub_data().gunit[ghost.unit_number] = { key = key, ck = ck, items = items }
     script.register_on_object_destroyed(ghost)
 end
@@ -890,6 +1157,26 @@ local function gindex_on_ghost_gone(unit_number)
         if next(chunk.items) == nil then idx.chunks[g.ck] = nil end
     end
     if idx.count > 0 then idx.count = idx.count - 1 end
+end
+
+-- Rebuild a coarse index from the world so it sheds the drift coarse mode
+-- accumulates. Called from the maintenance phase, never from a pull pass: the
+-- rebuild runs the two expensive whole-surface finds, and the whole point of
+-- the phase scheduler is that those never share a tick with pull work.
+-- If the world still holds more than the cap the fresh index simply goes coarse
+-- again and books the next resync, which is the correct behaviour while a huge
+-- paste is still draining.
+local function gindex_resync(surface, force)
+    local data = hub_data()
+    local key = gindex_key(surface, force)
+    local idx = data.gindex and data.gindex[key]
+    if not (idx and idx.coarse) then return end
+    if game.tick < (idx.resync_tick or 0) then return end
+    data.gindex[key] = nil
+    for unit, g in pairs(data.gunit or {}) do
+        if g.key == key then data.gunit[unit] = nil end
+    end
+    ghost_index(surface, force)
 end
 
 -- Item-request-proxies (module/fuel requests on built machines) have no
@@ -1067,6 +1354,11 @@ local function requester_wants(outlet, network, record)
 
     local wants = {}
     local have_cache = {}
+    -- Loop guard 1: the managed AUTO_GROUP section is an inlet echoing the
+    -- factories' own shortfall back at the network. Skipping just that section
+    -- (rather than the whole inlet) leaves the player's own manual requests on
+    -- an inlet working normally.
+    local skip_auto = guards(record).ignore_inlet_requests == true
     for _, point in pairs(network.requester_points) do
         local owner = point.owner
         if owner.valid and owner ~= outlet then
@@ -1074,7 +1366,7 @@ local function requester_wants(outlet, network, record)
             if sections and #sections > 0 then
                 local owner_key = (owner.unit_number or 0) .. "|"
                 for _, section in pairs(sections) do
-                    if section.active then
+                    if section.active and not (skip_auto and section.group == AUTO_GROUP) then
                         for _, filter in pairs(section.filters) do
                             local v = filter.value
                             if v and v.name and (v.type == nil or v.type == "item") then
@@ -1133,6 +1425,35 @@ local function holds_any(inv, need)
     return false
 end
 
+-- Loop guard 2: every item the inlets on this surface are currently
+-- auto-requesting. Those are, by definition, items that would be carried back
+-- into the same factories they came out of, so the outlet refuses to
+-- materialize them at all while the request stands — including for genuine
+-- outside demand, which is the trade this guard makes. Walked fresh each pass:
+-- it is a handful of inlets, not a network-wide scan.
+local function inlet_auto_keys(record)
+    local outlet = record.entity
+    local surface = outlet.surface.index
+    local force = outlet.force.index
+    local keys = {}
+    for _, other in pairs(hub_data().hubs) do
+        if other.kind == "inlet" and other.entity.valid
+            and other.entity.surface.index == surface
+            and other.entity.force.index == force then
+            local point = other.entity.get_requester_point()
+            for _, section in pairs(point and point.sections or {}) do
+                if section.group == AUTO_GROUP then
+                    for _, filter in pairs(section.filters) do
+                        local v = filter.value
+                        if v and v.name then keys[item_key(v.name, v.quality)] = true end
+                    end
+                end
+            end
+        end
+    end
+    return keys
+end
+
 -- On-demand: keep only wanted items in the outlet (return the rest to the
 -- factories), then materialize what the network can't already supply.
 local function pull_on_demand(record, hub_inv, chests, return_snap, set)
@@ -1144,6 +1465,9 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
             {"", game.tick, ",net-wants,", prof, "\n"}, true)
     end
     local moved = 0
+    local by_key = {}
+    local g = guards(record)
+    local tick = game.tick
 
     -- send back anything no longer wanted (bots occasionally re-route if we
     -- yank an item they were flying toward; the engine handles it)
@@ -1152,35 +1476,54 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
         local excess = count - wanted
         if excess > 0 then
             local name, quality = split_key(key)
-            local inserted = insert_spec_into_chests(return_snap, name, quality, excess)
+            local inserted, into_storage =
+                insert_spec_into_chests(return_snap, name, quality, excess)
             if inserted > 0 then
                 hub_inv.remove({name = name, count = inserted, quality = quality})
+                -- Loop guards 3 and 4 are armed here, on the give-back, because
+                -- that is the moment an item has demonstrably gone round once.
+                if g.cooldown then mark_lockout(record, "pull_cooldown", key, tick) end
+                if into_storage and g.no_storage_repull then
+                    mark_lockout(record, "storage_cooldown", key, tick)
+                end
             end
         end
     end
 
-    if not wants then return 0 end
+    if not wants then return 0, by_key end
 
     -- what the network can't already cover (its count includes our stock)
+    local blocked = g.block_inlet_items and inlet_auto_keys(record) or nil
     local need = {}
     for key, want in pairs(wants) do
-        local name, quality = split_key(key)
-        local missing = want - network.get_item_count({name = name, quality = quality})
-        if missing > 0 then need[key] = missing end
+        if not (blocked and blocked[key])
+            and not (g.cooldown
+                and locked_out(record.pull_cooldown, key, tick, COOLDOWN_TICKS)) then
+            local name, quality = split_key(key)
+            local missing = want - network.get_item_count({name = name, quality = quality})
+            if missing > 0 then need[key] = missing end
+        end
     end
-    if next(need) == nil then return 0 end
+    if next(need) == nil then return 0, by_key end
 
     for _, entry in pairs(chests) do
         if next(need) == nil then break end
         local chest = entry.chest
         if chest.valid then
             local inv = chest.get_inventory(defines.inventory.chest)
+            -- guard 4 only ever gates the storage half of the source list
+            local storage_gated = g.no_storage_repull and entry.mode == "storage"
             if inv and holds_any(inv, need) then
                 for i = 1, #inv do
                     local stack = inv[i]
-                    if stack.valid_for_read and item_allowed(record, stack.name, set) then
+                    if stack.valid_for_read
+                        and item_allowed(record, stack.name, stack.quality.name, set) then
                         local key = item_key(stack.name, stack.quality.name)
                         local missing = need[key]
+                        if storage_gated
+                            and locked_out(record.storage_cooldown, key, tick, STORAGE_LOCK_TICKS) then
+                            missing = nil
+                        end
                         if missing and missing >= 1 then
                             local original = stack.count
                             local move = math.min(missing, original)
@@ -1188,6 +1531,7 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
                             local inserted = hub_inv.insert(stack)
                             stack.count = original - inserted
                             moved = moved + inserted
+                            by_key[key] = (by_key[key] or 0) + inserted
                             need[key] = missing - inserted
                             if need[key] < 1 then need[key] = nil end
                         end
@@ -1196,7 +1540,50 @@ local function pull_on_demand(record, hub_inv, chests, return_snap, set)
             end
         end
     end
-    return moved
+    return moved, by_key
+end
+
+-- Evacuation: pull whatever the factories hold regardless of demand, until they
+-- are empty or the outlet is. Decommissioning a factory otherwise means standing
+-- inside it moving chests by hand, which is the one job the outlet exists to
+-- avoid and the one job it could not do.
+--
+-- This is NOT the buffer mode that was removed in 0.17.0, and the difference is
+-- the point: buffer mode was a standing state that kept stock pre-staged in the
+-- outlet forever. This is an action with an end. It runs while there is
+-- something to take and stops on its own, and while it runs the outlet keeps
+-- offering everything to the network as a normal passive provider, so the items
+-- flow onward to storage instead of piling up.
+local function evacuate_pass(record, hub_inv, chests, set)
+    local moved, by_key = 0, {}
+    for _, entry in pairs(chests) do
+        local chest = entry.chest
+        if chest.valid then
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv then
+                for i = 1, #inv do
+                    local stack = inv[i]
+                    if stack.valid_for_read
+                        and item_allowed(record, stack.name, stack.quality.name, set) then
+                        local key = item_key(stack.name, stack.quality.name)
+                        local original = stack.count
+                        -- whole stacks, so spoilage and quality ride along
+                        local inserted = hub_inv.insert(stack)
+                        if inserted > 0 then
+                            stack.count = original - inserted
+                            moved = moved + inserted
+                            by_key[key] = (by_key[key] or 0) + inserted
+                        end
+                        if inserted < original then
+                            -- outlet full: stop here, the next pass continues
+                            return moved, by_key, false
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return moved, by_key, true
 end
 
 local function pull_for_outlet(record)
@@ -1221,10 +1608,32 @@ local function pull_for_outlet(record)
     end
 
     local set = filter_set(record)
+
+    if record.evacuating then
+        -- Evacuation reaches storage chests too, whatever the pull-from-storage
+        -- toggle says: leaving a factory's storage full would defeat the point.
+        local all = reachable_chests(record, function(mode)
+            return provider_mode(mode) or mode == "storage"
+        end)
+        local moved, by_key, drained = evacuate_pass(record, hub_inv, all, set)
+        note_moved(record, moved, by_key)
+        -- Finished only when a whole sweep found nothing AND had room for it -
+        -- a full outlet is "come back next pass", not "done".
+        if drained and moved == 0 then
+            record.evacuating = nil
+            local force = record.entity.force
+            for _, player in pairs(force.connected_players) do
+                player.print({"gui-etech-hub.evacuate-done"})
+            end
+        end
+        return
+    end
+
     -- Snapshot the give-back candidates once for the whole pass, however many
     -- item types end up going back.
-    note_moved(record, pull_on_demand(record, hub_inv, chests,
-        return_snapshot(reachable_chests(record, return_mode)), set))
+    local moved, by_key = pull_on_demand(record, hub_inv, chests,
+        return_snapshot(reachable_chests(record, return_mode)), set)
+    note_moved(record, moved, by_key)
 end
 
 -- Inlet: distribute into interior requester/buffer chests ---------------------
@@ -1280,6 +1689,51 @@ local function update_inlet_auto_requests(record, remaining)
     target.filters = list
 end
 
+-- An inlet already knows when the factories are asking for something it can't
+-- supply - that is exactly the "Still missing inside" list in its window. Until
+-- 0.24.0 that was the ONLY place it appeared, so a starving factory was
+-- invisible unless you happened to walk over and open the right device.
+--
+-- Two things keep this from becoming noise. It needs the shortfall to PERSIST
+-- for the grace period, because a factory is briefly short every time a machine
+-- finishes a batch and alerting on that would fire constantly. And the alert is
+-- re-raised every pass while it lasts, deliberately: a custom alert that stops
+-- being re-added stops being shown, which is the same reason the teleporter's
+-- unpowered-pad alert re-raises.
+local function shortfall_alert(record)
+    if not settings.global["etech-hub-shortfall-alerts"].value then
+        record.short_since = nil
+        return
+    end
+    if not record.last_remaining then
+        record.short_since = nil
+        return
+    end
+    local tick = game.tick
+    record.short_since = record.short_since or tick
+    local grace = settings.global["etech-hub-shortfall-grace"].value * 60
+    if tick - record.short_since < grace then return end
+
+    local entity = record.entity
+    local force = entity.force
+    local players = force.connected_players
+    if #players == 0 then return end
+    -- Name one missing item rather than a count: "the factories want copper
+    -- plate" is actionable, "3 items missing" is not. Lowest key wins so the
+    -- message is stable between passes instead of flickering between items.
+    local pick
+    for key in pairs(record.last_remaining) do
+        if not pick or key < pick then pick = key end
+    end
+    if not pick then return end
+    local name = split_key(pick)
+    local icon = {type = "item", name = INLET_NAME}
+    local message = {"gui-etech-hub.alert-shortfall", name}
+    for _, player in pairs(players) do
+        player.add_custom_alert(entity, icon, message, true)
+    end
+end
+
 local function distribute_for_inlet(record)
     local inlet = record.entity
     local inlet_inv = inlet.get_inventory(defines.inventory.chest)
@@ -1288,36 +1742,38 @@ local function distribute_for_inlet(record)
     local have = inventory_counts(inlet_inv)
     local targets = reachable_chests(record, requester_mode)
     local moved = 0
+    local by_key = {}
     local remaining = {} -- interior deficits left after this pass, for auto-request
     local set = filter_set(record) -- inlets filter like outlets since 0.19.0
 
+    -- Pass 1: collect what every reachable chest is short of, grouped by item.
+    -- Nothing is inserted yet, and that is the whole point. Inserting as each
+    -- chest is met gives the first chest in the list its entire deficit before
+    -- the second is even looked at, so whenever the inlet holds less than the
+    -- factories want in total, the factories at the end of a stable list get
+    -- nothing — not "less", nothing — pass after pass, indefinitely. That is
+    -- invisible right up until supply tightens, and then it looks like the last
+    -- factory's inlet is broken.
+    local demand = {} -- key -> { total, claims = {{inv, want}, ...} }
     for _, entry in pairs(targets) do
         local chest = entry.chest
         if chest.valid then
             local wants = chest_requests(chest)
             if wants and next(wants) then
                 local inv = chest.get_inventory(defines.inventory.chest)
-                local current = inventory_counts(inv)
-                for key, want in pairs(wants) do
+                local current = inv and inventory_counts(inv)
+                for key, want in pairs(wants or {}) do
                     local name, quality = split_key(key)
-                    if item_allowed(record, name, set) then
+                    if inv and item_allowed(record, name, quality, set) then
                         local deficit = want - (current[key] or 0)
                         if deficit > 0 then
-                            local available = have[key] or 0
-                            local move = math.min(available, deficit)
-                            if move >= 1 then
-                                -- spec-based transfer: spoil timers restart
-                                local inserted = inv.insert({name = name, count = move, quality = quality})
-                                if inserted > 0 then
-                                    inlet_inv.remove({name = name, count = inserted, quality = quality})
-                                    have[key] = available - inserted
-                                    moved = moved + inserted
-                                    deficit = deficit - inserted
-                                end
+                            local d = demand[key]
+                            if not d then
+                                d = { total = 0, claims = {} }
+                                demand[key] = d
                             end
-                            if deficit > 0 then
-                                remaining[key] = (remaining[key] or 0) + deficit
-                            end
+                            d.total = d.total + deficit
+                            d.claims[#d.claims + 1] = { inv = inv, want = deficit }
                         end
                     end
                 end
@@ -1325,9 +1781,67 @@ local function distribute_for_inlet(record)
         end
     end
 
+    -- Pass 2: hand out. Enough on hand for an item -> every claim gets its full
+    -- deficit and this behaves exactly as it always did. Not enough -> each
+    -- claim gets its proportional share, floored, and the units left over by
+    -- the flooring are walked out one at a time from a rotating start so the
+    -- same chest doesn't collect the odd unit every single pass.
+    local turn = record.share_turn or 0
+    local reset_spoilage = guards(record).reset_spoilage == true
+    for key, d in pairs(demand) do
+        local name, quality = split_key(key)
+        local pool = math.min(have[key] or 0, d.total)
+        local grants = {}
+        if pool >= d.total then
+            for i, claim in ipairs(d.claims) do grants[i] = claim.want end
+        else
+            local handed = 0
+            for i, claim in ipairs(d.claims) do
+                local share = math.floor(pool * claim.want / d.total)
+                grants[i] = share
+                handed = handed + share
+            end
+            local spare = pool - handed
+            local n = #d.claims
+            -- Sweeps, not one pass: a claim already at its want takes nothing,
+            -- so a single lap can leave units unplaced. Stops the moment a whole
+            -- lap places nothing, which also caps the work at n per sweep.
+            while spare >= 1 do
+                local placed = false
+                for step = 0, n - 1 do
+                    if spare < 1 then break end
+                    local i = (turn + step) % n + 1
+                    if grants[i] < d.claims[i].want then
+                        grants[i] = grants[i] + 1
+                        spare = spare - 1
+                        placed = true
+                    end
+                end
+                if not placed then break end
+            end
+        end
+        for i, claim in ipairs(d.claims) do
+            local short = claim.want
+            if grants[i] >= 1 then
+                local inserted = transfer_items(inlet_inv, claim.inv, name, quality,
+                    grants[i], not reset_spoilage)
+                if inserted > 0 then
+                    have[key] = (have[key] or 0) - inserted
+                    moved = moved + inserted
+                    by_key[key] = (by_key[key] or 0) + inserted
+                    short = short - inserted
+                end
+            end
+            if short > 0 then remaining[key] = (remaining[key] or 0) + short end
+        end
+    end
+    -- Bounded so the counter can't grow without limit in a long save.
+    record.share_turn = (turn + 1) % 1000
+
     update_inlet_auto_requests(record, remaining)
     record.last_remaining = next(remaining) and remaining or nil
-    note_moved(record, moved)
+    note_moved(record, moved, by_key)
+    shortfall_alert(record)
 end
 
 -- Fluid outlet / inlet ---------------------------------------------------------
@@ -1367,6 +1881,20 @@ local function reachable_tanks(record)
     return tanks
 end
 
+-- Total interior fluid stock the device can reach, per fluid name.
+local function interior_fluids(record)
+    local totals = {}
+    for _, tank in pairs(reachable_tanks(record)) do
+        if tank.valid then
+            for name, amount in pairs(tank.get_fluid_contents()) do
+                totals[name] = (totals[name] or 0) + amount
+            end
+        end
+    end
+    return totals
+end
+
+
 -- First (and, for these devices, only) fluid in an entity, or nil.
 -- `next` says that outright; the old for-loop-with-an-unconditional-return
 -- said it by accident, which is also what luacheck reported.
@@ -1404,6 +1932,33 @@ local function push_fluid_to_tanks(record, device, name, amount)
     return moved
 end
 
+-- Fluid loop guard. The item devices got theirs in 0.23.0; the fluid pair has
+-- the same shape and is worse, because fluid moves in bulk with no bots to
+-- throttle it. Pipe a fluid outlet and a fluid inlet onto the same header — one
+-- header per fluid is the normal way to plumb a base — and the outlet drains
+-- the factories' tanks, the fluid runs down the header into the inlet, and the
+-- inlet pushes it straight back into those same tanks. Nothing leaves, both
+-- devices work forever.
+--
+-- The guard is on the pull side, where the circle starts: while a fluid inlet
+-- on this surface is holding the fluid this outlet is picked for, the outlet
+-- sits still. The inlet has no GUI of its own, so this is also the only device
+-- of the pair that can carry a toggle.
+local function inlet_holds_fluid(record, name)
+    local outlet = record.entity
+    local surface = outlet.surface.index
+    local force = outlet.force.index
+    for _, other in pairs(hub_data().hubs) do
+        if other.kind == "fluid-inlet" and other.entity.valid
+            and other.entity.surface.index == surface
+            and other.entity.force.index == force then
+            local held = device_fluid(other.entity)
+            if held == name then return true end
+        end
+    end
+    return false
+end
+
 local function pass_for_fluid_outlet(record)
     local device = record.entity
     -- 2.1: LuaEntity.fluidbox is gone; capacity/removal go through
@@ -1414,6 +1969,11 @@ local function pass_for_fluid_outlet(record)
         note_moved(record, 0)
         return
     end
+    -- Evaluated before the flush, applied after it. A pick change still has to
+    -- be able to hand the OLD fluid back even while the guard is holding the
+    -- pull, or the outlet would sit forever holding a fluid it can't shed.
+    record.fluid_looped =
+        (guards(record).fluid_loop and inlet_holds_fluid(record, want)) or nil
     local capacity = device.get_fluid_capacity(1)
     local current_name, current_amount = device_fluid(device)
     local moved = 0
@@ -1429,6 +1989,11 @@ local function pass_for_fluid_outlet(record)
             note_moved(record, math.floor(moved))
             return
         end
+    end
+
+    if record.fluid_looped then
+        note_moved(record, math.floor(moved))
+        return
     end
 
     local room = capacity - (current_amount or 0)
@@ -1472,15 +2037,64 @@ end
 
 -- Sensor: broadcast interior provider totals as signals ------------------------
 
+-- What the interior requester/buffer chests are still short of. Only walked
+-- when the sensor's deficit option is on — it doubles the sensor's chest walk,
+-- and most sensors just want stock. Same shape the inlet computes for its own
+-- auto-requests, but a sensor has no inlet to read it from: an inlet is a
+-- separate device and may not exist on this surface at all.
+local function interior_deficits(record)
+    local out = {}
+    for _, entry in pairs(reachable_chests(record, requester_mode)) do
+        local chest = entry.chest
+        if chest.valid then
+            local wants = chest_requests(chest)
+            if wants and next(wants) then
+                local inv = chest.get_inventory(defines.inventory.chest)
+                local current = inv and inventory_counts(inv) or {}
+                for key, want in pairs(wants) do
+                    local deficit = want - (current[key] or 0)
+                    if deficit > 0 then out[key] = (out[key] or 0) + deficit end
+                end
+            end
+        end
+    end
+    return out
+end
+
 local function update_sensor(record)
     local totals = {}
-    for _, entry in pairs(reachable_chests(record, provider_mode)) do
+    local set = filter_set(record)
+    local opts = guards(record)
+    local source = opts.sensor_storage and function(mode)
+        return provider_mode(mode) or mode == "storage"
+    end or provider_mode
+    for _, entry in pairs(reachable_chests(record, source)) do
         local inv = entry.chest.get_inventory(defines.inventory.chest)
         if inv then
             for _, item in pairs(inv.get_contents()) do
-                local key = item_key(item.name, item.quality)
-                totals[key] = (totals[key] or 0) + item.count
+                local quality = item.quality or "normal"
+                if item_allowed(record, item.name, quality, set) then
+                    local key = item_key(item.name, quality)
+                    totals[key] = (totals[key] or 0) + item.count
+                end
             end
+        end
+    end
+    -- Deficits are SUBTRACTED from stock rather than emitted as their own
+    -- signals: a signal can only carry one number per item, and "how much of
+    -- this do the factories have spare" is the number a circuit actually wants.
+    -- Positive = surplus sitting in provider chests, negative = the interior
+    -- requesters are short by that much.
+    if opts.sensor_deficits then
+        for key, deficit in pairs(interior_deficits(record)) do
+            local name, quality = split_key(key)
+            if item_allowed(record, name, quality, set) then
+                totals[key] = (totals[key] or 0) - deficit
+            end
+        end
+        -- a net of exactly zero is not a signal, it is the absence of one
+        for key, count in pairs(totals) do
+            if count == 0 then totals[key] = nil end
         end
     end
 
@@ -1505,7 +2119,57 @@ local function update_sensor(record)
         }
     end
     if #list > MAX_SIGNALS then
-        table.sort(list, function(a, b) return a.min > b.min end)
+        -- by magnitude, not by value: with deficits on, the most negative
+        -- signals are the most interesting ones and a plain descending sort
+        -- would truncate exactly those away first
+        table.sort(list, function(a, b)
+            local am, bm = math.abs(a.min), math.abs(b.min)
+            if am ~= bm then return am > bm end
+            return a.value.name < b.value.name
+        end)
+        for i = #list, MAX_SIGNALS + 1, -1 do list[i] = nil end
+    end
+
+    local behavior = record.entity.get_or_create_control_behavior()
+    local section = behavior.get_section(1) or behavior.add_section()
+    section.filters = list
+end
+
+-- Fluid sensor: the interior tanks' contents as signals. Completes the fluid
+-- side, which had an outlet and an inlet and no way for a circuit to see what
+-- was actually in there. Fluid signals only, so nothing here needs the item
+-- filter machinery - a fluid device has one fluid per tank and the interesting
+-- question is just "how much of each".
+local function update_fluid_sensor(record)
+    local totals = interior_fluids(record)
+
+    -- Same dirty check as the item sensor: rewriting the section every pass was
+    -- that device's entire steady-state cost. Amounts are floored first, so a
+    -- tank drifting by a fraction of a unit doesn't count as a change.
+    local sig = {}
+    for name, amount in pairs(totals) do
+        sig[#sig + 1] = name .. "=" .. math.floor(amount)
+    end
+    table.sort(sig)
+    local snapshot = table.concat(sig, ";")
+    if record.sensor_snapshot == snapshot then return end
+    record.sensor_snapshot = snapshot
+
+    local list = {}
+    for name, amount in pairs(totals) do
+        local floored = math.floor(amount)
+        if floored > 0 then
+            list[#list + 1] = {
+                value = { type = "fluid", name = name, comparator = "=" },
+                min = floored,
+            }
+        end
+    end
+    if #list > MAX_SIGNALS then
+        table.sort(list, function(a, b)
+            if a.min ~= b.min then return a.min > b.min end
+            return a.value.name < b.value.name
+        end)
         for i = #list, MAX_SIGNALS + 1, -1 do list[i] = nil end
     end
 
@@ -1558,8 +2222,31 @@ local function gps_tag(factory)
         building.position.x, building.position.y, building.surface.name)
 end
 
+-- Opening the interior chest itself, for players who turned that on. It has to
+-- be remote view: the chest is on another surface, so the reach trick the
+-- factory terminal uses (factory-hub/terminal.lua) cannot reach it at all.
+--
+-- Read terminal.lua's header before reusing this anywhere else. Remote view was
+-- tried there and rejected, because it swaps the player's inventory panel for
+-- the ghost-build palette - which is fatal when the point is moving items in and
+-- out. Here the point is LOOKING at where something is, and shift-click still
+-- takes a stack without moving the player at all, so the same trade lands the
+-- other way. It is off by default regardless.
+local function remote_view_at(player, entity)
+    if not (player.character and entity and entity.valid) then return false end
+    local ok = pcall(function()
+        player.set_controller {
+            type = defines.controllers.remote,
+            position = entity.position,
+            surface = entity.surface,
+        }
+    end)
+    return ok
+end
+
 local function locate_item(player, record, name, quality)
     local per = {}
+    local best, best_count = nil, 0
     for _, entry in pairs(reachable_chests(record, outlet_source_mode(record))) do
         local inv = entry.chest.get_inventory(defines.inventory.chest)
         if inv then
@@ -1568,8 +2255,15 @@ local function locate_item(player, record, name, quality)
                 local id = entry.factory.id
                 if not per[id] then per[id] = { factory = entry.factory, count = 0 } end
                 per[id].count = per[id].count + count
+                if count > best_count then best, best_count = entry.chest, count end
             end
         end
+    end
+    -- Per-player opt-in: jump the camera to the chest that holds the most of it
+    -- rather than printing links. The chat lines are still printed either way,
+    -- so the per-factory breakdown isn't lost by turning this on.
+    if best and player.mod_settings["etech-hub-locate-remote"].value then
+        remote_view_at(player, best)
     end
     local found = false
     for id, info in pairs(per) do
@@ -1597,7 +2291,55 @@ local function character_inventory(player)
     return player.get_main_inventory()
 end
 
-local function take_item(player, record, name, quality)
+-- Ask the player's OWN logistic requests for this item, rather than fetching it
+-- by hand. The point of the outlet is that bots can do the walking; a panel that
+-- can only hand you a stack in person is missing its own trick. Written into a
+-- managed section so it never disturbs the request groups the player set up.
+local PLAYER_REQUEST_GROUP = "etech-hub-requested"
+
+local function request_item(player, name, quality)
+    local character = player.character
+    local point = character and character.valid and character.get_requester_point()
+    if not point then
+        player.print({"gui-etech-hub.request-no-character"})
+        return
+    end
+    local proto = prototypes.item[name]
+    if not proto then return end
+    local target
+    for _, section in pairs(point.sections) do
+        if section.group == PLAYER_REQUEST_GROUP then
+            target = section
+            break
+        end
+    end
+    if not target then target = point.add_section(PLAYER_REQUEST_GROUP) end
+    if not target then
+        player.print({"gui-etech-hub.request-failed", name})
+        return
+    end
+    -- Repeat clicks top the same slot up by a stack instead of piling up
+    -- duplicate slots for the same item.
+    local filters = target.filters
+    local slot, total = nil, proto.stack_size
+    for i, filter in pairs(filters) do
+        local value = filter.value
+        if value and value.name == name and (value.quality or "normal") == quality then
+            slot = i
+            total = (filter.min or 0) + proto.stack_size
+            break
+        end
+    end
+    if not slot then slot = #filters + 1 end
+    target.set_slot(slot, {
+        value = { type = "item", name = name, quality = quality, comparator = "=" },
+        min = total,
+    })
+    player.print({"gui-etech-hub.requested", total, name})
+end
+
+-- `all = true` takes as much as the player can carry instead of one stack.
+local function take_item(player, record, name, quality, all)
     local player_inv = character_inventory(player)
     if not player_inv then
         player.print({"gui-etech-hub.take-no-inventory"})
@@ -1605,7 +2347,9 @@ local function take_item(player, record, name, quality)
     end
     local proto = prototypes.item[name]
     if not proto then return end -- item removed by a mod change
-    local wanted = proto.stack_size
+    -- The loop below already stops on a full inventory (it clamps `wanted` down
+    -- to what fit), so "everything" needs no separate capacity calculation.
+    local wanted = all and math.huge or proto.stack_size
     local taken = 0
     for _, entry in pairs(reachable_chests(record, outlet_source_mode(record))) do
         if taken >= wanted then break end
@@ -1645,6 +2389,44 @@ local MODE_ITEMS = {
     {"gui-etech-hub.mode-blacklist"},
 }
 
+local SORT_ITEMS = {
+    {"gui-etech-hub.sort-count"},
+    {"gui-etech-hub.sort-name"},
+    {"gui-etech-hub.sort-rate"},
+}
+
+-- The loop-guard checkboxes, in panel order. One table drives the build, the
+-- state restore and the click handler, so adding a guard is one entry plus its
+-- two locale keys.
+local GUARD_CHECKS = {
+    {element = "etech-hub-guard-inlet",    field = "ignore_inlet_requests", loc = "guard-inlet"},
+    {element = "etech-hub-guard-items",    field = "block_inlet_items",     loc = "guard-items"},
+    {element = "etech-hub-guard-cooldown", field = "cooldown",              loc = "guard-cooldown"},
+    {element = "etech-hub-guard-storage",  field = "no_storage_repull",     loc = "guard-storage"},
+}
+
+-- The fluid outlet's own loop guard. Same storage field convention, but it
+-- lives on a different panel, so it is registered for the shared handler
+-- without joining the outlet panel's checkbox list.
+local FLUID_GUARD = {element = "etech-hub-guard-fluid", field = "fluid_loop", loc = "guard-fluid"}
+
+-- Sits with the filter widgets rather than the loop guards — it changes where
+-- the filter list comes from, it doesn't stop a loop.
+local CIRCUIT_FILTER_OPT =
+    {element = "etech-hub-circuit-filters", field = "circuit_filters", loc = "circuit-filters"}
+
+-- Inlet only. Ticking it opts back IN to the pre-0.24.0 behaviour where
+-- distributed items arrive with a fresh spoilage timer.
+local SPOILAGE_OPT =
+    {element = "etech-hub-reset-spoilage", field = "reset_spoilage", loc = "reset-spoilage"}
+
+local GUARD_BY_ELEMENT = {
+    [FLUID_GUARD.element] = FLUID_GUARD,
+    [CIRCUIT_FILTER_OPT.element] = CIRCUIT_FILTER_OPT,
+    [SPOILAGE_OPT.element] = SPOILAGE_OPT,
+}
+for _, guard in ipairs(GUARD_CHECKS) do GUARD_BY_ELEMENT[guard.element] = guard end
+
 local function build_panel(player)
     local old = player.gui.relative[PANEL_NAME]
     if old then old.destroy() end
@@ -1668,6 +2450,16 @@ local function build_panel(player)
     inner.add {type = "label", name = "rate"}
     local search = inner.add {type = "textfield", name = "etech-hub-search"}
     search.style.horizontally_stretchable = true
+    -- The grid was one flat list of everything on the surface, with the
+    -- per-factory split available only by hovering each item in turn. These two
+    -- make "what is in factory 7" and "what is there most of" answerable
+    -- directly. Both are view state - neither changes what the outlet pulls.
+    local views = inner.add {type = "flow", name = "views", direction = "horizontal"}
+    views.add {type = "drop-down", name = "etech-hub-factory",
+        tooltip = {"gui-etech-hub.factory-filter-tooltip"}}
+    views.add {type = "drop-down", name = "etech-hub-sort",
+        items = SORT_ITEMS, selected_index = 1,
+        tooltip = {"gui-etech-hub.sort-tooltip"}}
     local scroll = inner.add {type = "scroll-pane", name = "scroll"}
     -- tall enough to visually match the 200-slot chest window next to it
     scroll.style.minimal_height = 420
@@ -1683,8 +2475,29 @@ local function build_panel(player)
     local slots = inner.add {type = "table", name = "filter_slots", column_count = 5}
     for i = 1, FILTER_SLOTS do
         slots.add {type = "choose-elem-button", name = "etech-hub-filter-" .. i,
-            elem_type = "item"}
+            elem_type = "item-with-quality"}
     end
+    inner.add {type = "checkbox", name = "etech-hub-match-quality", state = false,
+        caption = {"gui-etech-hub.match-quality"},
+        tooltip = {"gui-etech-hub.match-quality-tooltip"}}
+    inner.add {type = "checkbox", name = CIRCUIT_FILTER_OPT.element, state = false,
+        caption = {"gui-etech-hub." .. CIRCUIT_FILTER_OPT.loc},
+        tooltip = {"gui-etech-hub." .. CIRCUIT_FILTER_OPT.loc .. "-tooltip"}}
+
+    inner.add {type = "line", name = "guard_sep"}
+    inner.add {type = "label", name = "guards_label",
+        caption = {"gui-etech-hub.loop-guards"},
+        tooltip = {"gui-etech-hub.loop-guards-tooltip"}}
+    local gchecks = inner.add {type = "flow", name = "guard_checks", direction = "vertical"}
+    for _, guard in ipairs(GUARD_CHECKS) do
+        gchecks.add {type = "checkbox", name = guard.element, state = false,
+            caption = {"gui-etech-hub." .. guard.loc},
+            tooltip = {"gui-etech-hub." .. guard.loc .. "-tooltip"}}
+    end
+
+    inner.add {type = "button", name = "etech-hub-evacuate",
+        caption = {"gui-etech-hub.evacuate"},
+        tooltip = {"gui-etech-hub.evacuate-tooltip"}}
 
     inner.add {type = "label", name = "factories_label",
         caption = {"gui-etech-hub.factories"}}
@@ -1699,8 +2512,22 @@ local function load_panel_settings(player, record)
     local inner = panel.inner
     inner.checks["etech-hub-storage"].state = record.pull_storage == true
     inner["etech-hub-mode"].selected_index = record.filters.mode or 1
+    local g = guards(record)
+    local from_circuit = g[CIRCUIT_FILTER_OPT.field] == true
     for i = 1, FILTER_SLOTS do
-        inner.filter_slots["etech-hub-filter-" .. i].elem_value = record.filters.items[i]
+        local btn = inner.filter_slots["etech-hub-filter-" .. i]
+        btn.elem_value = filter_elem_value(record.filters.items[i])
+        btn.tooltip = filter_slot_tooltip(record.filters.items[i])
+        -- the slots are not what the outlet reads while the circuit drives the
+        -- filter list; greyed out beats silently ignored
+        btn.enabled = not from_circuit
+    end
+    inner["etech-hub-match-quality"].state = record.filters.match_quality == true
+    inner[CIRCUIT_FILTER_OPT.element].state = from_circuit
+    inner["etech-hub-evacuate"].caption = record.evacuating
+        and {"gui-etech-hub.evacuate-stop"} or {"gui-etech-hub.evacuate"}
+    for _, guard in ipairs(GUARD_CHECKS) do
+        inner.guard_checks[guard.element].state = g[guard.field] == true
     end
 
     -- factory rows: locate button + rename field (rebuilt on open only, so
@@ -1711,6 +2538,27 @@ local function load_panel_settings(player, record)
     for _, factory in pairs(cached_factories(record)) do
         if factory_usable(factory) then usable[#usable + 1] = factory end
     end
+
+    -- The factory dropdown is built from the same list, and its selected index
+    -- is mapped back to a factory id through grid_factory_ids rather than by
+    -- position: the list can change between opening the panel and clicking, and
+    -- an index into a stale list would silently filter by the wrong factory.
+    local ids = {}
+    local labels = {{"gui-etech-hub.factory-filter-all"}}
+    for _, factory in ipairs(usable) do
+        ids[#ids + 1] = factory.id
+        labels[#labels + 1] = factory_label(factory.id)
+    end
+    record.grid_factory_ids = ids
+    local picker = inner.views["etech-hub-factory"]
+    picker.items = labels
+    local selected = 1
+    for i, id in ipairs(ids) do
+        if id == record.grid_factory then selected = i + 1 end
+    end
+    if selected == 1 then record.grid_factory = nil end
+    picker.selected_index = selected
+    inner.views["etech-hub-sort"].selected_index = record.grid_sort or 1
     for i = 1, math.min(#usable, MAX_FACTORY_ROWS) do
         local factory = usable[i]
         local btn = rows.add {type = "button", caption = {"gui-etech-hub.locate"}}
@@ -1725,6 +2573,23 @@ local function load_panel_settings(player, record)
         rows.add {type = "label", caption = {"gui-etech-hub.more-factories", #usable - MAX_FACTORY_ROWS}}
         rows.add {type = "label", caption = ""}
     end
+end
+
+-- Search used to compare the INTERNAL name only, so "iron plate" found nothing
+-- and you had to know the string was "iron-plate". Both are matched now: the
+-- internal name (still useful, and what a modded item is often only findable
+-- by) and the translated display name.
+--
+-- Translation is per player and asynchronous in 2.x, so
+-- prototypes.item[x].localised_name cannot simply be read as a string here.
+-- helpers.is_valid_sprite_path-style shortcuts do not exist for names either.
+-- What DOES work without a translation round trip is the prototype's own
+-- `name` plus the hyphen-stripped form, which covers the case that actually
+-- bites - a space typed where the internal name has a hyphen.
+local function item_search_match(name, search)
+    local lowered = name:lower()
+    if lowered:find(search, 1, true) then return true end
+    return (lowered:gsub("%-", " ")):find(search, 1, true) ~= nil
 end
 
 local function refresh_grid(player, record)
@@ -1764,10 +2629,20 @@ local function refresh_grid(player, record)
     end
 
     local pins = record.pins or {}
+    local rates = rates_by_key(record)
+    local only = record.grid_factory
     local list = {}
     for _, t in pairs(order) do
-        if search == "" or t.name:lower():find(search, 1, true) then
+        -- Filtered to one factory, the number on the button becomes THAT
+        -- factory's count. Showing the surface-wide total while claiming to
+        -- show one factory would be worse than not filtering at all. `t` is
+        -- rebuilt every refresh, so overwriting it here is safe.
+        local visible = only and t.per[only] or t.count
+        if visible and visible > 0
+            and (search == "" or item_search_match(t.name, search)) then
+            t.count = visible
             t.pinned = pins[item_key(t.name, t.quality)] == true
+            t.rate = rates[item_key(t.name, t.quality)] or 0
             list[#list + 1] = t
         end
     end
@@ -1786,10 +2661,23 @@ local function refresh_grid(player, record)
         scroll.add {type = "label", caption = msg}
         return
     end
+    -- Pins always win, whatever the sort: the point of pinning is that the item
+    -- stays where you can see it. Name is the final tiebreak everywhere so the
+    -- order is total and stable rather than whatever table.sort happens to do
+    -- with equal elements.
+    local sort_mode = record.grid_sort or 1
     table.sort(list, function(a, b)
         if a.pinned ~= b.pinned then return a.pinned end
-        if a.count ~= b.count then return a.count > b.count end
-        return a.name < b.name
+        if sort_mode == 2 then
+            if a.name ~= b.name then return a.name < b.name end
+        elseif sort_mode == 3 then
+            if a.rate ~= b.rate then return a.rate > b.rate end
+            if a.count ~= b.count then return a.count > b.count end
+        else
+            if a.count ~= b.count then return a.count > b.count end
+        end
+        if a.name ~= b.name then return a.name < b.name end
+        return a.quality < b.quality
     end)
 
     -- Dirty check, same trick the sensor uses. Tearing down and rebuilding
@@ -1806,18 +2694,30 @@ local function refresh_grid(player, record)
     for _, t in ipairs(list) do
         sig[#sig + 1] = t.name .. "|" .. t.quality .. "=" .. t.count .. (t.pinned and "*" or "")
     end
-    local snapshot = search .. "\0" .. table.concat(sig, ";")
+    -- View state joins the signature: change the factory filter or the sort and
+    -- the item set or its order changes without any count changing, so without
+    -- this the grid would keep showing the previous view.
+    local snapshot = search .. "\0" .. tostring(only) .. "\0" .. sort_mode
+        .. "\0" .. table.concat(sig, ";")
     if record.grid_snapshot == snapshot and scroll.grid and scroll.grid.valid then
         return
     end
     record.grid_snapshot = snapshot
 
     scroll.clear()
+    local rates = rates_by_key(record)
     local grid = scroll.add {type = "table", name = "grid", column_count = 8}
     for _, t in ipairs(list) do
         local lines = {"", t.name}
         if t.quality ~= "normal" then
             lines[#lines + 1] = " (" .. t.quality .. ")"
+        end
+        -- What this ITEM moved in the last minute, not what the device moved.
+        -- Only shown when it is nonzero: a line of zeroes on every idle item
+        -- would bury the handful that are actually flowing.
+        local rate = rates[item_key(t.name, t.quality)]
+        if rate and rate > 0 then
+            lines[#lines + 1] = {"", "\n", {"gui-etech-hub.item-rate", rate}}
         end
         -- one nested LocalisedString per factory line (factory_label may be
         -- localized, and the top-level {"",...} parameter cap is 20)
@@ -1873,6 +2773,10 @@ local function build_inlet_panel(player, record)
         state = record.auto_request == true,
         caption = {"gui-etech-hub.auto-request"},
         tooltip = {"gui-etech-hub.auto-request-tooltip"}}
+    inner.add {type = "checkbox", name = SPOILAGE_OPT.element,
+        state = guards(record)[SPOILAGE_OPT.field] == true,
+        caption = {"gui-etech-hub." .. SPOILAGE_OPT.loc},
+        tooltip = {"gui-etech-hub." .. SPOILAGE_OPT.loc .. "-tooltip"}}
 
     -- Filter widgets (0.19.0 inlet parity): same element names as the
     -- outlet panel, so the shared name-based GUI handlers cover both.
@@ -1884,9 +2788,14 @@ local function build_inlet_panel(player, record)
     local slots = inner.add {type = "table", name = "filter_slots", column_count = 5}
     for i = 1, FILTER_SLOTS do
         local btn = slots.add {type = "choose-elem-button", name = "etech-hub-filter-" .. i,
-            elem_type = "item"}
-        btn.elem_value = record.filters and record.filters.items[i]
+            elem_type = "item-with-quality"}
+        btn.elem_value = record.filters and filter_elem_value(record.filters.items[i])
+        btn.tooltip = record.filters and filter_slot_tooltip(record.filters.items[i])
     end
+    inner.add {type = "checkbox", name = "etech-hub-match-quality",
+        state = record.filters and record.filters.match_quality == true,
+        caption = {"gui-etech-hub.match-quality"},
+        tooltip = {"gui-etech-hub.match-quality-tooltip"}}
 
     inner.add {type = "label", name = "deficit_label",
         caption = {"gui-etech-hub.inlet-deficits"}}
@@ -1933,22 +2842,67 @@ local function refresh_inlet_panel(player, record)
     end
 end
 
+-- GUI: sensor panel ----------------------------------------------------------
+-- The sensor broadcast everything it could see until 0.23.0, top 1000 by count.
+-- On a real base that is a wall of signals nobody wired anything to. It gets the
+-- same filter widgets as the outlet and inlet — same element names, so the
+-- shared handlers already cover it — plus its two own options.
+
+local SENSOR_PANEL_NAME = "etech-sensor-panel"
+
+local SENSOR_OPTIONS = {
+    {element = "etech-hub-sensor-storage",  field = "sensor_storage",  loc = "sensor-storage"},
+    {element = "etech-hub-sensor-deficits", field = "sensor_deficits", loc = "sensor-deficits"},
+}
+for _, opt in ipairs(SENSOR_OPTIONS) do GUARD_BY_ELEMENT[opt.element] = opt end
+
+local function build_sensor_panel(player, record)
+    local old = player.gui.relative[SENSOR_PANEL_NAME]
+    if old then old.destroy() end
+    local panel = player.gui.relative.add {
+        type = "frame",
+        name = SENSOR_PANEL_NAME,
+        direction = "vertical",
+        caption = {"gui-etech-hub.sensor-title"},
+        anchor = {
+            gui = defines.relative_gui_type.constant_combinator_gui,
+            position = defines.relative_gui_position.right,
+            names = {SENSOR_NAME},
+        },
+    }
+    local inner = panel.add {
+        type = "frame",
+        name = "inner",
+        style = "inside_shallow_frame_with_padding",
+        direction = "vertical",
+    }
+    for _, opt in ipairs(SENSOR_OPTIONS) do
+        inner.add {type = "checkbox", name = opt.element,
+            state = guards(record)[opt.field] == true,
+            caption = {"gui-etech-hub." .. opt.loc},
+            tooltip = {"gui-etech-hub." .. opt.loc .. "-tooltip"}}
+    end
+    inner.add {type = "line", name = "sep"}
+    inner.add {type = "label", name = "settings_label",
+        caption = {"gui-etech-hub.sensor-filter"}}
+    local mode = inner.add {type = "drop-down", name = "etech-hub-mode", items = MODE_ITEMS}
+    mode.selected_index = record.filters and record.filters.mode or 1
+    local slots = inner.add {type = "table", name = "filter_slots", column_count = 5}
+    for i = 1, FILTER_SLOTS do
+        local btn = slots.add {type = "choose-elem-button", name = "etech-hub-filter-" .. i,
+            elem_type = "item-with-quality"}
+        btn.elem_value = record.filters and filter_elem_value(record.filters.items[i])
+        btn.tooltip = record.filters and filter_slot_tooltip(record.filters.items[i])
+    end
+    inner.add {type = "checkbox", name = "etech-hub-match-quality",
+        state = record.filters and record.filters.match_quality == true,
+        caption = {"gui-etech-hub.match-quality"},
+        tooltip = {"gui-etech-hub.match-quality-tooltip"}}
+end
+
 -- GUI: fluid outlet panel --------------------------------------------------------
 
 local FLUID_PANEL_NAME = "etech-fluid-panel"
-
--- Total interior fluid stock the device can reach, per fluid name.
-local function interior_fluids(record)
-    local totals = {}
-    for _, tank in pairs(reachable_tanks(record)) do
-        if tank.valid then
-            for name, amount in pairs(tank.get_fluid_contents()) do
-                totals[name] = (totals[name] or 0) + amount
-            end
-        end
-    end
-    return totals
-end
 
 -- The "what's inside" grid: one button per interior fluid with the total
 -- amount; clicking one sets it as the pull pick.
@@ -1959,6 +2913,12 @@ local function refresh_fluid_panel(player, record)
     local picker = inner["etech-fluid-filter"]
     if picker and picker.valid and picker.elem_value ~= record.fluid_filter then
         picker.elem_value = record.fluid_filter
+    end
+    -- A guarded outlet that has gone still looks identical to a broken one.
+    -- Say which it is, the same way the item outlet reports its circuit pause.
+    local note = inner.loop_note
+    if note and note.valid then
+        note.caption = record.fluid_looped and {"gui-etech-hub.fluid-paused-loop"} or ""
     end
 
     local scroll = inner.fscroll
@@ -2023,6 +2983,11 @@ local function build_fluid_panel(player, record)
     local btn = inner.add {type = "choose-elem-button", name = "etech-fluid-filter",
         elem_type = "fluid", tooltip = {"gui-etech-hub.fluid-filter-tooltip"}}
     btn.elem_value = record.fluid_filter
+    inner.add {type = "checkbox", name = FLUID_GUARD.element,
+        state = guards(record)[FLUID_GUARD.field] == true,
+        caption = {"gui-etech-hub." .. FLUID_GUARD.loc},
+        tooltip = {"gui-etech-hub." .. FLUID_GUARD.loc .. "-tooltip"}}
+    inner.add {type = "label", name = "loop_note", caption = ""}
     inner.add {type = "label", name = "stock_label",
         caption = {"gui-etech-hub.fluid-stock"}}
     local scroll = inner.add {type = "scroll-pane", name = "fscroll"}
@@ -2043,7 +3008,8 @@ local function on_gui_opened(event)
     local entity = event.entity
     if not (entity and entity.valid) then return end
     local kind = KINDS[entity.name]
-    if not (kind == "outlet" or kind == "inlet" or kind == "fluid-outlet") then return end
+    if not (kind == "outlet" or kind == "inlet" or kind == "sensor"
+        or kind == "fluid-outlet") then return end
     if not factorissimo_available() then return end
     local player = game.get_player(event.player_index)
     if not player then return end
@@ -2059,6 +3025,8 @@ local function on_gui_opened(event)
     elseif kind == "inlet" then
         build_inlet_panel(player, record)
         refresh_inlet_panel(player, record)
+    elseif kind == "sensor" then
+        build_sensor_panel(player, record)
     else
         build_fluid_panel(player, record)
     end
@@ -2076,9 +3044,28 @@ local function on_gui_selection_state_changed(event)
     -- same event may have rebuilt its GUI (e.g. the teleporter list rebuilds
     -- on its sort dropdown) — touching .name then hard-crashes the game.
     if not (event.element and event.element.valid) then return end
-    if event.element.name ~= "etech-hub-mode" then return end
+    local name = event.element.name
+    if name == "etech-hub-factory" or name == "etech-hub-sort" then
+        local record = open_record(event.player_index)
+        local player = game.get_player(event.player_index)
+        if not (record and player) then return end
+        if name == "etech-hub-sort" then
+            record.grid_sort = event.element.selected_index
+        else
+            local index = event.element.selected_index
+            record.grid_factory = index > 1 and (record.grid_factory_ids or {})[index - 1] or nil
+        end
+        refresh_grid(player, record)
+        return
+    end
+    if name ~= "etech-hub-mode" then return end
     local record = open_record(event.player_index)
-    if record then record.filters.mode = event.element.selected_index end
+    if record then
+        record.filters.mode = event.element.selected_index
+        -- the sensor only rewrites its section when its totals change, and a
+        -- filter change alters them without anything in the world moving
+        record.sensor_snapshot = nil
+    end
 end
 
 local function on_gui_elem_changed(event)
@@ -2092,7 +3079,10 @@ local function on_gui_elem_changed(event)
         return
     end
     local slot = event.element.name:match("^etech%-hub%-filter%-(%d+)$")
-    if slot then record.filters.items[tonumber(slot)] = event.element.elem_value end
+    if slot then
+        record.filters.items[tonumber(slot)] = event.element.elem_value
+        record.sensor_snapshot = nil
+    end
 end
 
 local function on_gui_checked_state_changed(event)
@@ -2102,10 +3092,32 @@ local function on_gui_checked_state_changed(event)
     if not record then return end
     if name == "etech-hub-storage" then
         record.pull_storage = event.element.state
+    elseif name == "etech-hub-match-quality" then
+        record.filters.match_quality = event.element.state
+        record.sensor_snapshot = nil
     elseif name == "etech-inlet-auto" then
         record.auto_request = event.element.state
         if not record.auto_request then
             update_inlet_auto_requests(record, nil) -- clear the managed section
+        end
+    else
+        local guard = GUARD_BY_ELEMENT[name]
+        if guard then
+            guards(record)[guard.field] = event.element.state or nil
+            record.sensor_snapshot = nil
+            -- the demand scan is cached for REQUESTER_TTL and the ignore-inlet
+            -- guard changes what that scan returns: drop it so the toggle takes
+            -- effect on the next pass instead of up to 4 s later
+            record.requester_cache = nil
+            -- this one changes whether the filter slots are live, so the panel
+            -- has to be rebuilt to grey them (invalidates event.element)
+            if guard == CIRCUIT_FILTER_OPT and record.kind == "outlet" then
+                local player = game.get_player(event.player_index)
+                if player then
+                    load_panel_settings(player, record)
+                    refresh_grid(player, record)
+                end
+            end
         end
     end
 end
@@ -2130,6 +3142,22 @@ end
 local function on_gui_click(event)
     local element = event.element
     if not (element and element.valid) then return end
+
+    if element.name == "etech-hub-evacuate" then
+        local record = open_record(event.player_index)
+        local player = game.get_player(event.player_index)
+        if not (record and player) then return end
+        -- Second click cancels. No confirmation dialog: nothing is destroyed,
+        -- the items move to the outside network, and stopping it is one click
+        -- away - a modal here would be friction guarding nothing.
+        record.evacuating = not record.evacuating or nil
+        element.caption = record.evacuating
+            and {"gui-etech-hub.evacuate-stop"} or {"gui-etech-hub.evacuate"}
+        player.print(record.evacuating
+            and {"gui-etech-hub.evacuate-started"} or {"gui-etech-hub.evacuate-stopped"})
+        return
+    end
+
     local tags = element.tags
     if not (tags and tags.etech) then return end
     local player = game.get_player(event.player_index)
@@ -2148,6 +3176,11 @@ local function on_gui_click(event)
             record.pins = record.pins or {}
             local key = item_key(tags.name, tags.quality)
             record.pins[key] = not record.pins[key] or nil
+            refresh_grid(player, record)
+        elseif event.alt then
+            request_item(player, tags.name, tags.quality)
+        elseif event.control then
+            take_item(player, record, tags.name, tags.quality, true)
             refresh_grid(player, record)
         elseif event.shift then
             take_item(player, record, tags.name, tags.quality)
@@ -2185,6 +3218,7 @@ local function on_player_setup_blueprint(event)
             if record then
                 bp.set_blueprint_entity_tag(index, "etech_hub", {
                     filters = record.filters,
+                    guards = record.guards,
                     pull_storage = record.pull_storage,
                     auto_request = record.auto_request,
                     fluid_filter = record.fluid_filter,
@@ -2192,6 +3226,35 @@ local function on_player_setup_blueprint(event)
             end
         end
     end
+end
+
+-- Copying an entity's settings with the copy tool (shift + right-click, then
+-- shift + left-click) is a different code path from blueprinting, and until
+-- 0.24.0 the hub only handled the blueprint one. Filters and every toggle
+-- survived a blueprint and vanished on a copy-paste, which is the shape of
+-- inconsistency you rediscover every time rather than remember.
+local function on_entity_settings_pasted(event)
+    local source, destination = event.source, event.destination
+    if not (source and source.valid and destination and destination.valid) then return end
+    local kind = KINDS[destination.name]
+    -- Only between the same kind of device: an outlet's filters mean something
+    -- different on a fluid outlet, and pasting a sensor onto an inlet should do
+    -- nothing rather than something surprising.
+    if not kind or KINDS[source.name] ~= kind then return end
+    local hubs = hub_data().hubs
+    local from = hubs[source.unit_number]
+    if not from then return end
+    local to = hubs[destination.unit_number] or register_device(destination)
+    to.filters = table.deepcopy(from.filters)
+    to.guards = table.deepcopy(from.guards or {})
+    to.pins = table.deepcopy(from.pins or {})
+    to.pull_storage = from.pull_storage
+    to.auto_request = from.auto_request
+    to.fluid_filter = from.fluid_filter
+    -- caches keyed to the OLD settings
+    to.requester_cache = nil
+    to.sensor_snapshot = nil
+    to.grid_snapshot = nil
 end
 
 -- Tick dispatch ----------------------------------------------------------------
@@ -2209,7 +3272,8 @@ local function collect_records()
         if record.entity.valid then
             if record.kind == "outlet" then outlets[#outlets + 1] = record
             elseif record.kind == "inlet" then inlets[#inlets + 1] = record
-            elseif record.kind == "fluid-outlet" or record.kind == "fluid-inlet" then
+            elseif record.kind == "fluid-outlet" or record.kind == "fluid-inlet"
+                or record.kind == "fluid-sensor" then
                 fluids[#fluids + 1] = record
             else sensors[#sensors + 1] = record end
         else
@@ -2252,7 +3316,8 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
                 record.scanned_tick = tick
                 record.factory_gen = gen
             end
-            if record.kind == "fluid-outlet" or record.kind == "fluid-inlet" then
+            if record.kind == "fluid-outlet" or record.kind == "fluid-inlet"
+                or record.kind == "fluid-sensor" then
                 reachable_tanks(record)
             elseif chest_cache_stale(record) and chest_budget > 0 then
                 chest_budget = chest_budget - 1
@@ -2262,6 +3327,7 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
     end
     for _, record in pairs(outlets) do
         surface_proxies(record.entity.surface, record.entity.force, true)
+        gindex_resync(record.entity.surface, record.entity.force)
     end
     -- drop proxy caches nothing refreshed for two lifetimes (outlet gone,
     -- surface deleted) so storage doesn't accumulate dead surface entries
@@ -2340,6 +3406,8 @@ local function on_slot_tick(event)
         for _, record in pairs(fluids) do
             if record.kind == "fluid-outlet" then
                 pass_for_fluid_outlet(record)
+            elseif record.kind == "fluid-sensor" then
+                update_fluid_sensor(record)
             else
                 pass_for_fluid_inlet(record)
             end
@@ -2437,7 +3505,11 @@ local function adopt_existing()
                     register_device(entity)
                 else
                     record.kind = KINDS[name]
-                    record.filters = record.filters or { mode = 1, items = {} }
+                    record.filters = record.filters
+                        or { mode = 1, items = {}, match_quality = false }
+                    -- loop guards (0.23.0): absent on older devices, and an
+                    -- empty table is "every guard off" — no migration needed
+                    record.guards = record.guards or {}
                     record.pins = record.pins or {}
                     -- Devices from before 0.21.1 have no schedule slot yet.
                     -- Seed the same way a fresh one would, so an existing save
@@ -2453,7 +3525,8 @@ local function adopt_existing()
         end
     end
     for _, player in pairs(game.players) do
-        for _, panel_name in pairs({PANEL_NAME, INLET_PANEL_NAME, "etech-fluid-panel"}) do
+        for _, panel_name in pairs({PANEL_NAME, INLET_PANEL_NAME, "etech-sensor-panel",
+                                    "etech-fluid-panel"}) do
             local panel = player.gui.relative[panel_name]
             if panel then panel.destroy() end
         end
@@ -2504,6 +3577,7 @@ M.events = {
     [defines.events.on_gui_text_changed] = on_gui_text_changed,
     [defines.events.on_gui_click] = on_gui_click,
     [defines.events.on_player_setup_blueprint] = on_player_setup_blueprint,
+    [defines.events.on_entity_settings_pasted] = on_entity_settings_pasted,
     [defines.events.on_object_destroyed] = function(event)
         if event.useful_id then
             gindex_on_ghost_gone(event.useful_id)

@@ -18,9 +18,13 @@
 -- silently ship untinted chests.
 
 local hubTint = { r = 1, g = 0.6, b = 0.15, a = 1 }
+-- The fluid sensor is a tinted constant combinator like the item sensor, so it
+-- needs a tint of its own or the two are indistinguishable once placed. Cyan
+-- against the hub's amber.
+local fluidTint = { r = 0.25, g = 0.75, b = 1, a = 1 }
 
-local function tinted_icons(icon)
-    return {{ icon = icon, icon_size = 64, tint = hubTint }}
+local function tinted_icons(icon, tint)
+    return {{ icon = icon, icon_size = 64, tint = tint or hubTint }}
 end
 
 local function build_chest(base_name, name, icon)
@@ -103,6 +107,25 @@ sensor_item.order = sensor_item.order .. "-etech"
 sensor_item.icon = nil
 sensor_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png")
 
+-- Fluid sensor. The item side had outlet/inlet/sensor from the start; the fluid
+-- side shipped an outlet and an inlet and no sensor, so interior tank levels
+-- were the one thing about a factory that circuits could not see. Same
+-- constant-combinator base as the item sensor, tinted with the fluid devices'
+-- colour so the two are distinguishable on the ground.
+local fluid_sensor = table.deepcopy(sensor)
+fluid_sensor.name = "etech-factory-fluid-sensor"
+fluid_sensor.minable.result = "etech-factory-fluid-sensor"
+fluid_sensor.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", fluidTint)
+for _, direction in pairs({"north", "east", "south", "west"}) do
+    fluid_sensor.sprites[direction].layers[1].tint = fluidTint
+end
+
+local fluid_sensor_item = table.deepcopy(sensor_item)
+fluid_sensor_item.name = "etech-factory-fluid-sensor"
+fluid_sensor_item.place_result = "etech-factory-fluid-sensor"
+fluid_sensor_item.order = fluid_sensor_item.order .. "-fluid"
+fluid_sensor_item.icons = tinted_icons("__base__/graphics/icons/constant-combinator.png", fluidTint)
+
 -- Recipes + technology --------------------------------------------------------
 -- (the hidden "etech-hub-energy" buffer entity from the removed
 -- energy-per-item setting is gone; the engine deletes any leftovers in old
@@ -130,6 +153,7 @@ data:extend({
     outlet, outlet_item,
     inlet, inlet_item,
     sensor, sensor_item,
+    fluid_sensor, fluid_sensor_item,
     fluid_outlet, fluid_outlet_item,
     fluid_inlet, fluid_inlet_item,
     {
@@ -201,6 +225,18 @@ data:extend({
         results = {{type = "item", name = "etech-factory-sensor", amount = 1}},
     },
     {
+        type = "recipe",
+        name = "etech-factory-fluid-sensor",
+        enabled = false,
+        energy_required = 5,
+        ingredients = {
+            {type = "item", name = "constant-combinator", amount = 1},
+            {type = "item", name = "advanced-circuit", amount = 5},
+            {type = "item", name = "pipe", amount = 5},
+        },
+        results = {{type = "item", name = "etech-factory-fluid-sensor", amount = 1}},
+    },
+    {
         type = "technology",
         name = "etech-factory-provider-hub",
         icons = tinted_icons("__base__/graphics/icons/storage-chest.png"),
@@ -209,6 +245,7 @@ data:extend({
             { type = "unlock-recipe", recipe = "etech-factory-provider-hub" },
             { type = "unlock-recipe", recipe = "etech-factory-inlet" },
             { type = "unlock-recipe", recipe = "etech-factory-sensor" },
+            { type = "unlock-recipe", recipe = "etech-factory-fluid-sensor" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-outlet" },
             { type = "unlock-recipe", recipe = "etech-factory-fluid-inlet" },
         },

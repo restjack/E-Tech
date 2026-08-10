@@ -25,6 +25,8 @@
 local layout = require("factory-mk4/layout")
 
 local RELAY = "etech-factory-mk4-power-relay"
+local RADAR = "etech-factory-mk4-radar"
+local STOCK_RADAR = "factory-hidden-radar"
 
 -- Hidden power relay ---------------------------------------------------------
 -- Called by Factorissimo itself: the layout's `upgrades` list names
@@ -106,7 +108,66 @@ local function build_power_relay(factory)
   a.connect_to(b, false, defines.wire_origin.script)
 end
 
-remote.add_interface("etech-factory-mk4", {build_power_relay = build_power_relay})
+-- Hidden radar ---------------------------------------------------------------
+-- Same extension point, same idempotency requirement as build_power_relay.
+--
+-- Factorissimo's factory-hidden-radar reveals one chunk around itself, and the
+-- radar stands on a chunk corner at the interior origin, so the live box is
+-- local -32..+63 - enough for a 60-wide floor, ~41% short on a 120-wide one.
+-- Everything west of x = -32 or north of y = -32 in a Mk4 was charted-but-dead
+-- in remote view: map tiles, no live entities. The interior roboport cannot
+-- help (radar_range = 0) and force.chart() cannot either - a charted chunk
+-- without radar coverage is still a static snapshot.
+--
+-- So swap the radar for our own, which reveals two chunks (data.lua). Stock
+-- tiers keep the cheap one.
+--
+-- factory.radar is written by Factorissimo at creation and read by its
+-- always-enable-hidden-radar migration, which does factory.radar.valid with no
+-- nil guard - so this repoints that field and never leaves it nil.
+local function upgrade_radar(factory)
+  if not (factory and factory.inside_surface and factory.inside_surface.valid) then return end
+  if not (factory.force and factory.force.valid) then return end
+  if not prototypes.entity[RADAR] then return end
+
+  local surface = factory.inside_surface
+  local position = {factory.inside_x, factory.inside_y}
+  -- A box rather than a position filter: the radar has an empty collision mask
+  -- and a zero-size collision box, so a position lookup is not reliable for it.
+  -- Filtered by name, so nothing the player built at the centre is touched.
+  local area = {{factory.inside_x - 1, factory.inside_y - 1}, {factory.inside_x + 1, factory.inside_y + 1}}
+
+  local ours = surface.find_entities_filtered {name = RADAR, area = area}[1]
+  if not ours then
+    ours = surface.create_entity {
+      name = RADAR,
+      position = position,
+      force = factory.force,
+    }
+    if not ours then
+      local message = "[E-Tech] Factory Mk4: could not create the interior radar at "
+        .. surface.name .. " " .. factory.inside_x .. "," .. factory.inside_y
+        .. " - the far corner of that factory will be dark in remote view."
+      log(message)
+      if game then game.print(message) end
+      return
+    end
+    ours.destructible = false
+  end
+
+  -- Only after ours exists, so a failure above leaves the stock radar doing its
+  -- partial job rather than leaving the interior with no radar at all.
+  for _, stock in pairs(surface.find_entities_filtered {name = STOCK_RADAR, area = area}) do
+    stock.destroy()
+  end
+
+  factory.radar = ours
+end
+
+remote.add_interface("etech-factory-mk4", {
+  build_power_relay = build_power_relay,
+  upgrade_radar = upgrade_radar,
+})
 
 local mk4 = {}
 

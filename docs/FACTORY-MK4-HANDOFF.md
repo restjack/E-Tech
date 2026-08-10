@@ -600,3 +600,66 @@ Nothing is destroyed, but the machines are now inside a packed item in someone's
 inventory rather than in the new building — which is not what "upgrade" means
 to anyone using the planner. One line to enable (`next_upgrade` on `factory-3`)
 if that trade is ever wanted.
+
+## 10. Remote view was dark over half the floor (0.22.2)
+
+Found 2026-08-08 from a remote-view screenshot: a Mk3 shows its whole interior,
+a Mk4 does not.
+
+**The hidden radar is the only thing that makes a factory interior live in
+remote view.** Factorissimo builds one per factory in `create_factory_interior`
+(`script/factory-buildings.lua:420`) at `(inside_x, inside_y)`:
+
+```lua
+max_distance_of_sector_revealed = 0,          -- no long-range scan
+max_distance_of_nearby_sector_revealed = 1,   -- live area = 3x3 chunks
+```
+
+`create_factory_position` sets `inside_x = 32 * cx` with `cx = 16 * (n % 8)`, so
+the origin is a chunk **corner**, not a chunk centre. The radar's own chunk is
+local `[0,32)`, and one chunk of reach gives a live box of local **−32 … +63** —
+96×96, offset a chunk south-east.
+
+| tier | floor | door corridor | live box | covered |
+|---|---|---|---|---|
+| factory-3 | −30…+30 | to +33 | −32…+63 | all of it, 1 tile spare |
+| factory-4 | −60…+60 | to +63 | −32…+63 | 93×93 of 121×121 — **~41% dark** |
+
+Mk3 clearing that box by a single tile is luck, the same kind as the ±64
+chunk-generation ceiling in §3.
+
+Two non-fixes, both checked first:
+
+- **The interior roboport.** `radar_range = 0` (`prototypes/roboport.lua:43,134`),
+  so the 128 logistics/construction bump from 0.20.0 buys no map vision at all.
+- **`force.chart()`.** A charted chunk with no radar over it renders as a static
+  map snapshot — tiles, no live entities. Charting once would not have made the
+  corner *live*.
+
+**Shipped: a per-tier radar.** `etech-factory-mk4-radar` is a deepcopy of
+`factory-hidden-radar` with `max_distance_of_nearby_sector_revealed = 2` → local
+−64…+95. That 5×5 chunk box is exactly the set of chunks Factorissimo marks
+generated for a cell (`for xx = -2, 2`), and cells are 512 apart, so nothing
+bleeds into a neighbour.
+
+Swapped in a new `upgrade_radar` entry on `layout.upgrades`, alongside
+`build_power_relay` — same self-healing extension point (§ "The extension point
+that made it clean"), so existing Mk4s fix themselves on the next configuration
+change. It builds ours first and only then destroys the stock radar, so a
+failure leaves the partial radar rather than none.
+
+Rejected: raising `max_distance_of_nearby_sector_revealed` on the shared
+prototype. One line, but every Mk1/Mk2/Mk3 in the save would scan 25 chunks
+instead of 9, and hidden-radar performance has been fixed upstream twice
+(changelog entries at 1.1.16 and after).
+
+Two traps worth keeping:
+
+- `factory.radar` is read by Factorissimo's `always-enable-hidden-radar`
+  migration as `factory.radar.valid` with **no nil guard**, so the swap
+  repoints that field and must never leave it nil.
+- The radar has an empty collision mask and a zero-size collision box, so it is
+  looked up with a small **area** filter, not a `position` filter.
+
+Deepcopying rather than writing the prototype out keeps it in step with whatever
+Factorissimo does to its own radar.

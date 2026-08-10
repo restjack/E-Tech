@@ -122,18 +122,26 @@ Robots can't fly in or out of factory buildings. These bridge the wall by telepo
 - **Factory outlet** — offers everything made inside your factories to the outside logistic network.
 - **Factory inlet** — the reverse: fill it and it distributes into the requester and buffer chests inside.
 - **Factory sensor** — interior stock as circuit signals.
-- **Fluid outlet and inlet** — the same bridge for fluids, one fluid per device.
+- **Fluid outlet, inlet and sensor** — the same three for fluids.
 
-In its default on-demand mode the outlet sits empty and fetches only what the network actually wants: requester and buffer chests, player and spidertron requests, **and construction ghosts** — module requests included, so blueprints build straight from factory stock. Buffer mode instead keeps a set number of stacks on hand.
+The outlet sits empty and fetches only what the network actually wants: requester and buffer chests, player and spidertron requests, **and construction ghosts** — module requests included, so blueprints build straight from factory stock.
 
 The outlet panel shows everything inside your factories:
 
 - Search, per-factory breakdowns, and factory naming.
 - Click-to-locate map pins, shift-click to grab a stack.
-- Per-outlet item filters, stack caps, priorities, circuit enable.
+- Item filters with optional quality matching, whitelist or blacklist — or let the circuit network set the filter list instead.
+- Filter the grid to one factory, sort by count, name or what is moving; each item's tooltip shows what it moved in the last minute.
+- Shift-click takes a stack, ctrl-click takes all you can carry, alt-click adds it to your own logistic requests.
 - Optional storage-chest draining. Reaches nested factories.
+- An automatic circuit gate: no wire means always on, a wire means it runs while any nonzero signal reaches it.
+- **Evacuate** empties a factory's chests wholesale, for decommissioning or moving a build.
 
-Built for big bases: ghost demand is tracked event-driven, not by rescanning the map.
+**Loop guards.** An inlet with auto-request on is a requester in the same network the outlet provides to, so it can ask for exactly what the outlet then pulls back out of the same factories — items in a circle, forever. Four opt-in toggles break that, and the fluid outlet has one of its own for the same trap on a shared fluid header.
+
+The sensor takes the same filters, can include storage chests, and can subtract what the interior requesters are short of — a signal then reads positive for spare stock and negative for a shortfall, so one wire carries both.
+
+Built for big bases: ghost demand is tracked event-driven, not by rescanning the map, and the index is bounded so a ten-thousand-entity paste can't run away with it.
 
 ## Teleporter pads
 

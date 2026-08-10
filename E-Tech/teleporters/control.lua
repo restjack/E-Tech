@@ -2323,15 +2323,25 @@ local check_pad_alerts = function()
      and settings.global["etech-teleporter-energy-distance-mj"].value <= 0 then
     return
   end
+  -- The alert is re-raised every pass on purpose - a custom alert that stops
+  -- being re-added stops being shown - so the saving here is in what the pass
+  -- allocates, not in how often it runs. connected_players builds a fresh array
+  -- on every read, and the icon table was rebuilt once per pad per player; both
+  -- are now built once. Behaviour is unchanged.
+  local icon = {type = "item", name = teleporter_name}
   for force_name, network in pairs (script_data.networks) do
     local force = game.forces[force_name]
-    if force and force.valid and next(network) and #force.connected_players > 0 then
-      for name, teleporter_data in pairs (network) do
-        local entity = teleporter_data.teleporter
-        local eei = teleporter_data.energy_interface
-        if entity and entity.valid and eei and eei.valid and eei.energy <= 0 then
-          for _, player in pairs (force.connected_players) do
-            player.add_custom_alert(entity, {type = "item", name = teleporter_name}, {"etech-tp-alert-unpowered", name}, true)
+    if force and force.valid and next(network) then
+      local players = force.connected_players
+      if #players > 0 then
+        for name, teleporter_data in pairs (network) do
+          local entity = teleporter_data.teleporter
+          local eei = teleporter_data.energy_interface
+          if entity and entity.valid and eei and eei.valid and eei.energy <= 0 then
+            local message = {"etech-tp-alert-unpowered", name}
+            for _, player in pairs (players) do
+              player.add_custom_alert(entity, icon, message, true)
+            end
           end
         end
       end

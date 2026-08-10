@@ -281,6 +281,46 @@ data:extend({
   },
 })
 
+-- Hidden radar -----------------------------------------------------------------
+-- Factorissimo builds one "factory-hidden-radar" at the interior origin of
+-- every factory, and that radar is the ONLY thing that keeps an interior live
+-- in remote view - the interior roboport has radar_range = 0
+-- (Factorissimo prototypes/roboport.lua:43), so E-Tech's roboport reach bump
+-- gives no map vision at all.
+--
+-- Its stock reach is max_distance_of_nearby_sector_revealed = 1, i.e. a 3x3
+-- chunk box. The radar sits at (inside_x, inside_y), and
+-- create_factory_position() puts that at 32 * (16 * n), which is a chunk
+-- CORNER, not a chunk centre - so the live box runs from -32 to +63 in local
+-- tiles, offset one chunk south-east.
+--
+--   factory-3: floor -30..+30, door corridor to +33  -> inside the box, whole
+--              interior live. It clears the west/north edge by one tile.
+--   factory-4: floor -60..+60, door corridor to +63  -> everything west of
+--              x = -32 or north of y = -32 is outside it. That is 93x93 of a
+--              121x121 floor, so ~41% of a Mk4 was dark in remote view.
+--
+-- Reach 2 gives a 5x5 chunk box, local -64..+95, which covers the Mk4 with
+-- room to spare. That 5x5 is also exactly the set of chunks Factorissimo marks
+-- generated for a factory cell (`for xx = -2, 2` in create_factory_position),
+-- and cells are 512 tiles apart, so nothing bleeds into a neighbour.
+--
+-- Its own prototype rather than raising the stock one: every Mk1/Mk2/Mk3 in
+-- the save would then scan 25 chunks instead of 9, and hidden-radar
+-- performance has already been a problem upstream twice (Factorissimo
+-- changelog 1.1.16 and later). Only Mk4s pay for this. The swap happens in
+-- factory-mk4/control.lua.
+--
+-- Deepcopied so it keeps whatever Factorissimo does to that prototype - void
+-- energy source, empty collision mask, hidden flags, blank localised_name.
+local base_radar = data.raw.radar and data.raw.radar["factory-hidden-radar"]
+if base_radar then
+  local radar = table.deepcopy(base_radar)
+  radar.name = "etech-factory-mk4-radar"
+  radar.max_distance_of_nearby_sector_revealed = 2
+  data:extend({radar})
+end
+
 -- Recipe ---------------------------------------------------------------------
 -- Ingredients are resolved against what actually exists: E-Tech runs under
 -- AAI Industry, Krastorio 2 and Space Age in various combinations and any of

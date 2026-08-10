@@ -50,6 +50,11 @@ NOTABLE LOCAL PATCHES
 - QualityEffectsFixed: REMOVED from this set (2026-07-21) - absorbed into
   E-Tech 0.18.0+ ("Quality adds module slots to all machines", on by
   default). Delete the old zip from your mods folder.
+- ev-mining-drills: REMOVED from this set (2026-08-01) - the mod author
+  released an official Factorio 2.1 version (4.0.3), so the patched copy
+  retired itself. The mod is switched off in the pack, so nothing here
+  needs it. If you copied ev-mining-drills_4.0.2.zip during the past two
+  weeks, delete it from your mods folder. Safe for saves.
 - PlanetsLibTiers: REMOVED from the pack entirely (2026-07-26) - nothing
   in the pack ever used it (inert planet-tier data, no gameplay effect).
   Delete any PlanetsLibTiers zip from your mods folder. Safe for saves.

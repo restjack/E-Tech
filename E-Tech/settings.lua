@@ -497,6 +497,29 @@ data:extend({
     order = "tj",
   },
   {
+    type = "bool-setting",
+    name = "etech-hub-backer-names",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "bk4",
+  },
+  {
+    type = "bool-setting",
+    name = "etech-hub-shortfall-alerts",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "bk2",
+  },
+  {
+    type = "int-setting",
+    name = "etech-hub-shortfall-grace",
+    setting_type = "runtime-global",
+    default_value = 60,
+    minimum_value = 5,
+    maximum_value = 3600,
+    order = "bk3",
+  },
+  {
     type = "int-setting",
     name = "etech-markers-min-size",
     setting_type = "runtime-global",
@@ -509,6 +532,13 @@ data:extend({
   ----------------------------------------------------------------------------
   -- Per-player (u*)
   ----------------------------------------------------------------------------
+  {
+    type = "bool-setting",
+    name = "etech-hub-locate-remote",
+    setting_type = "runtime-per-user",
+    default_value = false,
+    order = "ua0",
+  },
   {
     type = "bool-setting",
     name = "etech-cpm-enabled",

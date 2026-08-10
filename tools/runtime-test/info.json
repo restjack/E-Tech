@@ -1,0 +1,9 @@
+{
+  "name": "etech-runtime-test",
+  "version": "0.1.0",
+  "factorio_version": "2.1",
+  "title": "E-Tech runtime test",
+  "author": "E-Tech",
+  "description": "Headless behaviour assertions for E-Tech's factory hub. Copied into a throwaway mod directory by tools/verify-runtime.ps1; never shipped and never placed in the live mods folder.",
+  "dependencies": ["E-Tech", "factorissimo-2-notnotmelon"]
+}
