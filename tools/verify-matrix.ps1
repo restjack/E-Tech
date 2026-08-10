@@ -31,8 +31,17 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
 $mods = Join-Path $env:APPDATA "Factorio\mods"
-$log = Join-Path $env:APPDATA "Factorio\factorio-current.log"
 $work = Join-Path $env:TEMP "etech-verify-matrix"
+
+# Own write-data directory via own config.ini, same as verify-runtime.ps1.
+# Factorio holds an exclusive lock on its user-data directory, so with the game
+# open every profile here used to die on "Cannot remove item ...
+# factorio-current.log: being used by another process" - which reads like a
+# tooling bug, not "close Factorio first". Isolated, the matrix runs mid-game
+# and each profile reads its OWN log rather than racing the live one.
+$userData = Join-Path $work "userdata"
+$config = Join-Path $work "config.ini"
+$log = Join-Path $userData "factorio-current.log"
 $factorio = "C:\Program Files (x86)\Steam\steamapps\common\Factorio\bin\x64\factorio.exe"
 
 $info = Get-Content (Join-Path $repo "E-Tech\info.json") -Raw | ConvertFrom-Json
@@ -77,6 +86,13 @@ if (-not (Test-Path $etechZip)) {
     Write-Host "Run E-Tech\build.ps1 first - this script loads the BUILT zip, not the source folder."
     exit 1
 }
+
+New-Item -ItemType Directory -Force -Path $userData | Out-Null
+@"
+[path]
+read-data=__PATH__executable__/../../data
+write-data=$($userData -replace '\\', '/')
+"@ | Out-File $config -Encoding utf8
 
 $selected = if ($Profiles) { $Profiles } else { @($profileSpecs.Keys) }
 $failed = @()
@@ -128,7 +144,7 @@ foreach ($name in $selected) {
     Set-Content (Join-Path $dir "mod-list.json") "{`"mods`":[$($entries -join ',')]}" -Encoding utf8
 
     if (Test-Path $log) { Remove-Item -Force $log }
-    & $factorio --mod-directory $dir --dump-data 2>&1 | Out-Null
+    & $factorio --mod-directory $dir --config $config --dump-data 2>&1 | Out-Null
 
     $errors = @()
     if (Test-Path $log) {

@@ -15,6 +15,9 @@
 #   4. luacheck, when it is installed locally (CI runs it on every push)
 #   5. factorio --dump-data with the CURRENT mods folder (catches data-stage
 #      errors; requires the zip to be built first via E-Tech/build.ps1)
+#   7. runtime behaviour (tools/verify-runtime.ps1): runs the game headless,
+#      builds a real Factorissimo factory and asserts the hub actually moves
+#      items. Steps 1-6 all prove the mod LOADS; this one proves it WORKS.
 #
 # NOT covered here: loading under other mod COMBINATIONS. Step 5 tests exactly
 # one point - whatever happens to be enabled right now - while the whole point
@@ -24,7 +27,7 @@
 #
 # Usage:  powershell -File tools\verify.ps1 [-SkipDump]
 
-param([switch]$SkipDump)
+param([switch]$SkipDump, [switch]$SkipRuntime)
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
 $mod = Join-Path $repo "E-Tech"
@@ -92,6 +95,17 @@ if (-not $SkipDump) {
     } else {
         Write-Host "factorio.exe not found - skipped dump-data"
     }
+}
+
+if (-not $SkipRuntime) {
+    Write-Host "== 7/7 runtime behaviour =="
+    # Actually runs the game: builds a Factorissimo factory, stocks it, places
+    # the hub devices and asserts items moved. Everything above this line proves
+    # the mod LOADS; this is the only step that proves it WORKS. Needs the built
+    # zip (same as the dump step) and Factorissimo in the mods folder; skips
+    # itself with a message when either is missing.
+    & powershell -File (Join-Path $PSScriptRoot "verify-runtime.ps1")
+    if ($LASTEXITCODE -ne 0) { $fail++ }
 }
 
 if ($fail -gt 0) { Write-Host "VERIFY FAILED ($fail)"; exit 1 }

@@ -1,4 +1,186 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.24.0
+Date: 2026-08-09
+  Features:
+    - Factory fluid sensor. The item side has had an outlet, an inlet and a
+      sensor from the start; the fluid side shipped an outlet and an inlet and
+      no sensor, so how much of each fluid your factories were holding was the
+      one thing about a factory a circuit could not see. Cyan rather than the
+      hub's amber, so the two sensors are distinguishable once placed.
+    - Factory outlet: "Evacuate the factories". Pulls everything out of the
+      interior provider AND storage chests regardless of what the network wants,
+      until nothing is left, then stops on its own. For decommissioning a
+      factory or moving a build - previously the one job the outlet existed to
+      avoid and could not actually do. Filters still apply, so you can evacuate
+      one item and leave the rest, and the outlet keeps offering what it takes
+      to the network as usual so it flows onward instead of piling up. Click
+      again to stop. This is NOT the buffer mode removed in 0.17.0: that was a
+      standing state that kept stock pre-staged forever, this is an action with
+      an end.
+    - Factory outlet panel: filter the item grid to ONE factory, and sort it by
+      count, by name or by what has moved most. Filtered to a factory, the
+      number on each item counts that factory alone. The grid was one flat list
+      with the per-factory split available only by hovering items one at a time.
+    - Factory outlet panel: each item's tooltip now shows what THAT item moved
+      in the last minute, not just the device's total. "Which item stopped" is
+      the actual question when a factory stalls.
+    - Factory outlet panel: ctrl-click an item to take as much as you can carry
+      (shift-click still takes one stack), and alt-click to add it to your own
+      logistic requests so robots bring it instead of you walking over.
+    - Factory inlet: an alert when the factories keep asking for something it
+      cannot supply. The inlet already knew - it is the "Still missing inside"
+      list in its window - but you only saw it by opening that window. Two new
+      map settings: "Factory inlet: alert when the factories go short" (on) and
+      how many seconds a shortfall must persist first (60), because a factory is
+      briefly short every time a machine finishes a batch.
+    - Factory outlet: new per-player setting "click an item to view its chest",
+      off by default. Left-clicking an item opens remote view at the chest
+      holding most of it instead of printing a map link. Off by default because
+      remote view swaps your inventory panel for the build palette - it is for
+      looking, not taking, and shift-click still takes a stack without moving
+      you at all.
+  Bugfixes:
+    - Factory inlet: distributed items arrived with a FRESH spoilage timer,
+      because the transfer re-created them from a spec rather than moving the
+      actual stacks. An inlet was a spoilage launderer - feed it nearly-rotten
+      Gleba produce and it handed the factories perfectly fresh food, with
+      nothing in the UI admitting it. Stacks are now moved slot by slot, so
+      spoilage rides along (and durability and ammo with it). The old behaviour
+      is a per-inlet checkbox for anyone who wants it deliberately.
+    - Device settings survived a blueprint and vanished on a copy-paste: the
+      copy tool raises on_entity_settings_pasted, which the factory hub never
+      handled. Filters, loop guards and every toggle now copy between devices of
+      the same kind. Pasting onto a different kind still does nothing, rather
+      than something surprising.
+    - Factory outlet panel: the search box only matched INTERNAL item names, so
+      "iron plate" found nothing and you had to know the string was
+      "iron-plate". Hyphens and spaces are now interchangeable.
+---------------------------------------------------------------------------------------------------
+Version: 0.23.0
+Date: 2026-08-09
+  Features:
+    - Factory outlet and inlet: the filter slots are quality-aware. Each slot
+      is now an item-with-quality pick, and a new "Match quality on filters"
+      checkbox under the slots decides what that quality means. Off (the
+      default, and how filters have always behaved) a slot covers its item at
+      every quality. On, a slot matches only the quality it was picked at, so
+      an outlet can pull legendary iron plates and leave the normal ones inside
+      - or blacklist exactly the normal ones. Slots picked before this version
+      carry no quality at all and keep matching every quality until re-picked,
+      so no existing filter changes meaning on upgrade. Those slots do render
+      with the normal-quality badge, because the button has no way to draw
+      "any" - they carry a tooltip saying so, since otherwise a filter set up
+      before this version reads as "normal only" the moment the checkbox is
+      ticked while still excluding every quality.
+    - Factory outlet: four loop guards, each its own checkbox, all off by
+      default. They all address one shape: an inlet with auto-request on is a
+      requester in the same logistic network the outlet provides to. The inlet
+      asks the network for what the factories are short of, the outlet reads
+      that as demand and pulls those same items straight back out of those same
+      factories, bots fly them to the inlet, the inlet pushes them inside, and
+      round it goes. Nothing that wasn't already satisfiable gets satisfied -
+      it just burns bots and CPU forever.
+      "Ignore factory inlet auto-requests" - the demand scan skips the managed
+      etech-inlet-auto section, so the round trip never starts; an inlet's own
+      manual requests still count as demand. "Never pull what an inlet is asking
+      for" - narrower: any item an inlet on this surface is currently
+      auto-requesting is off limits to the outlet, even for genuine outside
+      demand, while every other item still moves between factories normally.
+      "Re-pull cooldown (10 s)" - an item the outlet just handed back can't be
+      pulled again for 10 seconds, which is the one for demand that flickers on
+      and off between passes and had the same stack teleporting out and back
+      every 2 seconds indefinitely. "No storage re-pull (60 s)" - only bites
+      with "Also pull from storage chests" on: an item the outlet returned into
+      an interior storage chest stays there for 60 seconds instead of being
+      pulled straight back out, and provider chests are untouched by it.
+      The toggles ride along in blueprints and clones with the rest of the
+      device's settings.
+    - Factory fluid outlet: a loop guard of its own, and the fluid pair needed
+      one more than the item pair did - fluid moves in bulk with no robots to
+      throttle it. Pipe a fluid outlet and a fluid inlet onto the same header
+      (one header per fluid being the normal way to plumb a base) and the outlet
+      drains the factories' tanks, the fluid runs down the header into the
+      inlet, and the inlet pushes it straight back into those same tanks.
+      Nothing ever leaves and both devices work forever. With the guard on, the
+      outlet stops pulling while any fluid inlet on its surface is holding the
+      fluid it is picked for, and says so in its panel. Changing the pick still
+      flushes the old fluid back normally - a guarded outlet must never end up
+      holding a fluid it cannot shed.
+    - Factory sensor: filter slots, the same ones the outlet and inlet have,
+      plus quality matching. It broadcast every item it could see until now,
+      truncated to the top 1000 by count, which on a real base is a wall of
+      signals nobody wired anything to.
+    - Factory sensor: an option to also count the interior storage chests, and
+      an option to subtract what the factories are SHORT of. With the second
+      one on, a signal reads positive when the factories have that item spare
+      and negative when their requester chests are short by that much, so one
+      wire carries both halves. Truncation now keeps the largest signals by
+      magnitude rather than by value, or the most negative ones - the
+      interesting ones - would be the first thing dropped.
+    - Factory outlet: "Set filters from circuit network". The connected red and
+      green item signals become the filter list and the slots grey out; the
+      whitelist/blacklist dropdown still applies to that list. This is the
+      vanilla 2.0 requester-chest idiom, and it is the only way to change what
+      an outlet pulls without a player standing in front of it.
+  Bugfixes:
+    - Factory outlet: a storage chest's filter was matched by item name alone,
+      so a chest filtered for legendary iron plate read as the right home for
+      normal iron plate and quietly accepted it. Both halves of the filter are
+      honoured now. A filter with no quality set still matches every quality.
+    - Factory inlet: when it held less than the factories wanted in total, the
+      first chest in its list took its whole deficit before the second was even
+      looked at - so the factories at the end of the list got nothing, not
+      less, pass after pass, indefinitely. The list order is stable, so the same
+      factories starved every time. It now collects every chest's shortfall
+      first and then divides what it has proportionally, with the units left
+      over by the rounding walked out from a rotating start so the same chest
+      does not collect the odd one every pass. When there is enough to go round,
+      behaviour is exactly what it was.
+    - Teleporter pads: the unpowered-pad alert pass rebuilt its icon table once
+      per pad per player and re-read the connected-player list per pad. Both are
+      built once now. The alert itself is still re-raised every pass on purpose -
+      a custom alert that stops being re-added stops being shown.
+  Optimizations:
+    - The construction-ghost index is bounded. It kept one storage entry and one
+      destroy registration per ghost, which is the right trade for a normal base
+      and the wrong one for a ten-thousand-entity blueprint paste. Past 20 000
+      ghosts on a surface it keeps updating the per-chunk demand totals but
+      stops recording each ghost individually, and rebuilds itself from the
+      world every 60 seconds until the paste drains. The cost is that demand
+      reads slightly high while it is in that state - the outlet over-supplies
+      and its own give-back pass returns the excess.
+---------------------------------------------------------------------------------------------------
+Version: 0.22.2
+Date: 2026-08-08
+  Bugfixes:
+    - Factory Mk4: the whole 120x120 floor is now live in remote view. What
+      keeps a Factorissimo interior visible remotely is a hidden radar at the
+      interior origin, and it reveals one chunk in each direction - a 3x3 chunk
+      box. That origin sits on a chunk corner, so the box runs from -32 to +63
+      tiles: enough for a Mk3's 60-wide floor with one tile to spare, and about
+      41% short on a Mk4, leaving everything west of x = -32 or north of
+      y = -32 charted but dead - map tiles with no live entities. Mk4s now get
+      their own radar that reveals two chunks (-64..+95), which is exactly the
+      area Factorissimo marks as generated for a factory cell. Existing Mk4s
+      are upgraded on load. Mk1 to Mk3 keep the cheaper radar, since raising
+      the shared one would have made every factory in the save scan 25 chunks
+      instead of 9. The interior roboport could not have covered this - its
+      radar_range is 0, so E-Tech's roboport reach bump gives no map vision.
+---------------------------------------------------------------------------------------------------
+Version: 0.22.1
+Date: 2026-08-06
+  Bugfixes:
+    - "Allow all modules in every beacon" no longer breaks beacon-interface.
+      That mod does not use allowed_module_categories as a restriction, it uses
+      it as an identity marker - its control.lua looks for beacons whose
+      whitelist is exactly its own category and registers build handlers for
+      them. Clearing the field left it with zero matches and it asserted on
+      load ("beacon-interface 1.1.2 errored when running a required file",
+      control.lua:63). Beacons carrying that category are now left untouched;
+      they are hidden script-driven effect emitters that only ever hold
+      beacon-interface's own modules, so there was nothing to open up. Also
+      covers mods that deepcopy one of them, such as quality-condenser.
+---------------------------------------------------------------------------------------------------
 Version: 0.22.0
 Date: 2026-08-02
   Features:
