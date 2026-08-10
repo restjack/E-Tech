@@ -28,7 +28,12 @@ $zip = Join-Path $mods "$root.zip"
 $zipTemp = Join-Path $mods "$root.zip.building"
 
 if (Test-Path $zipTemp) { Remove-Item -Force $zipTemp }
-if (Test-Path $zip) { Remove-Item -Force $zip }
+# The installed zip is deliberately NOT deleted here. It used to be, which meant
+# any failure between that point and the rename left the mods folder with no
+# E-Tech at all - the build clobbered the working copy on its way to failing.
+# Move-Item -Force at the end replaces it in one step, so the folder holds the
+# old complete zip right up until it holds the new one. (Flagged by the Memory
+# Storage session, which found the same shape in its installer.)
 
 # Files to package. Excludes build script, docs, and the releases archive.
 $excludeFiles = @("build.ps1", "AAI-CHANGE-INVENTORY.md")
@@ -58,13 +63,29 @@ $fs.Close()
 # zip fails at load with the same unhelpful "Reading file info in package ...
 # failed" as the race did. Idea taken from the Memory Storage session, which
 # added the same gate to its installer today.
-$check = [System.IO.Compression.ZipFile]::OpenRead($zipTemp)
-$entryCount = $check.Entries.Count
-$hasInfo = @($check.Entries | Where-Object { $_.FullName -eq "$root/info.json" }).Count -eq 1
-$check.Dispose()
-if (-not $hasInfo -or $entryCount -lt 2) {
-    Remove-Item -Force $zipTemp
-    throw "Built archive failed its integrity check ($entryCount entries, info.json present: $hasInfo) - not published"
+# OpenRead THROWS on a truncated or corrupt archive rather than returning
+# something to inspect, so the check has to be wrapped: uncaught, it would crash
+# the build and leave the broken .tmp sitting in the mods folder - the gate
+# meant to keep a bad file out would have left one there. The verdict is
+# recorded, the archive is closed, and only then is the temp removed; deleting
+# while it is still open fails on Windows with a sharing violation.
+$verdict = $null
+try {
+    $check = [System.IO.Compression.ZipFile]::OpenRead($zipTemp)
+    try {
+        $entryCount = $check.Entries.Count
+        $hasInfo = @($check.Entries | Where-Object { $_.FullName -eq "$root/info.json" }).Count -eq 1
+        if (-not $hasInfo) { $verdict = "info.json missing from $root/" }
+        elseif ($entryCount -lt 2) { $verdict = "only $entryCount entr(ies)" }
+    } finally {
+        $check.Dispose()
+    }
+} catch {
+    $verdict = "will not open ($($_.Exception.Message))"
+}
+if ($verdict) {
+    Remove-Item -Force $zipTemp -ErrorAction SilentlyContinue
+    throw "Built archive failed its integrity check - $verdict - not published, the installed zip is untouched"
 }
 
 Move-Item -LiteralPath $zipTemp -Destination $zip -Force
