@@ -509,7 +509,7 @@ because robot charging is paid from a roboport's *stored* energy, that roboport
 **cannot charge robots at all**. E-Tech now gives it a real electric source.
 Measured cost ~1â€“2 MW per busy factory, ~29 MW across 16. Full writeup:
 `docs/FACTORISSIMO-ROBOPORT-BUG-REPORT.md` (drafted for upstream) and the
-`factorissimo-roboport-buff` row in ``Projects\Factorio Mod Pack\LOCAL-PATCHED-MODS.md``.
+`factorissimo-roboport-buff` row in ``Projects\Factorio (Patched-mods) 2.1.9\PATCH-NOTES.txt``.
 
 Related trap worth knowing if Mk4 touches roboports: **Krastorio 2 deep-copies
 every `data.raw.roboport` entry in data-updates** to build its logistic-only /

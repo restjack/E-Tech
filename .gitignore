@@ -2,8 +2,8 @@
 E-Tech/releases/*.zip
 
 # patched-mods/ and mods-replaced/ moved OUT of this repo on 2026-08-10:
-#   Projects\patched-mods\        the set shared with players
-#   Projects\Factorio Mod Pack\   superseded zips + the pack's own docs
+#   Projects\Factorio (Patched-mods) 2.1.9\ — active patched mods, plus
+#   Archived\ (retired builds + bookkeeping) and PATCH-NOTES.txt
 # Neither is under git. This project is now only E-Tech and what ships to
 # GitHub with it. absorbed-mods/ deliberately stayed and is still TRACKED —
 # those are the originals of mods whose code was merged INTO E-Tech, so they

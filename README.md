@@ -29,8 +29,7 @@ Release zips are not tracked here — they're built by `build.ps1` and published
 
 This repo is E-Tech and only E-Tech. The third-party mod work that used to live here moved out on 2026-08-10:
 
-- `Projects\patched-mods\` — the distribution set handed to friends/family: third-party mods locally patched for the current Factorio version, plus `install-mods.bat`, `mod-list.json` and `mod-settings.dat`. Shared as a folder, which is why it is no longer nested inside this repo.
-- `Projects\Factorio Mod Pack\` — the bookkeeping behind that set: `PATCHED-MODS.md` (process), `LOCAL-PATCHED-MODS.md` (per-mod manifest), the mod audit, the server-update notes, and `mods-replaced/` (superseded zips).
+- `Projects\Factorio (Patched-mods) 2.1.9\` — the one home for third-party mods locally patched for the current Factorio version. Root holds only what is **actively in use** (that is what `install-mods.bat` distributes), `Archived\` holds retired and superseded builds, and `PATCH-NOTES.txt` records what each patch changes and why. Shared as a folder, which is why it is not nested inside this repo. The name carries the game version and will change — refer to it by description, not by literal path.
 - `Projects\Archive\Factorio (ModUpdateCode)\` — the 2.0→2.1 mod-set migration archive: original 2.0.77 mods, dated snapshots, and the README with the full API fix catalog.
 
 ## Useful reading if you're here to learn
