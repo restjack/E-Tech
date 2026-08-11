@@ -63,6 +63,10 @@ local FILTER_SLOTS = 24    -- choose-elem filter slots in the outlet/inlet/senso
                            -- stock grid above it; 15 in a 5-wide block left the
                            -- panel visibly narrower than its own contents.
 local FILTER_COLUMNS = 8
+-- Stock grid width. The panel is sized by the Factories tab, which is much
+-- wider than 8 item slots, so a narrow grid wasted half the window and made
+-- the list twice as long as it needed to be.
+local STOCK_COLUMNS = 16
 local COOLDOWN_TICKS = 600 -- loop guard: 10 s lockout after an item is handed
                            -- back, so a want that flickers on and off between
                            -- passes can't pull the same stack out repeatedly
@@ -814,17 +818,38 @@ end
 -- the door is on, three tiles to the side of the door opening. Inside the room
 -- at every tier including a Mk4, never in the doorway, and always the same
 -- place. With no collision box it cannot be blocked or block anything.
-local EXPORT_FILTER_INSET = 2   -- tiles in from the door-side wall
-local EXPORT_FILTER_SIDE = 3    -- tiles to the side of the door opening
+-- Placement, chosen in game 2026-08-10: alongside Factorissimo's own interior
+-- fittings rather than out on the floor, where it competed with belts and
+-- machines for space and got built over.
+--
+-- Measured from the DOOR-SIDE wall, not in screen directions. door_y is
+-- positive in every tier (+16/+24/+31/+61), so the wall is BELOW the device
+-- and a LARGER inset moves it UP; a NEGATIVE inset moves it down, past the
+-- wall into the strip Factorissimo keeps its pole and overlay controller in.
+-- Every tier puts those at the same offsets from the interior centre:
+--     pole                 x = -4,   y = half + 2   (2x2, substation sprite)
+--     overlay controller   x = -3.5, y = half + 3.5
+-- -3.5 lands this on the overlay controller's row, in the tile to its left,
+-- and clear of the pole's footprint - at -2 it sits UNDER the substation
+-- graphic and cannot be seen at all.
+local EXPORT_FILTER_INSET = -3.5 -- negative: out past the door wall, by the pole
+local EXPORT_FILTER_SIDE = 5     -- tiles to the side of the door opening
 
 local function export_filter_position(factory)
     local half = (factory.layout and factory.layout.inside_size or 30) / 2
     local door_y = (factory.layout and factory.layout.inside_door_y) or half
     -- the door is on whichever side inside_door_y points at; come in from it
     local sign = door_y >= 0 and 1 or -1
+    -- Snap to the TILE CENTRE. The engine puts a 1x1 entity at x.5/y.5 no
+    -- matter what create_entity is handed, so an unsnapped target here can
+    -- never equal the resulting position - and the sweep below compares the
+    -- two to decide whether to teleport. Unsnapped, that comparison was
+    -- always true, so the same filters were teleported every pass, ate the
+    -- whole per-pass budget, and no factory past the first two was ever
+    -- fitted (0.32.0; fixed 0.32.1).
     return {
-        x = factory.inside_x - EXPORT_FILTER_SIDE,
-        y = factory.inside_y + sign * (half - EXPORT_FILTER_INSET),
+        x = math.floor(factory.inside_x - EXPORT_FILTER_SIDE) + 0.5,
+        y = math.floor(factory.inside_y + sign * (half - EXPORT_FILTER_INSET)) + 0.5,
     }
 end
 
@@ -2855,6 +2880,10 @@ local function build_panel(player)
     -- tall enough to visually match the 200-slot chest window next to it
     scroll.style.minimal_height = 420
     scroll.style.maximal_height = 640
+    -- The tabbed pane is as wide as its widest tab, which is Factories (two
+    -- buttons, a name and a rename field). Without this the stock grid kept
+    -- its natural 8-column width and left the rest of that width blank.
+    scroll.style.horizontally_stretchable = true
 
     local settings_tab = tabs.add {type = "tab", caption = {"gui-etech-hub.tab-settings"}}
     local pull = tabs.add {type = "flow", name = "settings", direction = "vertical"}
@@ -2909,7 +2938,13 @@ local function build_panel(player)
     local fsearch = factories.add {type = "textfield", name = "etech-hub-factory-search"}
     fsearch.style.horizontally_stretchable = true
     local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
-    fscroll.style.maximal_height = 420
+    -- Match the stock tab's height rather than stopping at 420: the panel is
+    -- already as tall as its tallest tab, so a short list just left a band of
+    -- empty frame under it.
+    fscroll.style.minimal_height = 420
+    fscroll.style.maximal_height = 640
+    fscroll.style.vertically_stretchable = true
+    fscroll.style.horizontally_stretchable = true
     fscroll.add {type = "table", name = "frows", column_count = 4}
 
     return panel
@@ -3189,7 +3224,7 @@ local function refresh_grid(player, record)
 
     scroll.clear()
     local rates = rates_by_key(record)
-    local grid = scroll.add {type = "table", name = "grid", column_count = 8}
+    local grid = scroll.add {type = "table", name = "grid", column_count = STOCK_COLUMNS}
     for _, t in ipairs(list) do
         local lines = {"", t.name}
         if t.quality ~= "normal" then
@@ -3885,17 +3920,27 @@ local function maintenance_pass(outlets, inlets, sensors, fluids)
         -- Fit any factory that has not got a filter yet, and move one that an
         -- earlier version left elsewhere onto the fixed tile. Teleported, never
         -- rebuilt: the signal list is the rule. Driven from the OUTLET, so a
-        -- surface with no outlet gets no devices it has no reader for; two per
-        -- pass, so hundreds of factories spread the work.
+        -- surface with no outlet gets no devices it has no reader for.
+        --
+        -- TWO budgets, because the two jobs do not cost the same. Creating a
+        -- device raises build events and registers a record, so it stays at
+        -- two per pass and hundreds of factories spread the work. Moving one
+        -- is a teleport of a collision-free entity - near free, and it only
+        -- ever happens after a version changes the anchor, so rationing it at
+        -- the same rate just meant a 200-factory base spent minutes visibly
+        -- half-migrated (measured on Eli's save: 214 filters, ~3.5 min).
         local existing = export_filters_by_factory()
         local budget = 2
+        local move_budget = 20
         for _, factory in pairs(cached_factories(record, false)) do
-            if budget <= 0 then break end
+            if budget <= 0 and move_budget <= 0 then break end
             if factory_usable(factory) then
                 local device = hub_data().hubs[existing[factory.id] or 0]
                 local entity = device and device.entity
                 if not (entity and entity.valid) then
-                    if ensure_export_filter(factory) then budget = budget - 1 end
+                    if budget > 0 and ensure_export_filter(factory) then
+                        budget = budget - 1
+                    end
                 else
                     local want = export_filter_position(factory)
                     local at = entity.position

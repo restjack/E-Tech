@@ -46,6 +46,11 @@ local CONN_STOCK = 100 -- iron parked in the connection chest inside the factory
 local KEPT = "copper-plate" -- listed in the export filter, so it must NOT leave
 local KEPT_STOCK = 150
 
+local EXTRA_FACTORIES = 3 -- beyond the main one, to outrun the per-pass fit budget
+local INSIDE_HALF = 15    -- factory-1 interior half-width, floor ends at +-15
+local STRIP = 6           -- fittings strip past the door wall: pole, overlay, filter
+local COVERAGE_TICK = 900 -- 15 s: the fit is budgeted at 2 per pass, every 2 s
+
 local SETTLE_TICK = 300  -- world is built and running by here
 local ASSERT_TICK = 1500 -- 12.5 s: ~12 hub passes plus bot flight time
 
@@ -91,6 +96,45 @@ local assert_all
 -- can produce: mods' on_init run in dependency order in the same tick, before
 -- the game is really running. Building from the clock instead is both closer to
 -- what a player does and free of that ordering question.
+-- EVERY factory gets an export filter, not just the first few. The fit is
+-- budgeted per maintenance pass, so this is the assertion that a factory
+-- beyond that budget is ever reached at all. 0.32.0 stalled at exactly two
+-- per outlet, forever, while every other check still passed - because the two
+-- it did fit were correct. Existence and correctness of one is not coverage.
+local function assert_coverage(t)
+    local want = 1 + #(t.extra or {})
+    local fitted, unfitted = 0, {}
+    local buildings = {t.building}
+    for _, extra in pairs(t.extra or {}) do buildings[#buildings + 1] = extra end
+    for _, building in pairs(buildings) do
+        if building and building.valid then
+            local factory = factory_of(building)
+            if factory and factory.inside_surface and factory.inside_surface.valid then
+                -- half + STRIP, not half: since 0.32.4 the filter lives out
+                -- past the door wall beside the pole and overlay controller,
+                -- so a box of exactly the interior misses it and every
+                -- factory reads as unfitted.
+                local half = (factory.layout and factory.layout.inside_size or 30) / 2 + STRIP
+                local here = factory.inside_surface.find_entities_filtered {
+                    name = "etech-factory-export-filter",
+                    area = {{factory.inside_x - half, factory.inside_y - half},
+                            {factory.inside_x + half, factory.inside_y + half}},
+                }
+                if #here > 0 then
+                    fitted = fitted + 1
+                else
+                    unfitted[#unfitted + 1] = string.format("%.0f,%.0f",
+                        building.position.x, building.position.y)
+                end
+            end
+        end
+    end
+    check("every factory got an export filter, not just the first pass's worth",
+        fitted == want,
+        fitted .. " of " .. want .. " fitted" ..
+            (#unfitted > 0 and (" - missing at " .. table.concat(unfitted, " ")) or ""))
+end
+
 local function build_world()
     storage.t = {}
     local t = storage.t
@@ -99,7 +143,7 @@ local function build_world()
 
     -- Anything the map generator left here would fight the placements below.
     for _, entity in pairs(surface.find_entities_filtered {
-        area = {{-20, -20}, {40, 40}},
+        area = {{-60, -20}, {40, 40}},
         type = {"tree", "simple-entity", "cliff"},
     }) do
         entity.destroy()
@@ -185,6 +229,30 @@ local function build_world()
     }
     if t.mixed then t.mixed.insert {name = KEPT, count = KEPT_STOCK} end
     t.inside_surface = inside
+    -- Our factory's own interior cell, plus the fittings strip past the door
+    -- wall where the filter now lives. Interior surfaces are shared grids, so
+    -- once EXTRA_FACTORIES exist below, "find an export filter on this
+    -- surface" would happily return someone else's - and a box of exactly the
+    -- interior would return nobody's at all.
+    local half = INSIDE_HALF + STRIP
+    t.inside_area = {{ix - half, iy - half}, {ix + half, iy + half}}
+
+    -- More factories than the sweep fits in one pass. E-Tech fits a bounded
+    -- number of export filters per maintenance pass, so a single factory only
+    -- ever proves the FIRST one works. 0.32.0 shipped a bug where exactly two
+    -- were fitted and every factory after that was skipped forever - the
+    -- position it compared against was not snapped to the tile centre, so the
+    -- check never matched, the same two were teleported onto themselves every
+    -- pass, and the budget was gone before reaching an unfitted factory. One
+    -- factory could not see it; three can.
+    t.extra = {}
+    for i = 1, EXTRA_FACTORIES do
+        local building = surface.create_entity {
+            name = FACTORY, position = {-14 - (i - 1) * 12, 0},
+            force = force, raise_built = true,
+        }
+        if building then t.extra[#t.extra + 1] = building end
+    end
 
     -- Fluid half: a plain storage tank inside with something in it, and a fluid
     -- sensor outside that should end up broadcasting it. A plain storage tank is
@@ -258,6 +326,17 @@ script.on_nth_tick(60, function()
 
     if t.roboport and t.roboport.valid then t.roboport.energy = 1e9 end
 
+    -- Runs on its OWN deadline, ahead of and independent of the rule-writing
+    -- gate below. Everything after that gate waits for a filter to appear in
+    -- OUR factory, so a sweep that stalls before reaching it makes the whole
+    -- assertion pass silently unreachable - which is exactly what the 0.32.0
+    -- bug did: the run reported INCONCLUSIVE rather than FAIL. A stalled sweep
+    -- has to be a failure, not a missing result.
+    if not t.coverage_done and game.tick - t.built >= COVERAGE_TICK then
+        t.coverage_done = true
+        assert_coverage(t)
+    end
+
     -- Wait for E-Tech to fit the factory's export filter, write the rule into
     -- it, and only THEN put demand for that item outside. Demanding it earlier
     -- would let the outlet legitimately ship some before any rule existed, and
@@ -265,7 +344,8 @@ script.on_nth_tick(60, function()
     if not t.rule_set then
         local found = t.inside_surface and t.inside_surface.valid
             and t.inside_surface.find_entities_filtered {
-                name = "etech-factory-export-filter", limit = 1 }[1]
+                name = "etech-factory-export-filter",
+                area = t.inside_area, limit = 1 }[1]
         if found then
             local behavior = found.get_or_create_control_behavior()
             -- The device is E-Tech's own now, so its sections are ours alone -
@@ -411,16 +491,41 @@ assert_all = function(t)
     -- floor, out in the door band past the wall, because Factorissimo puts the
     -- power pole it was anchored on OUTSIDE the room (factory-1: floor ends at
     -- 15, pole sits at 17). Invisible in game, findable by this test.
+    -- Where the filter physically IS, against Factorissimo's OWN fittings
+    -- rather than against E-Tech's constants - otherwise this just restates
+    -- the formula it is meant to police. As of 0.32.4 it sits beside the
+    -- interior overlay controller, one tile to its left, deliberately out in
+    -- the strip past the door wall. Two things have to hold: it is next to
+    -- that controller, and it is NOT under the power pole, whose 2x2
+    -- substation sprite would hide it completely (that was the whole reason
+    -- inset -2 was rejected).
     if t.export_filter and t.export_filter.valid then
         local factory = factory_of(t.building)
-        local half = (factory and factory.layout and factory.layout.inside_size or 30) / 2
+        local layout = factory and factory.layout
         local at = t.export_filter.position
-        local dx = math.abs(at.x - (factory and factory.inside_x or 0))
-        local dy = math.abs(at.y - (factory and factory.inside_y or 0))
-        check("the export filter is inside the room, not out past the wall",
-            dx < half and dy < half,
-            string.format("at %.1f,%.1f - offsets %.1f,%.1f against a half-extent of %.1f",
-                at.x, at.y, dx, dy, half))
+        if layout and layout.overlays and layout.inside_energy_y then
+            local ox = factory.inside_x + layout.overlays.inside_x
+            local oy = factory.inside_y + layout.overlays.inside_y
+            local px = factory.inside_x + layout.inside_energy_x
+            local py = factory.inside_y + layout.inside_energy_y
+            local beside = math.abs(at.y - oy) < 0.01
+                and math.abs(at.x - ox) > 0.6 and math.abs(at.x - ox) < 1.6
+            local under_pole = math.abs(at.x - px) < 1 and math.abs(at.y - py) < 1
+            check("the export filter sits beside the overlay controller, not under the pole",
+                beside and not under_pole,
+                string.format("filter %.1f,%.1f overlay %.1f,%.1f pole %.1f,%.1f%s",
+                    at.x, at.y, ox, oy, px, py,
+                    under_pole and " - UNDER THE POLE" or ""))
+        else
+            -- Older Factorissimo, or a layout that does not publish those
+            -- offsets: fall back to the weaker claim rather than silently
+            -- skipping, so a missing field cannot read as a pass.
+            local half = (layout and layout.inside_size or 30) / 2
+            local dy = math.abs(at.y - (factory and factory.inside_y or 0))
+            check("the export filter is within the factory's own strip",
+                dy < half + 5,
+                string.format("at %.1f,%.1f against half-extent %.1f", at.x, at.y, half))
+        end
     end
 
     -- The export rule is INERT until a mode is picked, and the mode lives in

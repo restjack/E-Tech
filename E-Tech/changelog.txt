@@ -1,4 +1,58 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.32.4
+Date: 2026-08-10
+  Changes:
+    - Factory export filter now sits beside Factorissimo's interior overlay controller,
+      one tile to its left, instead of out on the factory floor. On the floor it
+      competed with belts and machines for space and was easily built over; the strip
+      past the door wall already holds the power pole and the overlay controller, so
+      the filter reads as one of the factory's fittings. Every tier puts those at the
+      same offsets (pole x -4 y half+2, controller x -3.5 y half+3.5), so one constant
+      places it correctly in all of them, Mk4 included.
+    - Not level with the pole itself: the pole is a 2x2 substation sprite covering
+      half+1 to half+3, and a filter there is completely hidden behind it.
+---------------------------------------------------------------------------------------------------
+Version: 0.32.3
+Date: 2026-08-10
+  Changes:
+    - Factory export filter: 0.32.2 moved it 5 tiles the WRONG way. door_y is positive
+      in every tier measured (+61 on a 120 interior, +31 on a 60), so the door-side
+      wall is below the device and a larger inset moves it up, not down. Back to 2
+      tiles from that wall, keeping the sideways move to 5. Two is the practical
+      limit: the wall is at inside_y + half, so a smaller inset puts the device in the
+      door band outside the room.
+    - Repositioning existing filters no longer shares the per-pass budget that limits
+      CREATING them. Creating raises build events and registers a record, so it stays
+      at 2 per pass; a teleport of a collision-free entity is near free and now runs 20
+      per pass. A 214-factory base was taking ~3.5 minutes to finish migrating after a
+      version changed the anchor, sitting visibly half-moved the whole time.
+---------------------------------------------------------------------------------------------------
+Version: 0.32.2
+Date: 2026-08-10
+  Changes:
+    - Factory export filter sits further into the room: 7 tiles in from the door-side
+      wall instead of 2, and 5 to the side instead of 3. Against the wall it was
+      cramped and easy to lose among the entrances. Measured from the door-side wall,
+      not in screen directions, so factories with the door on the opposite side put it
+      the same distance INTO the room rather than mirroring it outside. Filters already
+      placed move themselves to the new spot on the next maintenance pass.
+---------------------------------------------------------------------------------------------------
+Version: 0.32.1
+Date: 2026-08-10
+  Bugfixes:
+    - Factory export filter: only the first two factories per outlet ever got one.
+      export_filter_position() returned an unsnapped tile coordinate while the engine
+      places a 1x1 entity at the tile CENTRE, so the sweep's position check never
+      matched, the same two filters were teleported onto themselves every pass, and
+      the per-pass budget of 2 was spent before reaching any unfitted factory. The
+      target is now snapped, so existing filters compare equal and the budget goes to
+      factories that still need one. Filters already placed are left where they are.
+  Changes:
+    - Factory outlet panel: removed the dead space. The panel is as wide as its widest
+      tab (Factories), so the Stock grid now stretches to that width at 16 columns
+      instead of 8, and the Factories list fills the panel height instead of stopping
+      at 420px and leaving an empty band beneath it.
+---------------------------------------------------------------------------------------------------
 Version: 0.32.0
 Date: 2026-08-09
   Features:
