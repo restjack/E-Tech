@@ -63,10 +63,14 @@ local FILTER_SLOTS = 24    -- choose-elem filter slots in the outlet/inlet/senso
                            -- stock grid above it; 15 in a 5-wide block left the
                            -- panel visibly narrower than its own contents.
 local FILTER_COLUMNS = 8
--- Stock grid width. The panel is sized by the Factories tab, which is much
--- wider than 8 item slots, so a narrow grid wasted half the window and made
--- the list twice as long as it needed to be.
-local STOCK_COLUMNS = 16
+-- Stock grid width. The panel is sized by the Factories tab, which is wider
+-- than 8 item slots, so a narrow grid wasted half the window and made the
+-- list twice as long as it needed to be. 16 overshot the other way and put a
+-- HORIZONTAL scrollbar on a grid that is meant to be read at a glance - only
+-- 9 of the 16 were visible. 12 slots is 480px of the ~560 the Factories tab
+-- asks for, so it fills the width without ever driving it wider.
+local STOCK_COLUMNS = 12
+local SLOT_PX = 40  -- one item slot, base pixels (UI scale is applied on top)
 local COOLDOWN_TICKS = 600 -- loop guard: 10 s lockout after an item is handed
                            -- back, so a want that flickers on and off between
                            -- passes can't pull the same stack out repeatedly
@@ -2883,7 +2887,12 @@ local function build_panel(player)
     -- The tabbed pane is as wide as its widest tab, which is Factories (two
     -- buttons, a name and a rename field). Without this the stock grid kept
     -- its natural 8-column width and left the rest of that width blank.
+    -- minimal_width guarantees the full STOCK_COLUMNS fit even if the
+    -- Factories tab is ever narrower, so the grid never gets a horizontal
+    -- scrollbar - a grid you have to scroll sideways is worse than a narrow
+    -- one, because nothing lines up between rows.
     scroll.style.horizontally_stretchable = true
+    scroll.style.minimal_width = STOCK_COLUMNS * SLOT_PX + 24
 
     local settings_tab = tabs.add {type = "tab", caption = {"gui-etech-hub.tab-settings"}}
     local pull = tabs.add {type = "flow", name = "settings", direction = "vertical"}
@@ -2938,13 +2947,17 @@ local function build_panel(player)
     local fsearch = factories.add {type = "textfield", name = "etech-hub-factory-search"}
     fsearch.style.horizontally_stretchable = true
     local fscroll = factories.add {type = "scroll-pane", name = "fscroll"}
-    -- Match the stock tab's height rather than stopping at 420: the panel is
-    -- already as tall as its tallest tab, so a short list just left a band of
-    -- empty frame under it.
+    -- Taller than the stock pane's 640 ON PURPOSE. The panel is as tall as
+    -- its tallest tab, and the stock tab carries a search box and two
+    -- dropdowns ABOVE its pane, so matching 640 here left a band of empty
+    -- frame under the factory list exactly that header's height. This tab has
+    -- only a search box, so it gets 640 plus the difference.
     fscroll.style.minimal_height = 420
-    fscroll.style.maximal_height = 640
+    fscroll.style.maximal_height = 730
     fscroll.style.vertically_stretchable = true
-    fscroll.style.horizontally_stretchable = true
+    -- NOT horizontally stretchable. This tab's rows are what give the panel
+    -- its width; stretching the pane instead let it shrink to the tabbed
+    -- pane's own width and put a horizontal scrollbar under the factory list.
     fscroll.add {type = "table", name = "frows", column_count = 4}
 
     return panel

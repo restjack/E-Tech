@@ -1,4 +1,24 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.32.6
+Date: 2026-08-10
+  Bugfixes:
+    - Factory outlet panel, Factories tab: removed the empty band under the factory
+      list. Capping that list at the stock pane's 640px ignored the fact that the
+      stock tab also has a search box and two dropdowns above its pane, so the panel
+      was taller than the list could ever grow. The list now gets that header's height
+      back.
+---------------------------------------------------------------------------------------------------
+Version: 0.32.5
+Date: 2026-08-10
+  Bugfixes:
+    - Factory outlet panel: 0.32.4 widened the stock grid to 16 columns, but only 9
+      fitted, so it gained a horizontal scrollbar - worse than the narrow grid it
+      replaced, since nothing lines up between rows when you scroll sideways. Now 12
+      columns with a minimum width that guarantees they all fit.
+    - Factories tab no longer has a horizontal scrollbar of its own. Making its list
+      horizontally stretchable stopped it from setting the panel's natural width, so
+      the rows overflowed the pane instead of the pane growing to hold them.
+---------------------------------------------------------------------------------------------------
 Version: 0.32.4
 Date: 2026-08-10
   Changes:
